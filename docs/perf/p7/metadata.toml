@@ -1,0 +1,28 @@
+# Performance Test Run Metadata (Stage P7 / T13)
+# Generated automatically on benchmark completion.
+
+[host]
+os = "Linux (x86_64)"
+display_server = "Wayland / X11"
+resolution = "1920x1080"
+scale = "100%"
+rustc_version = "1.95.0"
+cargo_version = "1.95.0"
+profile = "release"
+seed = 20261010
+
+[binary]
+path = "/home/papayka/Rust_project/Truff_v2/target/release/truff"
+size_bytes = 27395496
+size_mib = 26.13
+
+[thresholds]
+empty_window_rss_limit_mib = 100.0
+empty_window_rss_target_mib = 60.0
+vault_10k_rss_limit_mib = 160.0
+vault_10k_overhead_limit_mib = 60.0
+core_edit_p95_ms = 2.0
+warm_scroll_frame_p95_ms = 16.7
+visible_layout_ready_p95_ms = 50.0
+warm_startup_p95_ms = 700.0
+idle_cpu_30s_max_percent = 1.0

@@ -19,3 +19,8 @@ masonry.workspace = true
 masonry_winit.workspace = true
 parley.workspace = true
 winit.workspace = true
+
+[features]
+default = []
+perf = []
+

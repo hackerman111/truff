@@ -6,3 +6,5 @@ pub mod overlays;
 pub mod rows;
 pub mod shell;
 pub mod theme;
+
+pub mod perf_scenarios;
