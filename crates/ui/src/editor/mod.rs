@@ -1,7 +1,15 @@
-//! Retained editor probe using `crop::Rope`, Parley layout, and Masonry events.
-
+pub mod display;
 pub mod input;
 pub mod layout;
+pub mod paint;
+
+pub use display::{Affinity, DisplayChunk, DisplayMap, ProjectionMode, SourceHit, VisualPos};
+pub use input::{EditorInput, InputAdapter};
+pub use layout::{
+    BlockInfo, EditorLayout, HeightIndex, ScrollAnchor, VirtualizedLayout,
+    snap_to_grapheme_boundary,
+};
+pub use paint::EditorPainter;
 
 use crop::Rope;
 use masonry::core::{
@@ -11,9 +19,6 @@ use masonry::core::{
 use masonry::kurbo::Size;
 use masonry::vello::Scene;
 use unicode_segmentation::UnicodeSegmentation;
-
-pub use input::EditorInput;
-pub use layout::{EditorLayout, snap_to_grapheme_boundary};
 
 /// Retained editor probe holding text buffer, selection, IME state, and visual layout.
 pub struct EditorProbe {
@@ -112,6 +117,9 @@ impl EditorProbe {
                 } else {
                     self.ime_preedit = Some(text);
                 }
+            }
+            EditorInput::ImeCancel => {
+                self.ime_preedit = None;
             }
             EditorInput::ImeCommit(commit_text) => {
                 // Clear preedit immediately upon commit.

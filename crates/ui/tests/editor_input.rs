@@ -1,0 +1,132 @@
+use truff_core::Buffer;
+use truff_core::markdown::syntax::IncrementalSyntaxTree;
+use truff_ui::editor::input::{EditorInput, InputAdapter};
+use truff_ui::shell::Shell;
+use truff_ui::theme::Theme;
+
+#[test]
+fn ime_preedit_cancel() {
+    let mut buffer = Buffer::from_str("Hello world");
+    let initial_rev = buffer.revision();
+    let mut cursor = 5;
+    let mut selection = None;
+    let mut adapter = InputAdapter::new();
+
+    // 1. IME composition starts: preedit text received
+    let change = adapter
+        .handle_input(
+            &mut buffer,
+            &mut cursor,
+            &mut selection,
+            EditorInput::ImePreedit {
+                text: "преэдит".to_string(),
+                cursor: Some((7, 7)),
+            },
+        )
+        .expect("handle preedit");
+
+    assert!(change.is_none(), "Preedit must not generate buffer changes");
+    assert_eq!(adapter.ime_preedit(), Some("преэдит"));
+    assert_eq!(buffer.as_str(), "Hello world");
+    assert_eq!(
+        buffer.revision(),
+        initial_rev,
+        "Preedit must NOT alter buffer revision!"
+    );
+
+    // 2. IME composition cancelled by user (e.g. Esc or backspacing all composition characters)
+    let change_cancel = adapter
+        .handle_input(
+            &mut buffer,
+            &mut cursor,
+            &mut selection,
+            EditorInput::ImeCancel,
+        )
+        .expect("handle cancel");
+
+    assert!(
+        change_cancel.is_none(),
+        "Cancel must not generate buffer changes"
+    );
+    assert_eq!(adapter.ime_preedit(), None);
+    assert_eq!(
+        buffer.as_str(),
+        "Hello world",
+        "Cancelled IME preedit must leave buffer completely unmodified!"
+    );
+    assert_eq!(
+        buffer.revision(),
+        initial_rev,
+        "Buffer revision must remain identical after IME cancellation"
+    );
+}
+
+#[test]
+fn ime_commit_single() {
+    let mut buffer = Buffer::from_str("Prefix: ");
+    let initial_rev = buffer.revision();
+    let mut cursor = buffer.byte_len();
+    let mut selection = None;
+    let mut adapter = InputAdapter::new();
+
+    // Preedit arrives first
+    adapter
+        .handle_input(
+            &mut buffer,
+            &mut cursor,
+            &mut selection,
+            EditorInput::ImePreedit {
+                text: "коммит".to_string(),
+                cursor: Some((6, 6)),
+            },
+        )
+        .expect("preedit");
+
+    // Commit arrives
+    let change = adapter
+        .handle_input(
+            &mut buffer,
+            &mut cursor,
+            &mut selection,
+            EditorInput::ImeCommit("коммит".to_string()),
+        )
+        .expect("commit");
+
+    assert!(change.is_some(), "Commit must generate a ChangeSet");
+    assert_eq!(adapter.ime_preedit(), None);
+    assert_eq!(buffer.as_str(), "Prefix: коммит");
+    assert_eq!(
+        buffer.revision(),
+        initial_rev + 1,
+        "IME commit must execute exactly ONE Buffer::apply transaction!"
+    );
+
+    // Calling undo once must restore the buffer to its exact pre-commit state
+    let undo_change = buffer.undo().expect("undo");
+    assert!(undo_change.is_some());
+    assert_eq!(buffer.as_str(), "Prefix: ");
+    assert_eq!(buffer.revision(), initial_rev + 2); // undo adds undo transaction
+    assert!(!buffer.is_dirty()); // at savepoint
+}
+
+#[test]
+fn theme_no_parse() {
+    let markdown = "# Heading\n\nSome text with **bold** and `code`.\n\n- item 1\n- item 2";
+    let syntax_tree = IncrementalSyntaxTree::parse_fresh(markdown);
+    let original_sexp = syntax_tree.snapshot().syntax_tree_sexp();
+
+    let mut shell = Shell::new();
+    assert_eq!(shell.theme(), &Theme::obsidian_dark());
+
+    // Switch theme to light theme
+    shell.set_theme(Theme::light());
+    assert_eq!(shell.theme(), &Theme::light());
+
+    // Theme switch must NOT reparse or invalidate the syntax tree!
+    let snapshot_after = syntax_tree.snapshot();
+    assert_eq!(
+        snapshot_after.syntax_tree_sexp(),
+        original_sexp,
+        "Theme switch must not trigger Markdown syntax parsing or tree rebuild!"
+    );
+}

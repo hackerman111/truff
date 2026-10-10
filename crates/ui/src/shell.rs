@@ -124,6 +124,11 @@ impl Shell {
         &self.theme
     }
 
+    /// Updates the visual theme without touching buffer contents or syntax structures.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+    }
+
     /// Access the WhichKey overlay controller.
     pub fn which_key(&self) -> &WhichKeyOverlay {
         &self.which_key
