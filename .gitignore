@@ -1,0 +1,5 @@
+target/
+rust_agents_bundle_v2.zip
+*.swp
+*.bak
+*~
