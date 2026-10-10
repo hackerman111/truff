@@ -1,0 +1,21 @@
+[package]
+name = "truff-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+default-run = "truff"
+
+[[bin]]
+name = "truff"
+path = "src/main.rs"
+
+[dependencies]
+truff-core = { path = "../core" }
+truff-store = { path = "../store" }
+crop.workspace = true
+unicode-segmentation.workspace = true
+masonry.workspace = true
+masonry_winit.workspace = true
+parley.workspace = true
+winit.workspace = true

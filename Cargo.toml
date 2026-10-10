@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/store",
+    "crates/ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95.0"
+
+[workspace.dependencies]
+crop = "0.4.3"
+unicode-segmentation = "1.13.3"
+masonry = "0.4.0"
+masonry_winit = "0.4.0"
+parley = "0.6.0"
+winit = "0.30"
