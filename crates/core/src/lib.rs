@@ -9,4 +9,13 @@ pub use text::{
     Register, RegisterKind, Registers, SingleEdit, Transaction, UndoGroup,
 };
 
+pub use commands::{Action, AppError, CommandId, CommandSpec, Effect};
+pub use workspace::buffers::{
+    BufferEntry, BufferRegistry, BufferState, DEFAULT_MAX_BUFFERS, SnapshotKey, VaultEpoch,
+};
+pub use workspace::views::{DEFAULT_MAX_JUMP_ENTRIES, JumpHistory, View, ViewId};
+pub use workspace::{DEFAULT_MAX_VIEWS, StoreEvent, StoreJob, Workspace};
+
+pub mod commands;
 pub mod text;
+pub mod workspace;
