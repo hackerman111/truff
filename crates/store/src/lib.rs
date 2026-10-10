@@ -16,7 +16,10 @@ pub use vault::{VaultError, VaultLock, VaultPaths};
 pub use worker::{DEFAULT_MAX_DURABLE_SLOTS, JobId, StoreWorker, SubmitError};
 
 pub mod files;
+pub mod index;
+pub mod operations;
 pub mod recovery;
+pub mod session;
 pub mod vault;
 pub mod worker;
 

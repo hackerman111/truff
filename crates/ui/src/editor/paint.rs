@@ -45,4 +45,60 @@ impl EditorPainter {
         let bg_color = VelloColor::from_rgba8(r, g, b, a);
         scene.fill(Fill::NonZero, Affine::IDENTITY, bg_color, None, &rect);
     }
+
+    /// Renders Parley layout glyphs onto the Vello scene.
+    pub fn paint_text(
+        scene: &mut Scene,
+        origin: Point,
+        layout: &parley::Layout<[u8; 4]>,
+        default_color: VelloColor,
+    ) {
+        let transform = Affine::translate(origin.to_vec2());
+        for line in layout.lines() {
+            for item in line.items() {
+                let parley::layout::PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+                let style = glyph_run.style();
+                let mut x = glyph_run.offset();
+                let y = glyph_run.baseline();
+                let run = glyph_run.run();
+                let font = run.font();
+                let font_size = run.font_size();
+                let synthesis = run.synthesis();
+                let glyph_xform = synthesis
+                    .skew()
+                    .map(|angle| Affine::skew(angle.to_radians().tan() as f64, 0.0));
+                let coords = run.normalized_coords();
+                let [r, g, b, a] = style.brush;
+                let brush = if [r, g, b, a] == [255, 255, 255, 255] {
+                    default_color
+                } else {
+                    VelloColor::from_rgba8(r, g, b, a)
+                };
+
+                scene
+                    .draw_glyphs(font)
+                    .brush(brush)
+                    .hint(false)
+                    .transform(transform)
+                    .glyph_transform(glyph_xform)
+                    .font_size(font_size)
+                    .normalized_coords(coords)
+                    .draw(
+                        Fill::NonZero,
+                        glyph_run.glyphs().map(|glyph| {
+                            let gx = x + glyph.x;
+                            let gy = y - glyph.y;
+                            x += glyph.advance;
+                            masonry::vello::Glyph {
+                                id: glyph.id,
+                                x: gx,
+                                y: gy,
+                            }
+                        }),
+                    );
+            }
+        }
+    }
 }

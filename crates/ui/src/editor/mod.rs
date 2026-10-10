@@ -12,13 +12,16 @@ pub use layout::{
 pub use paint::EditorPainter;
 
 use crop::Rope;
+use masonry::core::keyboard::{Key, KeyState, NamedKey};
 use masonry::core::{
     AccessCtx, BoxConstraints, ChildrenIds, EventCtx, LayoutCtx, PaintCtx, PointerButton,
     PointerEvent, PropertiesMut, PropertiesRef, RegisterCtx, TextEvent, Update, UpdateCtx, Widget,
 };
-use masonry::kurbo::Size;
+use masonry::kurbo::{Point, Rect, Size};
 use masonry::vello::Scene;
 use unicode_segmentation::UnicodeSegmentation;
+
+use crate::theme::Theme;
 
 /// Retained editor probe holding text buffer, selection, IME state, and visual layout.
 pub struct EditorProbe {
@@ -317,12 +320,14 @@ impl EditorProbe {
 /// Masonry retained Widget wrapping `EditorProbe`.
 pub struct EditorWidget {
     pub probe: EditorProbe,
+    pub theme: Theme,
 }
 
 impl EditorWidget {
     pub fn new(initial_text: &str) -> Self {
         Self {
             probe: EditorProbe::new(initial_text),
+            theme: Theme::default(),
         }
     }
 }
@@ -339,23 +344,74 @@ impl Widget for EditorWidget {
         bc: &BoxConstraints,
     ) -> Size {
         let max_width = bc.max().width;
-        let wrap_width = if max_width.is_finite() && max_width > 0.0 {
+        let wrap_width = if max_width.is_finite() && max_width > 48.0 {
+            Some((max_width - 48.0) as f32)
+        } else if max_width.is_finite() && max_width > 0.0 {
             Some(max_width as f32)
         } else {
             None
         };
         self.probe.relayout(wrap_width);
-        let height = self.probe.layout.height().max(24.0) as f64;
+        let height = (self.probe.layout.height() + 48.0).max(24.0) as f64;
         let width = if max_width.is_finite() {
             max_width
         } else {
-            self.probe.layout.width() as f64
+            (self.probe.layout.width() + 48.0) as f64
         };
         bc.constrain(Size::new(width, height))
     }
 
-    fn paint(&mut self, _ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, _scene: &mut Scene) {
-        // Painting will be fully fleshed out in P1/P4 Live Preview.
+    fn paint(&mut self, ctx: &mut PaintCtx<'_>, _props: &PropertiesRef<'_>, scene: &mut Scene) {
+        let size = ctx.size();
+        let padding = 24.0;
+        let origin = Point::new(padding, padding);
+
+        // 1. Fill background with theme color
+        EditorPainter::paint_background(scene, size, &self.theme);
+
+        self.probe.ensure_layout();
+        let parley_layout = self.probe.layout.parley_layout();
+
+        // 2. Selection highlights
+        if let Some((start, end)) = self.probe.selection() {
+            let anchor = parley::layout::Cursor::from_byte_index(
+                parley_layout,
+                start,
+                parley::layout::Affinity::Downstream,
+            );
+            let focus = parley::layout::Cursor::from_byte_index(
+                parley_layout,
+                end,
+                parley::layout::Affinity::Downstream,
+            );
+            let selection = parley::layout::Selection::new(anchor, focus);
+            selection.geometry_with(parley_layout, |bbox, _line| {
+                let rect = Rect::new(
+                    origin.x + bbox.x0,
+                    origin.y + bbox.y0,
+                    origin.x + bbox.x1,
+                    origin.y + bbox.y1,
+                );
+                EditorPainter::paint_selection_rect(scene, rect, &self.theme);
+            });
+        }
+
+        // 3. Text rendering
+        let [r, g, b, a] = self.theme.text_primary.to_rgba_u8();
+        let default_color = masonry::vello::peniko::Color::from_rgba8(r, g, b, a);
+        EditorPainter::paint_text(scene, origin, parley_layout, default_color);
+
+        // 4. Cursor / Caret
+        let cursor_offset = self.probe.cursor();
+        let cursor = parley::layout::Cursor::from_byte_index(
+            parley_layout,
+            cursor_offset,
+            parley::layout::Affinity::Downstream,
+        );
+        let bbox = cursor.geometry(parley_layout, 2.0);
+        let cursor_pos = Point::new(origin.x + bbox.x0, origin.y + bbox.y0);
+        let cursor_height = (bbox.y1 - bbox.y0).max(18.0);
+        EditorPainter::paint_cursor(scene, cursor_pos, cursor_height, false, &self.theme);
     }
 
     fn accessibility_role(&self) -> masonry::accesskit::Role {
@@ -395,9 +451,10 @@ impl Widget for EditorWidget {
         if let PointerEvent::Down(down) = event
             && down.button == Some(PointerButton::Primary)
         {
-            let hit = self
-                .probe
-                .hit_test(down.state.position.x as f32, down.state.position.y as f32);
+            let hit = self.probe.hit_test(
+                (down.state.position.x - 24.0).max(0.0) as f32,
+                (down.state.position.y - 24.0).max(0.0) as f32,
+            );
             self.probe.cursor = hit;
             self.probe.selection_anchor = None;
             ctx.request_render();
@@ -411,6 +468,61 @@ impl Widget for EditorWidget {
         event: &TextEvent,
     ) {
         match event {
+            TextEvent::Keyboard(key_event) => {
+                if key_event.state != KeyState::Down || key_event.is_composing {
+                    return;
+                }
+                let shift = key_event.modifiers.shift();
+                let ctrl = key_event.modifiers.ctrl() || key_event.modifiers.meta();
+
+                match &key_event.key {
+                    Key::Character(s) if !ctrl => {
+                        self.probe.handle_input(EditorInput::InsertText(s.clone()));
+                        ctx.request_render();
+                    }
+                    Key::Named(NamedKey::Enter) => {
+                        self.probe
+                            .handle_input(EditorInput::InsertText("\n".to_string()));
+                        ctx.request_render();
+                    }
+                    Key::Named(NamedKey::Backspace) => {
+                        self.probe.handle_input(EditorInput::DeleteBackward);
+                        ctx.request_render();
+                    }
+                    Key::Named(NamedKey::Delete) => {
+                        self.probe.handle_input(EditorInput::DeleteForward);
+                        ctx.request_render();
+                    }
+                    Key::Named(NamedKey::ArrowLeft) => {
+                        self.probe.handle_input(EditorInput::MoveCursorLeft {
+                            extend_selection: shift,
+                        });
+                        ctx.request_render();
+                    }
+                    Key::Named(NamedKey::ArrowRight) => {
+                        self.probe.handle_input(EditorInput::MoveCursorRight {
+                            extend_selection: shift,
+                        });
+                        ctx.request_render();
+                    }
+                    Key::Character(s) if ctrl && s.eq_ignore_ascii_case("a") => {
+                        self.probe.handle_input(EditorInput::SelectAll);
+                        ctx.request_render();
+                    }
+                    Key::Character(s) if ctrl && s.eq_ignore_ascii_case("c") => {
+                        if let Some(text) = self.probe.copy_selection() {
+                            ctx.set_clipboard(text);
+                        }
+                    }
+                    Key::Character(s) if ctrl && s.eq_ignore_ascii_case("x") => {
+                        if let Some(text) = self.probe.cut_selection() {
+                            ctx.set_clipboard(text);
+                            ctx.request_render();
+                        }
+                    }
+                    _ => {}
+                }
+            }
             TextEvent::Ime(ime) => match ime {
                 masonry::core::Ime::Preedit(text, cursor) => {
                     self.probe.handle_input(EditorInput::ImePreedit {

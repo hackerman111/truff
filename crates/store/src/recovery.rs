@@ -279,4 +279,39 @@ impl RecoveryManager {
         }
         Ok(())
     }
+
+    /// Recovers all latest valid snapshots across all buffers in the recovery directory.
+    pub fn recover_all_latest_snapshots(&self) -> Result<Vec<RecoveredSnapshot>, RecoveryError> {
+        let entries = match fs::read_dir(&self.recovery_dir) {
+            Ok(e) => e,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(RecoveryError::Io(err)),
+        };
+
+        let mut buffer_files: std::collections::HashMap<u64, Vec<PathBuf>> =
+            std::collections::HashMap::new();
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+            if name_str.ends_with(".snap")
+                && let Some((buf_str, _)) = name_str.split_once("_r")
+                && let Ok(buf_id) = buf_str.parse::<u64>()
+            {
+                buffer_files.entry(buf_id).or_default().push(entry.path());
+            }
+        }
+
+        let mut recovered = Vec::new();
+        for (_buf_id, mut files) in buffer_files {
+            files.sort_by(|a, b| b.cmp(a));
+            for snap_path in files {
+                if let Ok(snap) = self.try_read_snapshot(&snap_path) {
+                    recovered.push(snap);
+                    break;
+                }
+            }
+        }
+
+        Ok(recovered)
+    }
 }

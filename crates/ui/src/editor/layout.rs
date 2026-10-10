@@ -366,6 +366,11 @@ impl EditorLayout {
         self.layout.width()
     }
 
+    /// Access the underlying Parley layout for rendering.
+    pub fn parley_layout(&self) -> &Layout<[u8; 4]> {
+        &self.layout
+    }
+
     /// Hit-tests a coordinate (x, y) in layout space against the given text.
     ///
     /// GUARANTEE: The returned offset is ALWAYS a valid UTF-8 byte index
