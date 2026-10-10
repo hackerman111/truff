@@ -361,6 +361,31 @@ impl Workspace {
                     "Switched to vault epoch {epoch}"
                 )));
             }
+            Action::CreateFile(path) => {
+                effects.push(Effect::StatusMessage(format!(
+                    "Create file: {}",
+                    path.display()
+                )));
+            }
+            Action::CreateFolder(path) => {
+                effects.push(Effect::StatusMessage(format!(
+                    "Create folder: {}",
+                    path.display()
+                )));
+            }
+            Action::RenamePath { from, to } => {
+                effects.push(Effect::StatusMessage(format!(
+                    "Rename {} to {}",
+                    from.display(),
+                    to.display()
+                )));
+            }
+            Action::TrashPath(path) => {
+                effects.push(Effect::StatusMessage(format!(
+                    "Move to trash: {}",
+                    path.display()
+                )));
+            }
         }
 
         Ok(effects)

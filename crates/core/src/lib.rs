@@ -17,5 +17,9 @@ pub use workspace::views::{DEFAULT_MAX_JUMP_ENTRIES, JumpHistory, View, ViewId};
 pub use workspace::{DEFAULT_MAX_VIEWS, StoreEvent, StoreJob, Workspace};
 
 pub mod commands;
+pub mod config;
+pub mod markdown;
+pub mod navigation;
 pub mod text;
+pub mod vim;
 pub mod workspace;

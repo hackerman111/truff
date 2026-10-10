@@ -8,7 +8,9 @@ use crate::workspace::buffers::{BufferId, BufferState, SnapshotKey, VaultEpoch};
 use crate::workspace::views::ViewId;
 
 /// Strongly-typed identifier for a command.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct CommandId(pub Cow<'static, str>);
 
 impl CommandId {
@@ -68,6 +70,14 @@ pub enum Action {
     Redo(ViewId),
     /// Switch active vault epoch.
     SwitchVault(VaultEpoch),
+    /// Create a new file on disk.
+    CreateFile(PathBuf),
+    /// Create a new folder on disk.
+    CreateFolder(PathBuf),
+    /// Rename or move a path.
+    RenamePath { from: PathBuf, to: PathBuf },
+    /// Move a path to trash / recovery.
+    TrashPath(PathBuf),
 }
 
 /// Effects produced by `Workspace::dispatch` or `Workspace::accept`.

@@ -19,3 +19,8 @@ masonry = "0.4.0"
 masonry_winit = "0.4.0"
 parley = "0.6.0"
 winit = "0.30"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+tree-sitter = "0.26"
+tree-sitter-md = { version = "0.5.3", features = ["parser"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"

@@ -160,6 +160,12 @@ impl Buffer {
         }
     }
 
+    /// Creates a buffer from a string slice with an automatically allocated ID.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(text: &str) -> Self {
+        Self::from_text(BufferId::next(), text).unwrap_or_else(|_| Self::new(BufferId::next()))
+    }
+
     /// Creates a buffer populated from initial text, checking the size limit.
     pub fn from_text(id: BufferId, text: &str) -> Result<Self, EditError> {
         let max_file_bytes = DEFAULT_MAX_FILE_BYTES;
@@ -193,6 +199,11 @@ impl Buffer {
     /// Returns a reference to the underlying `Rope`.
     pub fn rope(&self) -> &crop::Rope {
         &self.rope
+    }
+
+    /// Converts the buffer content to an owned `String`.
+    pub fn as_str(&self) -> String {
+        self.rope.to_string()
     }
 
     /// Total byte length of the buffer.
