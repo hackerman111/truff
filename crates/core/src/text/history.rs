@@ -101,14 +101,12 @@ impl Registers {
     }
 }
 
-fn edit_size_in_bytes(edit: &SingleEdit) -> usize {
-    size_of::<SingleEdit>() + edit.text.capacity()
-}
-
-fn tx_size_in_bytes(tx: &Transaction) -> usize {
-    size_of::<Transaction>()
-        + tx.edits.capacity() * size_of::<SingleEdit>()
-        + tx.edits.iter().map(edit_size_in_bytes).sum::<usize>()
+fn tx_heap_bytes(tx: &Transaction) -> usize {
+    tx.edits.capacity() * size_of::<SingleEdit>()
+        + tx.edits
+            .iter()
+            .map(|edit| edit.text.capacity())
+            .sum::<usize>()
 }
 
 /// A group of transactions applied under the same `UndoGroup`.
@@ -118,28 +116,34 @@ pub struct HistoryGroup {
     pub group_id: UndoGroup,
     /// Forward transactions in chronological order.
     pub forward: Vec<Transaction>,
-    /// Inverse transactions in reverse chronological order (for undo).
+    /// Inverse transactions in chronological order; replay backwards for undo.
     pub inverse: Vec<Transaction>,
     /// Estimated memory usage in bytes.
     pub size_in_bytes: usize,
+    before_state: u64,
+    after_state: u64,
 }
 
 impl HistoryGroup {
-    fn new(group_id: UndoGroup) -> Self {
+    fn new(group_id: UndoGroup, before_state: u64, after_state: u64) -> Self {
         Self {
             group_id,
             forward: Vec::new(),
             inverse: Vec::new(),
             size_in_bytes: size_of::<Self>(),
+            before_state,
+            after_state,
         }
     }
 
     fn add(&mut self, forward_tx: Transaction, inverse_tx: Transaction) {
-        let f_size = tx_size_in_bytes(&forward_tx);
-        let i_size = tx_size_in_bytes(&inverse_tx);
+        let payload = tx_heap_bytes(&forward_tx) + tx_heap_bytes(&inverse_tx);
+        let old_capacity = self.forward.capacity() + self.inverse.capacity();
         self.forward.push(forward_tx);
         self.inverse.push(inverse_tx);
-        self.size_in_bytes += f_size + i_size;
+        self.size_in_bytes += payload
+            + (self.forward.capacity() + self.inverse.capacity() - old_capacity)
+                * size_of::<Transaction>();
     }
 }
 
@@ -150,10 +154,11 @@ pub struct History {
     redo_stack: VecDeque<HistoryGroup>,
     total_bytes: usize,
     max_bytes: usize,
-    /// The `UndoGroup` ID at the last savepoint.
-    savepoint_marker: Option<UndoGroup>,
-    /// Indicates whether the buffer is at savepoint when undo stack is completely empty.
-    savepoint_at_empty: bool,
+    current_state: u64,
+    next_state: u64,
+    savepoint_state: u64,
+    /// An oversized group stays unavailable until a new group or savepoint.
+    discarded_group: Option<UndoGroup>,
     registers: Registers,
 }
 
@@ -164,8 +169,10 @@ impl Default for History {
             redo_stack: VecDeque::new(),
             total_bytes: 0,
             max_bytes: DEFAULT_MAX_HISTORY_BYTES,
-            savepoint_marker: None,
-            savepoint_at_empty: true,
+            current_state: 0,
+            next_state: 1,
+            savepoint_state: 0,
+            discarded_group: None,
             registers: Registers::new(),
         }
     }
@@ -177,9 +184,13 @@ impl History {
         Self::default()
     }
 
-    /// Returns the current total memory consumption in bytes.
+    /// Retained undo/redo storage, including vector/deque capacity and text capacity.
+    /// Excludes fixed `History` storage, registers, and allocator bookkeeping.
     pub fn total_bytes(&self) -> usize {
         self.total_bytes
+            + (self.undo_stack.capacity() - self.undo_stack.len() + self.redo_stack.capacity()
+                - self.redo_stack.len())
+                * size_of::<HistoryGroup>()
     }
 
     /// Returns the configured memory limit in bytes.
@@ -187,7 +198,7 @@ impl History {
         self.max_bytes
     }
 
-    /// Updates the maximum memory limit in bytes, evicting oldest undo entries if needed.
+    /// Updates the limit, evicting farthest undo then redo entries as needed.
     pub fn set_max_bytes(&mut self, limit: usize) {
         self.max_bytes = limit;
         self.enforce_memory_limit();
@@ -219,20 +230,31 @@ impl History {
         for group in self.redo_stack.drain(..) {
             self.total_bytes = self.total_bytes.saturating_sub(group.size_in_bytes);
         }
+        self.redo_stack.shrink_to_fit();
+        let before_state = self.current_state;
+        self.current_state = self.next_state;
+        self.next_state += 1;
 
-        // If the top of undo_stack has the same UndoGroup, append to it
+        if self.discarded_group == Some(group_id) && before_state != self.savepoint_state {
+            return;
+        }
+        self.discarded_group = None;
+
+        // Saving splits a group so undo can return to the exact saved text.
         if let Some(top) = self.undo_stack.back_mut()
             && top.group_id == group_id
+            && before_state != self.savepoint_state
         {
             let old_size = top.size_in_bytes;
             top.add(forward, inverse);
+            top.after_state = self.current_state;
             let delta = top.size_in_bytes - old_size;
             self.total_bytes += delta;
             self.enforce_memory_limit();
             return;
         }
 
-        let mut group = HistoryGroup::new(group_id);
+        let mut group = HistoryGroup::new(group_id, before_state, self.current_state);
         group.add(forward, inverse);
         self.total_bytes += group.size_in_bytes;
         self.undo_stack.push_back(group);
@@ -244,11 +266,18 @@ impl History {
     pub fn pop_undo(&mut self) -> Option<HistoryGroup> {
         let group = self.undo_stack.pop_back()?;
         self.total_bytes = self.total_bytes.saturating_sub(group.size_in_bytes);
+        self.current_state = group.before_state;
+        self.discarded_group = None;
         Some(group)
+    }
+
+    pub(crate) fn peek_undo(&self) -> Option<&HistoryGroup> {
+        self.undo_stack.back()
     }
 
     /// Pushes a group onto the redo stack.
     pub fn push_redo(&mut self, group: HistoryGroup) {
+        self.current_state = group.before_state;
         self.total_bytes += group.size_in_bytes;
         self.redo_stack.push_back(group);
         self.enforce_memory_limit();
@@ -258,11 +287,18 @@ impl History {
     pub fn pop_redo(&mut self) -> Option<HistoryGroup> {
         let group = self.redo_stack.pop_back()?;
         self.total_bytes = self.total_bytes.saturating_sub(group.size_in_bytes);
+        self.current_state = group.after_state;
+        self.discarded_group = None;
         Some(group)
+    }
+
+    pub(crate) fn peek_redo(&self) -> Option<&HistoryGroup> {
+        self.redo_stack.back()
     }
 
     /// Pushes a group back onto the undo stack (used during redo).
     pub fn push_undo(&mut self, group: HistoryGroup) {
+        self.current_state = group.after_state;
         self.total_bytes += group.size_in_bytes;
         self.undo_stack.push_back(group);
         self.enforce_memory_limit();
@@ -270,36 +306,33 @@ impl History {
 
     /// Marks the current undo position as the savepoint.
     pub fn mark_savepoint(&mut self) {
-        if let Some(top) = self.undo_stack.back() {
-            self.savepoint_marker = Some(top.group_id);
-            self.savepoint_at_empty = false;
-        } else {
-            self.savepoint_marker = None;
-            self.savepoint_at_empty = true;
-        }
+        self.savepoint_state = self.current_state;
+        self.discarded_group = None;
     }
 
     /// Checks if the current undo position matches the savepoint.
     pub fn is_at_savepoint(&self) -> bool {
-        if self.undo_stack.is_empty() {
-            self.savepoint_at_empty
-        } else if let Some(marker) = self.savepoint_marker {
-            self.undo_stack
-                .back()
-                .is_some_and(|top| top.group_id == marker)
-        } else {
-            false
-        }
+        self.current_state == self.savepoint_state
     }
 
     fn enforce_memory_limit(&mut self) {
-        while self.total_bytes > self.max_bytes && self.undo_stack.len() > 1 {
-            if let Some(evicted) = self.undo_stack.pop_front() {
-                self.total_bytes = self.total_bytes.saturating_sub(evicted.size_in_bytes);
-                if Some(evicted.group_id) == self.savepoint_marker {
-                    self.savepoint_marker = None;
-                }
+        while self.total_bytes() > self.max_bytes {
+            self.undo_stack.shrink_to_fit();
+            self.redo_stack.shrink_to_fit();
+            if self.total_bytes() <= self.max_bytes {
+                break;
             }
+            let evicted = if let Some(group) = self.undo_stack.pop_front() {
+                if group.after_state == self.current_state {
+                    self.discarded_group = Some(group.group_id);
+                }
+                group
+            } else if let Some(group) = self.redo_stack.pop_front() {
+                group
+            } else {
+                break;
+            };
+            self.total_bytes -= evicted.size_in_bytes;
         }
     }
 }

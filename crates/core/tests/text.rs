@@ -70,7 +70,7 @@ fn edit_unicode_atomic() {
     assert_eq!(buffer.rope().to_string(), "Здравствуй 🌍 вселенная 🚀");
     assert_eq!(buffer.revision(), initial_rev + 1);
     assert!(buffer.is_dirty());
-    assert_eq!(cs.changes.len(), 2);
+    assert_eq!(cs.changes().len(), 2);
 }
 
 #[test]
@@ -288,4 +288,301 @@ fn registers_and_crlf() {
     // Unnamed register fallback
     let reg_unnamed = buffer.history().registers().get(None).unwrap();
     assert_eq!(reg_unnamed.text, "yanked content");
+}
+
+#[test]
+fn grouped_dependent_edits_roundtrip_and_rebase() {
+    let mut buffer = Buffer::from_str("ab");
+    let group = UndoGroup::next();
+    buffer
+        .apply(Transaction::insert(0, "Ж").with_undo_group(group))
+        .unwrap();
+    buffer
+        .apply(Transaction::replace(2..3, "🌍").with_undo_group(group))
+        .unwrap();
+    assert_eq!(buffer.as_str(), "Ж🌍b");
+    let undo = buffer.undo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "ab");
+    assert_eq!(undo.map_pos(6), 1);
+    assert_eq!(undo.map_pos(7), 2);
+    let redo = buffer.redo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "Ж🌍b");
+    assert_eq!(redo.map_pos(1), 6);
+    assert_eq!(redo.map_pos(2), 7);
+}
+
+#[test]
+fn grouped_undo_failure_preserves_text_revision_history_and_savepoint() {
+    let mut buffer = Buffer::from_str("abcdef");
+    let group = UndoGroup::next();
+    buffer
+        .apply(Transaction::delete(0..2).with_undo_group(group))
+        .unwrap();
+    buffer
+        .apply(Transaction::delete(0..2).with_undo_group(group))
+        .unwrap();
+    buffer.set_savepoint();
+    buffer.set_max_file_bytes(4);
+    let revision = buffer.revision();
+    let history = buffer.history().clone();
+    assert!(matches!(
+        buffer.undo(),
+        Err(EditError::SizeLimitExceeded { .. })
+    ));
+    assert_eq!(buffer.as_str(), "ef");
+    assert_eq!(buffer.revision(), revision);
+    assert_eq!(buffer.history(), &history);
+    assert!(!buffer.is_dirty());
+    buffer.set_max_file_bytes(6);
+    buffer.undo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "abcdef");
+}
+
+#[test]
+fn grouped_redo_failure_preserves_text_revision_and_history() {
+    let mut buffer = Buffer::from_str("");
+    let group = UndoGroup::next();
+    buffer
+        .apply(Transaction::insert(0, "a").with_undo_group(group))
+        .unwrap();
+    buffer
+        .apply(Transaction::insert(1, "bc").with_undo_group(group))
+        .unwrap();
+    buffer.undo().unwrap();
+    buffer.set_max_file_bytes(2);
+    let revision = buffer.revision();
+    let history = buffer.history().clone();
+    assert!(matches!(
+        buffer.redo(),
+        Err(EditError::SizeLimitExceeded { .. })
+    ));
+    assert_eq!(buffer.as_str(), "");
+    assert_eq!(buffer.revision(), revision);
+    assert_eq!(buffer.history(), &history);
+    assert!(!buffer.is_dirty());
+    buffer.set_max_file_bytes(3);
+    buffer.redo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "abc");
+}
+
+#[test]
+fn savepoint_splits_an_active_undo_group() {
+    let mut buffer = Buffer::from_str("");
+    let group = UndoGroup::next();
+    buffer
+        .apply(Transaction::insert(0, "a").with_undo_group(group))
+        .unwrap();
+    buffer.set_savepoint();
+    buffer
+        .apply(Transaction::insert(1, "b").with_undo_group(group))
+        .unwrap();
+    assert!(buffer.is_dirty());
+    buffer.undo().unwrap();
+    assert_eq!(buffer.as_str(), "a");
+    assert!(!buffer.is_dirty());
+    buffer.undo().unwrap();
+    assert_eq!(buffer.as_str(), "");
+    assert!(buffer.is_dirty());
+    buffer.redo().unwrap();
+    assert!(!buffer.is_dirty());
+    buffer.redo().unwrap();
+    assert!(buffer.is_dirty());
+}
+
+#[test]
+fn later_edit_anchor_includes_preceding_deltas() {
+    let changes = ChangeSet::new(vec![
+        truff_core::Change::new(0..0, 2),
+        truff_core::Change::new(4..6, 1),
+        truff_core::Change::new(8..9, 3),
+    ]);
+    for (position, expected) in [
+        (0, 2),
+        (3, 5),
+        (4, 7),
+        (5, 7),
+        (6, 7),
+        (7, 8),
+        (8, 12),
+        (9, 12),
+        (10, 13),
+    ] {
+        assert_eq!(changes.map_pos(position), expected, "position {position}");
+    }
+}
+
+#[test]
+fn oversized_history_group_is_dropped_in_full() {
+    let mut buffer = Buffer::from_str("");
+    buffer.history_mut().set_max_bytes(1024);
+    let group = UndoGroup::next();
+    buffer
+        .apply(Transaction::insert(0, "a".repeat(2048)).with_undo_group(group))
+        .unwrap();
+    assert!(buffer.history().total_bytes() <= 1024);
+    assert!(!buffer.history().can_undo());
+    buffer
+        .apply(Transaction::insert(0, "b").with_undo_group(group))
+        .unwrap();
+    assert!(
+        !buffer.history().can_undo(),
+        "do not retain a suffix of an evicted group"
+    );
+    assert!(buffer.is_dirty());
+    buffer.apply(Transaction::insert(0, "c")).unwrap();
+    buffer.undo().unwrap().unwrap();
+    assert!(buffer.as_str().starts_with("ba"));
+    assert!(
+        buffer.is_dirty(),
+        "eviction must not alias the initial savepoint"
+    );
+}
+
+#[test]
+fn lowering_history_limit_evicts_redo_and_does_not_alias_savepoint() {
+    let mut buffer = Buffer::from_str("base");
+    buffer.apply(Transaction::insert(0, "a")).unwrap();
+    buffer.set_savepoint();
+    buffer.apply(Transaction::insert(0, "b")).unwrap();
+    buffer.undo().unwrap();
+    assert!(!buffer.is_dirty());
+    buffer.history_mut().set_max_bytes(0);
+    assert_eq!(buffer.history().total_bytes(), 0);
+    assert!(!buffer.history().can_undo());
+    assert!(!buffer.history().can_redo());
+    assert!(!buffer.is_dirty());
+    buffer.apply(Transaction::insert(0, "c")).unwrap();
+    assert!(buffer.is_dirty());
+}
+
+#[test]
+fn growing_group_stays_bounded() {
+    let mut buffer = Buffer::from_str("");
+    buffer.history_mut().set_max_bytes(2048);
+    let group = UndoGroup::next();
+    for _ in 0..100 {
+        buffer
+            .apply(Transaction::insert(0, "x").with_undo_group(group))
+            .unwrap();
+        assert!(buffer.history().total_bytes() <= 2048);
+    }
+    assert!(!buffer.history().can_undo());
+    assert!(buffer.is_dirty());
+}
+
+#[test]
+fn adjacent_deletions_can_be_undone_atomically() {
+    let mut buffer = Buffer::from_str("aЖ🌍z");
+    buffer
+        .apply(
+            Transaction::new()
+                .with_edit(SingleEdit::delete(0..1))
+                .with_edit(SingleEdit::delete(1..3))
+                .with_edit(SingleEdit::delete(3..7)),
+        )
+        .unwrap();
+    assert_eq!(buffer.as_str(), "z");
+    buffer.undo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "aЖ🌍z");
+    buffer.redo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "z");
+}
+
+#[test]
+fn grouped_changes_expose_each_coordinate_space_in_execution_order() {
+    let mut buffer = Buffer::from_str("abcd");
+    let group = UndoGroup::next();
+    buffer
+        .apply(Transaction::insert(0, "XX").with_undo_group(group))
+        .unwrap();
+    buffer
+        .apply(Transaction::replace(4..6, "Y").with_undo_group(group))
+        .unwrap();
+    let undo = buffer.undo().unwrap().unwrap();
+    let batches: Vec<_> = undo.batches().collect();
+    assert_eq!(batches.len(), 2);
+    assert_eq!(batches[0], &[truff_core::Change::new(4..5, 2)]);
+    assert_eq!(batches[1], &[truff_core::Change::new(0..2, 0)]);
+    let redo = buffer.redo().unwrap().unwrap();
+    assert_eq!(redo.map_pos(3), 5);
+    assert_eq!(redo.batches().count(), 2);
+}
+
+#[test]
+fn evicted_savepoint_does_not_match_an_unrelated_empty_stack() {
+    let mut buffer = Buffer::from_str("base");
+    buffer.apply(Transaction::insert(0, "a")).unwrap();
+    buffer.set_savepoint();
+    buffer.apply(Transaction::insert(0, "b")).unwrap();
+    let one_group_limit = buffer.history().total_bytes() / 2;
+    buffer.history_mut().set_max_bytes(one_group_limit);
+    buffer.history_mut().set_max_bytes(0);
+    assert!(buffer.is_dirty());
+    assert_eq!(buffer.history().total_bytes(), 0);
+}
+
+#[test]
+fn anchor_at_shared_edit_boundary_has_right_affinity() {
+    let changes = ChangeSet::new(vec![
+        truff_core::Change::new(0..2, 1),
+        truff_core::Change::new(2..3, 2),
+        truff_core::Change::new(3..3, 1),
+    ]);
+    assert_eq!(changes.map_pos(1), 1);
+    assert_eq!(changes.map_pos(2), 3);
+    assert_eq!(changes.map_pos(3), 4);
+    assert_eq!(changes.map_pos(4), 5);
+}
+
+#[test]
+fn rope_graphemes_match_unicode_reference_across_fragmented_chunks() {
+    use unicode_segmentation::UnicodeSegmentation;
+    let pattern = "Жa\u{301}\r\n👨‍👩‍👧‍👦🇷🇺🇫🇷क्‍ष";
+    let mut buffer = Buffer::from_str(&pattern.repeat(90));
+    // Split clusters across Rope leaves and change gap positions before traversal.
+    for offset in [0, 731, 1547] {
+        let at = (offset..buffer.byte_len())
+            .find(|&at| buffer.is_char_boundary(at))
+            .unwrap();
+        buffer.apply(Transaction::insert(at, "\u{301}🇷🇺")).unwrap();
+    }
+    let text = buffer.as_str();
+    let boundaries: Vec<_> = text
+        .grapheme_indices(true)
+        .map(|(at, _)| at)
+        .chain(std::iter::once(text.len()))
+        .collect();
+    assert_eq!(buffer.grapheme_len(), boundaries.len() - 1);
+    for at in text.char_indices().map(|(at, _)| at).chain([text.len()]) {
+        let next = boundaries.iter().copied().find(|&boundary| boundary > at);
+        let prev = boundaries.iter().copied().rfind(|&boundary| boundary < at);
+        assert_eq!(
+            buffer.grapheme_next(BytePos::new(at)),
+            next.map(BytePos::new),
+            "next at {at}"
+        );
+        assert_eq!(
+            buffer.grapheme_prev(BytePos::new(at)),
+            prev.map(BytePos::new),
+            "prev at {at}"
+        );
+    }
+}
+
+#[test]
+fn rope_graphemes_handle_large_clusters_and_invalid_byte_positions() {
+    let text = format!("x{}🇷🇺z", "\u{301}".repeat(8192));
+    let buffer = Buffer::from_str(&text);
+    let cluster_end = 1 + 8192 * 2;
+    assert_eq!(
+        buffer.grapheme_next(BytePos::ZERO),
+        Some(BytePos::new(cluster_end))
+    );
+    assert_eq!(
+        buffer.grapheme_prev(BytePos::new(cluster_end)),
+        Some(BytePos::ZERO)
+    );
+    assert_eq!(buffer.grapheme_len(), 3);
+    assert_eq!(buffer.grapheme_next(BytePos::new(2)), None);
+    assert_eq!(buffer.grapheme_prev(BytePos::new(2)), None);
 }

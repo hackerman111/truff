@@ -2,6 +2,7 @@
 
 pub mod buffer;
 pub mod edit;
+mod grapheme;
 pub mod history;
 
 pub use buffer::{Buffer, BufferId, BytePos, DEFAULT_MAX_FILE_BYTES, LineEnding};

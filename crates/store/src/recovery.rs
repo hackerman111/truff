@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -60,7 +60,6 @@ impl RecoveryManager {
     /// Creates a new `RecoveryManager` for a vault root directory.
     pub fn new(vault_dir: PathBuf, max_storage_bytes: usize) -> Self {
         let recovery_dir = vault_dir.join(".truff/recovery");
-        let _ = fs::create_dir_all(&recovery_dir);
         Self {
             recovery_dir,
             max_storage_bytes,
@@ -72,15 +71,29 @@ impl RecoveryManager {
         &self.recovery_dir
     }
 
+    fn validate_internal_directory(&self) -> io::Result<()> {
+        for path in self.recovery_dir.ancestors() {
+            if fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "symlink recovery directory",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Computes total bytes currently occupied by all snapshots in the recovery directory.
     pub fn current_storage_bytes(&self) -> io::Result<u64> {
-        let mut total = 0;
-        if let Ok(entries) = fs::read_dir(&self.recovery_dir) {
-            for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    total += meta.len();
-                }
-            }
+        let mut total = 0u64;
+        self.validate_internal_directory()?;
+        let entries = match fs::read_dir(&self.recovery_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            total = total.saturating_add(entry?.metadata()?.len());
         }
         Ok(total)
     }
@@ -93,20 +106,29 @@ impl RecoveryManager {
         content: &str,
         base_fingerprint: Option<&str>,
     ) -> Result<PathBuf, RecoveryError> {
+        self.validate_internal_directory()?;
         fs::create_dir_all(&self.recovery_dir)?;
-
-        let current_storage = self.current_storage_bytes().unwrap_or(0);
-        let estimated_size = content.len() as u64 + 512;
-        if current_storage + estimated_size > self.max_storage_bytes as u64 {
-            return Err(RecoveryError::StorageLimitExceeded(self.max_storage_bytes));
+        #[cfg(unix)]
+        {
+            // Recovery directory creation must survive as well as the snapshot entry.
+            let internal = self
+                .recovery_dir
+                .parent()
+                .ok_or_else(|| io::Error::other("missing recovery parent"))?;
+            File::open(internal)?.sync_all()?;
+            if let Some(root) = internal.parent() {
+                File::open(root)?.sync_all()?;
+            }
         }
 
-        let mut hasher = std::hash::DefaultHasher::new();
-        content.as_bytes().hash(&mut hasher);
-        let checksum = hasher.finish();
-
+        if rel_path.contains(['\n', '\r']) || content.len() > crate::files::DEFAULT_MAX_FILE_BYTES {
+            return Err(RecoveryError::CorruptedSnapshot(
+                "invalid path or oversized content".into(),
+            ));
+        }
+        let checksum = crate::files::compute_fingerprint(content.as_bytes());
         let header = format!(
-            "TRUFF_SNAP_V1\nepoch:{}\nbuffer_id:{}\nrevision:{}\nrel_path:{}\nbase_fp:{}\ncontent_len:{}\nchecksum:{:016x}\n---DATA---\n",
+            "TRUFF_SNAP_V2\nepoch:{}\nbuffer_id:{}\nrevision:{}\nrel_path:{}\nbase_fp:{}\ncontent_len:{}\nchecksum:{}\n---DATA---\n",
             key.epoch.0,
             key.buffer_id.0,
             key.revision,
@@ -115,12 +137,47 @@ impl RecoveryManager {
             content.len(),
             checksum
         );
+        if header.len() > 16 * 1024 {
+            return Err(RecoveryError::CorruptedSnapshot(
+                "snapshot header exceeds size limit".into(),
+            ));
+        }
+        let target_name = format!(
+            "{}_r{:020}_e{:020}.snap",
+            key.buffer_id.0, key.revision, key.epoch.0
+        );
+        let target_path = self.recovery_dir.join(&target_name);
+        if let Ok(existing) = self.try_read_snapshot(&target_path)
+            && existing.key == key
+            && existing.rel_path == rel_path
+            && existing.content == content
+            && existing.base_fingerprint.as_deref() == base_fingerprint
+        {
+            File::open(&target_path)?.sync_all()?;
+            #[cfg(unix)]
+            File::open(&self.recovery_dir)?.sync_all()?;
+            return Ok(target_path);
+        }
+        let size = header.len() + content.len();
+        // Never evict the sole valid unsaved copy to admit a new checkpoint.
+        // With two durable copies it is safe to retire the older one first.
+        let mut valid = self.valid_snapshots(key.buffer_id)?;
+        valid.sort_by_key(|(_, key)| (key.epoch, key.revision));
+        let mut storage = self.current_storage_bytes()?;
+        while storage.saturating_add(size as u64) > self.max_storage_bytes as u64 && valid.len() > 1
+        {
+            let (oldest, _) = valid.remove(0);
+            let old_size = fs::metadata(&oldest)?.len();
+            fs::remove_file(oldest)?;
+            storage = storage.saturating_sub(old_size);
+        }
+        if storage.saturating_add(size as u64) > self.max_storage_bytes as u64 {
+            return Err(RecoveryError::StorageLimitExceeded(self.max_storage_bytes));
+        }
 
         static COUNTER: AtomicU64 = AtomicU64::new(1);
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
         let pid = std::process::id();
-        let target_name = format!("{}_r{:08}.snap", key.buffer_id.0, key.revision);
-        let target_path = self.recovery_dir.join(&target_name);
         let tmp_path = self
             .recovery_dir
             .join(format!(".{target_name}.{pid}_{id}.tmp"));
@@ -130,18 +187,25 @@ impl RecoveryManager {
                 .write(true)
                 .create_new(true)
                 .open(&tmp_path)?;
+            #[cfg(test)]
+            crate::files::fault(crate::files::WriteStage::Write)?;
             file.write_all(header.as_bytes())?;
             file.write_all(content.as_bytes())?;
-            file.sync_data()?;
+            file.flush()?;
+            #[cfg(test)]
+            crate::files::fault(crate::files::WriteStage::Sync)?;
+            file.sync_all()?;
             drop(file);
 
+            #[cfg(test)]
+            crate::files::fault(crate::files::WriteStage::Rename)?;
             fs::rename(&tmp_path, &target_path)?;
 
             #[cfg(unix)]
             {
-                if let Ok(dir) = File::open(&self.recovery_dir) {
-                    let _ = dir.sync_all();
-                }
+                #[cfg(test)]
+                crate::files::fault(crate::files::WriteStage::DirectorySync)?;
+                File::open(&self.recovery_dir)?.sync_all()?;
             }
 
             Ok(())
@@ -152,6 +216,27 @@ impl RecoveryManager {
             return Err(RecoveryError::Io(e));
         }
 
+        valid.retain(|(path, _)| path != &target_path);
+        valid.push((target_path.clone(), key));
+        valid.sort_by_key(|(_, key)| (key.epoch, key.revision));
+        while valid.len() > 2 {
+            fs::remove_file(valid.remove(0).0)?;
+        }
+        // Invalid remnants cannot serve as the previous copy and must not consume the budget.
+        let prefix = format!("{}_r", key.buffer_id.0);
+        for entry in fs::read_dir(&self.recovery_dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(&prefix)
+                && name.ends_with(".snap")
+                && !valid.iter().any(|(path, _)| *path == entry.path())
+            {
+                fs::remove_file(entry.path())?;
+            }
+        }
+        #[cfg(unix)]
+        File::open(&self.recovery_dir)?.sync_all()?;
         Ok(target_path)
     }
 
@@ -162,105 +247,110 @@ impl RecoveryManager {
         &self,
         buffer_id: BufferId,
     ) -> Result<RecoveredSnapshot, RecoveryError> {
-        let entries = fs::read_dir(&self.recovery_dir)?;
+        self.valid_snapshots(buffer_id)?
+            .into_iter()
+            .max_by_key(|(_, key)| (key.epoch, key.revision))
+            .map(|(path, _)| self.try_read_snapshot(&path))
+            .unwrap_or(Err(RecoveryError::NoValidSnapshot))
+    }
+
+    fn valid_snapshots(
+        &self,
+        buffer_id: BufferId,
+    ) -> Result<Vec<(PathBuf, SnapshotKey)>, RecoveryError> {
+        self.validate_internal_directory()?;
+        let mut valid = Vec::new();
         let prefix = format!("{}_r", buffer_id.0);
-
-        let mut snapshot_files = Vec::new();
-        for entry in entries.flatten() {
-            let file_name = entry.file_name();
-            let name_str = file_name.to_string_lossy();
-            if name_str.starts_with(&prefix) && name_str.ends_with(".snap") {
-                snapshot_files.push(entry.path());
+        for entry in fs::read_dir(&self.recovery_dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(&prefix)
+                && name.ends_with(".snap")
+                && entry.file_type()?.is_file()
+                && let Ok(snapshot) = self.try_read_snapshot(&entry.path())
+                && snapshot.key.buffer_id == buffer_id
+            {
+                valid.push((entry.path(), snapshot.key));
             }
         }
-
-        // Sort descending so newest revision comes first
-        snapshot_files.sort_by(|a, b| b.cmp(a));
-
-        for snap_path in snapshot_files {
-            if let Ok(snap) = self.try_read_snapshot(&snap_path) {
-                return Ok(snap);
-            }
-        }
-
-        Err(RecoveryError::NoValidSnapshot)
+        Ok(valid)
     }
 
     fn try_read_snapshot(&self, path: &Path) -> Result<RecoveredSnapshot, RecoveryError> {
+        let invalid =
+            || RecoveryError::CorruptedSnapshot("invalid snapshot header or checksum".into());
+        let limit = self
+            .max_storage_bytes
+            .min(crate::files::DEFAULT_MAX_FILE_BYTES + 16 * 1024);
         let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
-
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        if line.trim() != "TRUFF_SNAP_V1" {
-            return Err(RecoveryError::CorruptedSnapshot("bad magic".to_string()));
+        if file.metadata()?.len() > limit as u64 {
+            return Err(invalid());
         }
-
-        let mut epoch = 0;
-        let mut buffer_id = 0;
-        let mut revision = 0;
-        let mut rel_path = String::new();
+        let mut bytes = Vec::new();
+        file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+        if bytes.len() > limit {
+            return Err(invalid());
+        }
+        let delimiter = b"---DATA---\n";
+        let header_end = bytes
+            .windows(delimiter.len())
+            .position(|window| window == delimiter)
+            .ok_or_else(invalid)?;
+        if header_end > 16 * 1024 {
+            return Err(invalid());
+        }
+        let header = std::str::from_utf8(&bytes[..header_end]).map_err(|_| invalid())?;
+        let mut lines = header.lines();
+        let magic = lines.next().ok_or_else(invalid)?;
+        if !matches!(magic, "TRUFF_SNAP_V1" | "TRUFF_SNAP_V2") {
+            return Err(invalid());
+        }
+        let mut epoch = None;
+        let mut buffer_id = None;
+        let mut revision = None;
+        let mut rel_path = None;
         let mut base_fp = None;
-        let mut content_len = 0;
-        let mut checksum = 0;
-
-        loop {
-            line.clear();
-            let n = reader.read_line(&mut line)?;
-            if n == 0 {
-                return Err(RecoveryError::CorruptedSnapshot(
-                    "unexpected EOF".to_string(),
-                ));
-            }
-            let trimmed = line.trim();
-            if trimmed == "---DATA---" {
-                break;
-            }
-
-            let Some((k, v)) = trimmed.split_once(':') else {
-                continue;
-            };
-            match k {
-                "epoch" => epoch = v.parse().unwrap_or(0),
-                "buffer_id" => buffer_id = v.parse().unwrap_or(0),
-                "revision" => revision = v.parse().unwrap_or(0),
-                "rel_path" => rel_path = v.to_string(),
-                "base_fp" if !v.is_empty() => {
-                    base_fp = Some(v.to_string());
-                }
-                "content_len" => content_len = v.parse().unwrap_or(0),
-                "checksum" => checksum = u64::from_str_radix(v, 16).unwrap_or(0),
-                _ => {}
+        let mut length = None;
+        let mut checksum = None;
+        for line in lines {
+            let (name, value) = line.split_once(':').ok_or_else(invalid)?;
+            match name {
+                "epoch" => epoch = Some(value.parse::<u64>().map_err(|_| invalid())?),
+                "buffer_id" => buffer_id = Some(value.parse::<u64>().map_err(|_| invalid())?),
+                "revision" => revision = Some(value.parse::<u64>().map_err(|_| invalid())?),
+                "rel_path" => rel_path = Some(value.to_owned()),
+                "base_fp" if !value.is_empty() => base_fp = Some(value.to_owned()),
+                "base_fp" => {}
+                "content_len" => length = Some(value.parse::<usize>().map_err(|_| invalid())?),
+                "checksum" => checksum = Some(value),
+                _ => return Err(invalid()),
             }
         }
-
-        let mut content_bytes = Vec::with_capacity(content_len);
-        reader.read_to_end(&mut content_bytes)?;
-
-        if content_bytes.len() != content_len {
-            return Err(RecoveryError::CorruptedSnapshot(format!(
-                "length mismatch: expected {content_len}, got {}",
-                content_bytes.len()
-            )));
+        let content_bytes = &bytes[header_end + delimiter.len()..];
+        if Some(content_bytes.len()) != length {
+            return Err(invalid());
         }
-
-        let mut hasher = std::hash::DefaultHasher::new();
-        content_bytes.hash(&mut hasher);
-        let actual_checksum = hasher.finish();
-
-        if actual_checksum != checksum {
-            return Err(RecoveryError::CorruptedSnapshot(format!(
-                "checksum mismatch: expected {checksum:016x}, got {actual_checksum:016x}"
-            )));
+        let checksum = checksum.ok_or_else(invalid)?;
+        if magic == "TRUFF_SNAP_V2" {
+            if crate::files::compute_fingerprint(content_bytes) != checksum {
+                return Err(invalid());
+            }
+        } else {
+            let mut hasher = std::hash::DefaultHasher::new();
+            content_bytes.hash(&mut hasher);
+            if u64::from_str_radix(checksum, 16).ok() != Some(hasher.finish()) {
+                return Err(invalid());
+            }
         }
-
-        let content = String::from_utf8(content_bytes).map_err(|_| {
-            RecoveryError::CorruptedSnapshot("content is not valid utf-8".to_string())
-        })?;
-
+        let content = String::from_utf8(content_bytes.to_vec()).map_err(|_| invalid())?;
         Ok(RecoveredSnapshot {
-            key: SnapshotKey::new(VaultEpoch::new(epoch), BufferId::new(buffer_id), revision),
-            rel_path,
+            key: SnapshotKey::new(
+                VaultEpoch::new(epoch.ok_or_else(invalid)?),
+                BufferId::new(buffer_id.ok_or_else(invalid)?),
+                revision.ok_or_else(invalid)?,
+            ),
+            rel_path: rel_path.ok_or_else(invalid)?,
             content,
             base_fingerprint: base_fp,
         })
@@ -268,20 +358,28 @@ impl RecoveryManager {
 
     /// Cleans up snapshots for a given buffer ID after successful save.
     pub fn delete_snapshots(&self, buffer_id: BufferId) -> Result<(), RecoveryError> {
-        let entries = fs::read_dir(&self.recovery_dir)?;
+        self.validate_internal_directory()?;
+        let entries = match fs::read_dir(&self.recovery_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
         let prefix = format!("{}_r", buffer_id.0);
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             if name_str.starts_with(&prefix) && name_str.ends_with(".snap") {
-                let _ = fs::remove_file(entry.path());
+                fs::remove_file(entry.path())?;
             }
         }
+        #[cfg(unix)]
+        File::open(&self.recovery_dir)?.sync_all()?;
         Ok(())
     }
 
     /// Recovers all latest valid snapshots across all buffers in the recovery directory.
     pub fn recover_all_latest_snapshots(&self) -> Result<Vec<RecoveredSnapshot>, RecoveryError> {
+        self.validate_internal_directory()?;
         let entries = match fs::read_dir(&self.recovery_dir) {
             Ok(e) => e,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -303,12 +401,12 @@ impl RecoveryManager {
 
         let mut recovered = Vec::new();
         for (_buf_id, mut files) in buffer_files {
-            files.sort_by(|a, b| b.cmp(a));
-            for snap_path in files {
-                if let Ok(snap) = self.try_read_snapshot(&snap_path) {
-                    recovered.push(snap);
-                    break;
-                }
+            if let Some(snapshot) = files
+                .drain(..)
+                .filter_map(|path| self.try_read_snapshot(&path).ok())
+                .max_by_key(|snapshot| (snapshot.key.epoch, snapshot.key.revision))
+            {
+                recovered.push(snapshot);
             }
         }
 

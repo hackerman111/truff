@@ -438,6 +438,9 @@ fn find_enclosing_tag(
     let tag_open_end = text[prefix_pos..].find('>')? + prefix_pos + 1;
 
     // Check if the closing tag comes after or at range.end
+    if tag_open_end > range.start {
+        return None;
+    }
     let closing_pos = text[range.end..].find(closing_tag)? + range.end;
     let outer_end = closing_pos + closing_tag.len();
 
@@ -482,4 +485,69 @@ fn strip_tag_pattern(text: &str, tag_prefix: &str, closing_tag: &str) -> String 
     }
     result.push_str(cur);
     result
+}
+
+/// A recognized color wrapper emitted by `apply_text_color`, with source byte ranges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColorSpan {
+    pub opening: Range<usize>,
+    pub content: Range<usize>,
+    pub closing: Range<usize>,
+    pub rgba: [u8; 4],
+}
+
+/// Extract supported color wrappers outside fenced and inline code.
+pub fn color_spans(text: &str) -> Vec<ColorSpan> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let mut code = Vec::new();
+    let mut fence_start = None;
+    for (event, range) in Parser::new(text).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => fence_start = Some(range.start),
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some(start) = fence_start.take() {
+                    code.push(start..range.end);
+                }
+            }
+            Event::Code(_) => code.push(range),
+            _ => {}
+        }
+    }
+    let mut spans = Vec::new();
+    let prefix = "<span style=\"color:#";
+    let mut offset = 0;
+    while let Some(relative) = text[offset..].find(prefix) {
+        let start = offset + relative;
+        let hex_start = start + prefix.len();
+        let hex_end = hex_start + 6;
+        offset = hex_start;
+        let Some(hex) = text.get(hex_start..hex_end) else {
+            continue;
+        };
+        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) || !text[hex_end..].starts_with("\">") {
+            continue;
+        }
+        let content_start = hex_end + 2;
+        let Some(close_relative) = text[content_start..].find("</span>") else {
+            continue;
+        };
+        let close_start = content_start + close_relative;
+        let end = close_start + 7;
+        offset = end;
+        if code
+            .iter()
+            .any(|range| range.start < end && range.end > start)
+        {
+            continue;
+        }
+        let channel =
+            |index| u8::from_str_radix(&hex[index..index + 2], 16).expect("validated hex pair");
+        spans.push(ColorSpan {
+            opening: start..content_start,
+            content: content_start..close_start,
+            closing: close_start..end,
+            rgba: [channel(0), channel(2), channel(4), 255],
+        });
+    }
+    spans
 }

@@ -1,7 +1,6 @@
 use std::fmt;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
-use unicode_segmentation::UnicodeSegmentation;
 
 use super::edit::{Change, ChangeSet, EditError, SingleEdit, Transaction, UndoGroup};
 use super::history::History;
@@ -13,6 +12,8 @@ pub const DEFAULT_MAX_FILE_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BufferId(pub u64);
 
+static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
+
 impl BufferId {
     /// Creates a `BufferId` with an explicit ID.
     pub const fn new(id: u64) -> Self {
@@ -21,8 +22,19 @@ impl BufferId {
 
     /// Allocates the next unique `BufferId`.
     pub fn next() -> Self {
-        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-        Self(NEXT_ID.fetch_add(1, Ordering::Relaxed))
+        Self(
+            NEXT_BUFFER_ID
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+                .expect("buffer identifier space exhausted"),
+        )
+    }
+
+    /// Keeps persisted IDs out of the namespace used by subsequently allocated buffers.
+    /// Returns `None` if the historical ID exhausts the identifier space.
+    pub fn reserve_through(id: Self) -> Option<()> {
+        let next = id.get().checked_add(1)?;
+        NEXT_BUFFER_ID.fetch_max(next, Ordering::Relaxed);
+        Some(())
     }
 
     /// Returns the raw numeric ID.
@@ -216,6 +228,15 @@ impl Buffer {
         self.rope.is_empty()
     }
 
+    /// Replaces a clean resident document from disk, discarding undo but preserving revision order.
+    pub(crate) fn reload_from_text(&mut self, text: &str) -> Result<(), EditError> {
+        let mut replacement = Self::from_text(self.id, text)?;
+        replacement.revision = self.revision + 1;
+        replacement.set_savepoint();
+        *self = replacement;
+        Ok(())
+    }
+
     /// Monotonically increasing revision number.
     pub fn revision(&self) -> u64 {
         self.revision
@@ -296,130 +317,21 @@ impl Buffer {
         self.rope.byte_of_line(line)
     }
 
-    /// Returns total count of grapheme clusters without copying the full text into a `String`.
+    /// Counts extended grapheme clusters across borrowed Rope chunks.
     pub fn grapheme_len(&self) -> usize {
-        if self.rope.is_empty() {
-            return 0;
-        }
-
-        let mut count = 0;
-        for line in self.rope.raw_lines() {
-            let mut chunks = line.chunks();
-            if let Some(first) = chunks.next()
-                && chunks.next().is_none()
-            {
-                count += first.graphemes(true).count();
-                continue;
-            }
-            let s = line.to_string();
-            count += s.graphemes(true).count();
-        }
-        count
+        super::grapheme::count(&self.rope)
     }
 
-    /// Advances to the next grapheme cluster boundary after `pos`.
+    /// Advances to the next grapheme boundary without copying the logical line.
+    /// Invalid UTF-8 byte offsets return `None`.
     pub fn grapheme_next(&self, pos: BytePos) -> Option<BytePos> {
-        if pos.0 >= self.rope.byte_len() {
-            return None;
-        }
-
-        let line_idx = self.rope.line_of_byte(pos.0);
-        let line_start = self.rope.byte_of_line(line_idx);
-        let next_line_start = if line_idx + 1 < self.rope.line_len() {
-            self.rope.byte_of_line(line_idx + 1)
-        } else {
-            self.rope.byte_len()
-        };
-
-        let slice = self.rope.byte_slice(line_start..next_line_start);
-        let mut chunks = slice.chunks();
-        let first_chunk = chunks.next().unwrap_or("");
-        let has_more = chunks.next().is_some();
-        let line_owned;
-        let line_str = if !has_more {
-            first_chunk
-        } else {
-            line_owned = slice.to_string();
-            &line_owned
-        };
-
-        let rel = pos.0.saturating_sub(line_start);
-        for (idx, _) in line_str.grapheme_indices(true) {
-            if idx > rel {
-                return Some(BytePos::new(line_start + idx));
-            }
-        }
-
-        if next_line_start <= self.rope.byte_len() && next_line_start > pos.0 {
-            Some(BytePos::new(next_line_start))
-        } else {
-            None
-        }
+        super::grapheme::next(&self.rope, pos.get()).map(BytePos::new)
     }
 
-    /// Moves to the previous grapheme cluster boundary before `pos`.
+    /// Moves to the preceding grapheme boundary across Rope chunk boundaries.
+    /// Positions beyond EOF are clamped; invalid UTF-8 byte offsets return `None`.
     pub fn grapheme_prev(&self, pos: BytePos) -> Option<BytePos> {
-        if pos.0 == 0 {
-            return None;
-        }
-
-        let clamped = pos.0.min(self.rope.byte_len());
-        let line_idx = self.rope.line_of_byte(clamped);
-        let line_start = self.rope.byte_of_line(line_idx);
-
-        if clamped == line_start && line_idx > 0 {
-            let prev_line_idx = line_idx - 1;
-            let prev_line_start = self.rope.byte_of_line(prev_line_idx);
-            let slice = self.rope.byte_slice(prev_line_start..line_start);
-            let mut chunks = slice.chunks();
-            let first_chunk = chunks.next().unwrap_or("");
-            let has_more = chunks.next().is_some();
-            let line_owned;
-            let line_str = if !has_more {
-                first_chunk
-            } else {
-                line_owned = slice.to_string();
-                &line_owned
-            };
-
-            let mut last_idx = 0;
-            for (idx, _) in line_str.grapheme_indices(true) {
-                last_idx = idx;
-            }
-            return Some(BytePos::new(prev_line_start + last_idx));
-        }
-
-        let next_line_start = if line_idx + 1 < self.rope.line_len() {
-            self.rope.byte_of_line(line_idx + 1)
-        } else {
-            self.rope.byte_len()
-        };
-
-        let slice = self.rope.byte_slice(line_start..next_line_start);
-        let mut chunks = slice.chunks();
-        let first_chunk = chunks.next().unwrap_or("");
-        let has_more = chunks.next().is_some();
-        let line_owned;
-        let line_str = if !has_more {
-            first_chunk
-        } else {
-            line_owned = slice.to_string();
-            &line_owned
-        };
-
-        let rel = clamped.saturating_sub(line_start);
-        let mut prev_idx = None;
-        for (idx, _) in line_str.grapheme_indices(true) {
-            if idx < rel {
-                prev_idx = Some(idx);
-            } else {
-                break;
-            }
-        }
-
-        prev_idx
-            .map(|idx| BytePos::new(line_start + idx))
-            .or_else(|| Some(BytePos::new(line_start)))
+        super::grapheme::prev(&self.rope, pos.get()).map(BytePos::new)
     }
 
     /// Applies a transaction atomically to the buffer.
@@ -433,7 +345,7 @@ impl Buffer {
             }
         }
 
-        self.validate_edits(&normalized_edits)?;
+        Self::validate_edits(&self.rope, self.max_file_bytes, &normalized_edits)?;
 
         let (inverse_edits, changes) = self.build_inverse_and_changes(&normalized_edits);
 
@@ -464,38 +376,38 @@ impl Buffer {
 
     /// Reverts the most recent `UndoGroup` atomically.
     pub fn undo(&mut self) -> Result<Option<ChangeSet>, EditError> {
-        let Some(history_group) = self.history.pop_undo() else {
+        let Some(history_group) = self.history.peek_undo() else {
             return Ok(None);
         };
-
-        let mut combined_changes = Vec::new();
-        for inv_tx in history_group.inverse.iter() {
-            let cs = self.apply_raw(inv_tx)?;
-            combined_changes.extend(cs.changes);
-        }
-
+        let count = history_group.inverse.len();
+        let (rope, changes) = self.stage_history(history_group.inverse.iter().rev())?;
+        let history_group = self.history.pop_undo().expect("peeked undo group exists");
+        self.rope = rope;
+        self.revision += count as u64;
         self.history.push_redo(history_group);
-        Ok(Some(ChangeSet::new(combined_changes)))
+        Ok(Some(changes))
     }
 
     /// Reapplies the most recently undone `UndoGroup`.
     pub fn redo(&mut self) -> Result<Option<ChangeSet>, EditError> {
-        let Some(history_group) = self.history.pop_redo() else {
+        let Some(history_group) = self.history.peek_redo() else {
             return Ok(None);
         };
-
-        let mut combined_changes = Vec::new();
-        for fwd_tx in history_group.forward.iter() {
-            let cs = self.apply_raw(fwd_tx)?;
-            combined_changes.extend(cs.changes);
-        }
-
+        let count = history_group.forward.len();
+        let (rope, changes) = self.stage_history(history_group.forward.iter())?;
+        let history_group = self.history.pop_redo().expect("peeked redo group exists");
+        self.rope = rope;
+        self.revision += count as u64;
         self.history.push_undo(history_group);
-        Ok(Some(ChangeSet::new(combined_changes)))
+        Ok(Some(changes))
     }
 
-    fn validate_edits(&self, edits: &[SingleEdit]) -> Result<(), EditError> {
-        let current_len = self.rope.byte_len();
+    fn validate_edits(
+        rope: &crop::Rope,
+        limit: usize,
+        edits: &[SingleEdit],
+    ) -> Result<(), EditError> {
+        let current_len = rope.byte_len();
         let mut total_deleted: usize = 0;
         let mut total_inserted: usize = 0;
 
@@ -512,12 +424,12 @@ impl Buffer {
                     len: current_len,
                 });
             }
-            if !self.rope.is_char_boundary(edit.range.start) {
+            if !rope.is_char_boundary(edit.range.start) {
                 return Err(EditError::NotCharBoundary {
                     pos: edit.range.start,
                 });
             }
-            if !self.rope.is_char_boundary(edit.range.end) {
+            if !rope.is_char_boundary(edit.range.end) {
                 return Err(EditError::NotCharBoundary {
                     pos: edit.range.end,
                 });
@@ -545,14 +457,14 @@ impl Buffer {
                 EditError::SizeLimitExceeded {
                     current_len,
                     new_len: usize::MAX,
-                    limit: self.max_file_bytes,
+                    limit,
                 },
             )?;
             total_inserted = total_inserted.checked_add(edit.text.len()).ok_or(
                 EditError::SizeLimitExceeded {
                     current_len,
                     new_len: usize::MAX,
-                    limit: self.max_file_bytes,
+                    limit,
                 },
             )?;
         }
@@ -563,14 +475,14 @@ impl Buffer {
             .ok_or(EditError::SizeLimitExceeded {
                 current_len,
                 new_len: usize::MAX,
-                limit: self.max_file_bytes,
+                limit,
             })?;
 
-        if new_len > self.max_file_bytes {
+        if new_len > limit {
             return Err(EditError::SizeLimitExceeded {
                 current_len,
                 new_len,
-                limit: self.max_file_bytes,
+                limit,
             });
         }
 
@@ -578,7 +490,7 @@ impl Buffer {
     }
 
     fn build_inverse_and_changes(&self, edits: &[SingleEdit]) -> (Vec<SingleEdit>, Vec<Change>) {
-        let mut inverse_edits = Vec::with_capacity(edits.len());
+        let mut inverse_edits: Vec<SingleEdit> = Vec::with_capacity(edits.len());
         let mut changes = Vec::with_capacity(edits.len());
 
         let mut shift: isize = 0;
@@ -589,30 +501,43 @@ impl Buffer {
             let delta = (edit.text.len() as isize) - (edit.range.len() as isize);
             shift += delta;
 
-            inverse_edits.push(SingleEdit {
-                range: new_start..new_end,
-                text: old_text,
-            });
+            // Adjacent deletions collapse onto one insertion point in the inverse.
+            if let Some(previous) = inverse_edits.last_mut()
+                && previous.range == (new_start..new_end)
+                && previous.range.is_empty()
+            {
+                previous.text.push_str(&old_text);
+            } else {
+                inverse_edits.push(SingleEdit {
+                    range: new_start..new_end,
+                    text: old_text,
+                });
+            }
             changes.push(Change::new(edit.range.clone(), edit.text.len()));
         }
 
         (inverse_edits, changes)
     }
 
-    fn apply_raw(&mut self, tx: &Transaction) -> Result<ChangeSet, EditError> {
-        self.validate_edits(&tx.edits)?;
-
-        let changes: Vec<Change> = tx
-            .edits
-            .iter()
-            .map(|edit| Change::new(edit.range.clone(), edit.text.len()))
-            .collect();
-
-        for edit in tx.edits.iter().rev() {
-            self.rope.replace(edit.range.clone(), &edit.text);
+    fn stage_history<'a>(
+        &self,
+        transactions: impl Iterator<Item = &'a Transaction>,
+    ) -> Result<(crop::Rope, ChangeSet), EditError> {
+        // Rope clones share unchanged storage; failed replay discards only edited paths.
+        let mut rope = self.rope.clone();
+        let mut changes = ChangeSet::default();
+        for tx in transactions {
+            Self::validate_edits(&rope, self.max_file_bytes, &tx.edits)?;
+            changes.append_batch(ChangeSet::new(
+                tx.edits
+                    .iter()
+                    .map(|edit| Change::new(edit.range.clone(), edit.text.len()))
+                    .collect(),
+            ));
+            for edit in tx.edits.iter().rev() {
+                rope.replace(edit.range.clone(), &edit.text);
+            }
         }
-
-        self.revision += 1;
-        Ok(ChangeSet::new(changes))
+        Ok((rope, changes))
     }
 }

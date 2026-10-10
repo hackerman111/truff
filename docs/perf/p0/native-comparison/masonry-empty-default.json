@@ -1,0 +1,194 @@
+[
+  {
+    "backend": "default",
+    "boundary": "whole native GUI process",
+    "note_bytes": 0,
+    "startup_seconds": 4.434038860999863,
+    "window_size": [
+      956,
+      1047
+    ],
+    "status": "Name:\ttruff\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1496395\nNgid:\t0\nPid:\t1496395\nPPid:\t1496392\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t128\nGroups:\t98 949 985 995 998 1000 \nNStgid:\t1496395\nNSpid:\t1496395\nNSpgid:\t1496382\nNSsid:\t1496382\nKthread:\t0\nVmPeak:\t 1537912 kB\nVmSize:\t 1537912 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  598660 kB\nVmRSS:\t  598660 kB\nRssAnon:\t   50556 kB\nRssFile:\t  402964 kB\nRssShmem:\t  145140 kB\nVmData:\t  162068 kB\nVmStk:\t     156 kB\nVmExe:\t   15048 kB\nVmLib:\t  275440 kB\nVmPTE:\t     756 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t12\nSigQ:\t0/127173\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000800000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tfff\nCpus_allowed_list:\t0-11\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t191\nnonvoluntary_ctxt_switches:\t6\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n",
+    "smaps_rollup": "40404000-7ffc82674000 ---p 00000000 00:00 0                              [rollup]\nRss:              453580 kB\nPss:              269251 kB\nPss_Dirty:         79960 kB\nPss_Anon:          50556 kB\nPss_File:         218654 kB\nPss_Shmem:            40 kB\nShared_Clean:     240748 kB\nShared_Dirty:         20 kB\nPrivate_Clean:    132852 kB\nPrivate_Dirty:     79960 kB\nReferenced:       453580 kB\nAnonymous:         50556 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:         0 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:    215040 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n",
+    "largest_rss_mappings_kib": [
+      [
+        "/dev/nvidiactl",
+        144788
+      ],
+      [
+        "/usr/lib/libLLVM.so.23.1",
+        79656
+      ],
+      [
+        "/usr/lib/libnvidia-gpucomp.so.615.71.09",
+        77432
+      ],
+      [
+        "[heap]",
+        28116
+      ],
+      [
+        "/usr/lib/libnvidia-glcore.so.615.71.09",
+        25328
+      ],
+      [
+        "/usr/lib/libnvidia-eglcore.so.615.71.09",
+        21080
+      ],
+      [
+        "/usr/lib/libgallium-26.2.4-arch1.1.so",
+        20648
+      ],
+      [
+        "/home/papayka/Rust_project/Truff_v2/target/release/truff",
+        17860
+      ],
+      [
+        "[anonymous]",
+        10060
+      ],
+      [
+        "/usr/lib/libnvidia-glvkspirv.so.615.71.09",
+        7356
+      ],
+      [
+        "/usr/lib/libicudata.so.78.3",
+        2068
+      ],
+      [
+        "/usr/lib/libc.so.6",
+        1748
+      ],
+      [
+        "/usr/lib/libstdc++.so.6.0.36",
+        1508
+      ],
+      [
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        1464
+      ],
+      [
+        "/var/cache/fontconfig/923e285e415b1073c8df160bee08820f-le64.cache-12",
+        1128
+      ],
+      [
+        "/usr/lib/libGLX_nvidia.so.615.71.09",
+        1064
+      ],
+      [
+        "/usr/lib/libEGL_nvidia.so.615.71.09",
+        924
+      ],
+      [
+        "/usr/lib/libvulkan.so.1.4.363",
+        676
+      ],
+      [
+        "/usr/lib/libm.so.6",
+        668
+      ],
+      [
+        "/var/cache/fontconfig/17090aa38d5c6f09fb8c5c354938f1d7-le64.cache-12",
+        648
+      ]
+    ]
+  },
+  {
+    "backend": "vulkan",
+    "boundary": "whole native GUI process",
+    "note_bytes": 0,
+    "startup_seconds": 4.378872658002365,
+    "window_size": [
+      956,
+      1047
+    ],
+    "status": "Name:\ttruff\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1496659\nNgid:\t0\nPid:\t1496659\nPPid:\t1496392\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t128\nGroups:\t98 949 985 995 998 1000 \nNStgid:\t1496659\nNSpid:\t1496659\nNSpgid:\t1496382\nNSsid:\t1496382\nKthread:\t0\nVmPeak:\t 1218600 kB\nVmSize:\t 1218600 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  457120 kB\nVmRSS:\t  457120 kB\nRssAnon:\t   39284 kB\nRssFile:\t  276192 kB\nRssShmem:\t  141644 kB\nVmData:\t  152176 kB\nVmStk:\t     152 kB\nVmExe:\t   15048 kB\nVmLib:\t  127964 kB\nVmPTE:\t     644 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t12\nSigQ:\t0/127173\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000800000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tfff\nCpus_allowed_list:\t0-11\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t154\nnonvoluntary_ctxt_switches:\t68\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n",
+    "smaps_rollup": "55ffe56a9000-7ffc8fbfa000 ---p 00000000 00:00 0                          [rollup]\nRss:              315512 kB\nPss:              220077 kB\nPss_Dirty:         69196 kB\nPss_Anon:          39284 kB\nPss_File:         180761 kB\nPss_Shmem:            32 kB\nShared_Clean:     117364 kB\nShared_Dirty:          4 kB\nPrivate_Clean:    128948 kB\nPrivate_Dirty:     69196 kB\nReferenced:       315512 kB\nAnonymous:         39284 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:         0 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:    100352 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n",
+    "largest_rss_mappings_kib": [
+      [
+        "/dev/nvidiactl",
+        141444
+      ],
+      [
+        "/usr/lib/libnvidia-gpucomp.so.615.71.09",
+        77432
+      ],
+      [
+        "/usr/lib/libnvidia-glcore.so.615.71.09",
+        25328
+      ],
+      [
+        "[heap]",
+        23864
+      ],
+      [
+        "/home/papayka/Rust_project/Truff_v2/target/release/truff",
+        17812
+      ],
+      [
+        "[anonymous]",
+        8468
+      ],
+      [
+        "/usr/lib/libnvidia-glvkspirv.so.615.71.09",
+        7356
+      ],
+      [
+        "/usr/lib/libc.so.6",
+        1744
+      ],
+      [
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        1516
+      ],
+      [
+        "/var/cache/fontconfig/923e285e415b1073c8df160bee08820f-le64.cache-12",
+        1128
+      ],
+      [
+        "/usr/lib/libGLX_nvidia.so.615.71.09",
+        1064
+      ],
+      [
+        "/usr/lib/libvulkan.so.1.4.363",
+        676
+      ],
+      [
+        "/var/cache/fontconfig/17090aa38d5c6f09fb8c5c354938f1d7-le64.cache-12",
+        648
+      ],
+      [
+        "/var/cache/fontconfig/df311e82a1a24c41a75c2c930223552e-le64.cache-12",
+        648
+      ],
+      [
+        "/usr/lib/libm.so.6",
+        604
+      ],
+      [
+        "/usr/lib/libX11.so.6.4.0",
+        560
+      ],
+      [
+        "/usr/lib/libnvidia-glsi.so.615.71.09",
+        536
+      ],
+      [
+        "/var/cache/fontconfig/f6b893a7224233d96cb72fd88691c0b4-le64.cache-12",
+        504
+      ],
+      [
+        "/usr/lib/libfontconfig.so.1.17.0",
+        396
+      ],
+      [
+        "/usr/lib/libxkbcommon.so.0.13.2",
+        380
+      ]
+    ]
+  },
+  {
+    "backend": "gl",
+    "error": "Truff window did not appear"
+  }
+]

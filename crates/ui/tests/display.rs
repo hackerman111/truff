@@ -206,3 +206,23 @@ fn flash_visible_only() {
     );
     assert!(!flash.is_active(), "Flash must deactivate after match");
 }
+
+#[test]
+fn live_preview_projects_color_wrappers_and_keeps_code_literal() {
+    let text = "plain <span style=\"color:#3388ff\">blue</span>\n`<span style=\"color:#ff0000\">code</span>`";
+    let mut display = DisplayMap::new(text, ProjectionMode::LivePreview);
+    display.set_cursor(BytePos::ZERO);
+    assert!(display.visual_text().contains("plain blue"));
+    assert!(display.visual_text().contains("color:#ff0000"));
+    assert_eq!(display.color_spans().len(), 1);
+    assert_eq!(display.color_spans()[0].rgba, [0x33, 0x88, 0xff, 255]);
+    let pos = BytePos::new(text.find("blue").unwrap());
+    display.set_cursor(pos);
+    assert!(display.visual_text().contains("color:#3388ff"));
+    assert_eq!(
+        display
+            .visual_to_source(display.source_to_visual(pos, Affinity::Right))
+            .pos,
+        pos
+    );
+}

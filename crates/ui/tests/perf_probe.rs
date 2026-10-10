@@ -18,7 +18,7 @@ fn test_probe_1mib_performance_baseline() {
 
     // 1. Rope construction latency
     let t0 = Instant::now();
-    let mut probe = EditorProbe::new(&text_1mib);
+    let mut probe = EditorProbe::new(&text_1mib).unwrap();
     let rope_init_duration = t0.elapsed();
     println!("1 MiB Rope Init: {rope_init_duration:?} for {total_bytes} bytes");
     let init_threshold_ms = if cfg!(debug_assertions) { 150 } else { 50 };
@@ -27,11 +27,11 @@ fn test_probe_1mib_performance_baseline() {
         "1 MiB Rope initialization must be under {init_threshold_ms}ms (got {rope_init_duration:?})"
     );
 
-    // 2. Parley layout computation latency
+    // 2. Bounded viewport layout, independent of the document's total byte count.
     let t1 = Instant::now();
     probe.relayout(Some(800.0));
     let layout_duration = t1.elapsed();
-    println!("1 MiB Parley Layout: {layout_duration:?}");
+    println!("1 MiB document, bounded viewport layout: {layout_duration:?}");
 
     // 3. Hit testing latency (1000 queries)
     let queries = 1000;
@@ -58,7 +58,7 @@ fn test_probe_1mib_performance_baseline() {
     // 4. 500 sequential edits
     let t3 = Instant::now();
     for i in 0..500 {
-        probe.handle_input(EditorInput::InsertText(format!("{i} ")));
+        probe.handle_input(EditorInput::InsertText(format!("{i} "))).unwrap();
     }
     let edits_duration = t3.elapsed();
     let avg_edit_us = edits_duration.as_micros() as f64 / 500.0;

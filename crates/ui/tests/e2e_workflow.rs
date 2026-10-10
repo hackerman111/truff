@@ -1,6 +1,8 @@
-//! End-to-End Keyboard Workflow Integration Test (P6-P7 / T13).
+//! Headless backend workflow fixture (P6-P7 / T13).
 //!
-//! Validates the entire cohesive workflow crossing all subsystems:
+//! Calls backend APIs directly; it does not validate native input, widgets, or presentation.
+//! Production widget coverage lives in `gui.rs`; Wayland coverage in `tools/gui/native_smoke.py`.
+//! Exercises the backend workflow:
 //! `vault -> open note -> vim edit -> flash jump -> wrap color -> create link -> resolve backlinks -> rename file with link cascade -> atomic save -> restart session`.
 
 use std::fs;

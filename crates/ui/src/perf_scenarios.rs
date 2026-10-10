@@ -1,7 +1,7 @@
 //! Performance Benchmark Scenarios, Harness, and Metrics Collection (P6-P7 / T13).
 //!
-//! Implements reproducible measurements matching §10.2 / §10.3 of Truff v2 plan:
-//! - `startup`: Process launch, core/store/shell initialization, initial layout.
+//! Headless component measurements; these do not certify native GUI budgets in §10.2 / §10.3:
+//! - `startup`: In-process core/store/shell initialization and a Parley layout probe.
 //! - `edit-latency`: High-resolution per-edit latency for Vim operations (p50, p95, p99).
 //! - `scroll-layout`: Virtualized paragraph layout and HeightIndex caching during scroll.
 //! - `memory-retention`: RSS/PSS memory retention under view churn and 10k-note vaults.
@@ -457,7 +457,7 @@ pub fn run_scroll_layout(runs: usize) -> Vec<PerfSample> {
         // Measure single paragraph layout ready time (§10.2: Visible layout ready p95 <= 50 ms)
         let t_para = Instant::now();
         if height_index.block_count() > 10 {
-            height_index.blocks_mut()[10].revision += 1;
+            height_index.set_block_revision(10, height_index.blocks()[10].revision + 1);
         }
         let _ = virtual_layout.layout_visible_window(
             &large_note,
@@ -749,18 +749,17 @@ pub fn write_metadata_toml(path: &Path, bin_path: Option<&Path>) -> io::Result<(
     let bin_size_mib = bin_size_bytes as f64 / (1024.0 * 1024.0);
 
     let mut file = File::create(path)?;
-    writeln!(file, "# Performance Test Run Metadata (Stage P7 / T13)")?;
+    writeln!(
+        file,
+        "# Headless component run metadata; no native window is created."
+    )?;
     writeln!(file, "# Generated automatically on benchmark completion.\n")?;
 
     writeln!(file, "[host]")?;
-    writeln!(file, "os = \"Linux (x86_64)\"")?;
-    writeln!(file, "display_server = \"Wayland / X11\"")?;
-    writeln!(file, "resolution = \"1920x1080\"")?;
-    writeln!(file, "scale = \"100%\"")?;
-    writeln!(file, "rustc_version = \"1.95.0\"")?;
-    writeln!(file, "cargo_version = \"1.95.0\"")?;
-    writeln!(file, "profile = \"release\"")?;
-    writeln!(file, "seed = 20261010\n")?;
+    writeln!(file, "os = \"{}\"", std::env::consts::OS)?;
+    writeln!(file, "arch = \"{}\"", std::env::consts::ARCH)?;
+    writeln!(file, "debug_assertions = {}", cfg!(debug_assertions))?;
+    writeln!(file, "measurement_boundary = \"headless components\"\n")?;
 
     writeln!(file, "[binary]")?;
     writeln!(file, "path = \"{}\"", bin_path_buf.display())?;
@@ -785,278 +784,52 @@ pub fn write_summary_md(path: &Path, samples: &[PerfSample]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-
-    // Helper to calculate mean and p95 for a specific metric
-    let get_metric_stats = |scenario: &str, metric: &str| -> (f64, f64) {
-        let mut vals: Vec<f64> = samples
-            .iter()
-            .filter(|s| s.scenario == scenario && s.metric == metric)
-            .map(|s| s.value)
-            .collect();
-        if vals.is_empty() {
-            return (0.0, 0.0);
-        }
-        let sum: f64 = vals.iter().sum();
-        let mean = sum / vals.len() as f64;
-        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let p95 = percentile(&vals, 0.95);
-        (mean, p95)
-    };
-
-    let (startup_mean, startup_p95) = get_metric_stats("startup", "wall_time_ms");
-    let (_, note_open_p95) = get_metric_stats("startup", "note_open_1mib_ms");
-    let (rss_steady_mean, _) = get_metric_stats("startup", "rss_steady_mib");
-    let (rss_peak_mean, _) = get_metric_stats("startup", "rss_peak_mib");
-
-    let (edit_p50_mean, _) = get_metric_stats("edit-latency", "edit_p50_ms");
-    let (edit_p95_mean, _) = get_metric_stats("edit-latency", "edit_p95_ms");
-    let (edit_p99_mean, _) = get_metric_stats("edit-latency", "edit_p99_ms");
-    let (_, flash_p95) = get_metric_stats("edit-latency", "flash_labels_ms");
-
-    let (_cold_layout_mean, _) = get_metric_stats("scroll-layout", "cold_layout_ms");
-    let (_, para_ready_p95) = get_metric_stats("scroll-layout", "paragraph_layout_ready_ms");
-    let (scroll_p50_mean, _) = get_metric_stats("scroll-layout", "scroll_frame_p50_ms");
-    let (scroll_p95_mean, _) = get_metric_stats("scroll-layout", "scroll_frame_p95_ms");
-    let (cache_hit_mean, _) = get_metric_stats("scroll-layout", "cache_hit_rate_percent");
-
-    let (mem_delta_mean, _) = get_metric_stats("memory-retention", "rss_delta_mib");
-    let (vault_10k_rss_mean, _) = get_metric_stats("memory-retention", "vault_10k_rss_mib");
-    let (vault_10k_overhead_mean, _) =
-        get_metric_stats("memory-retention", "vault_10k_overhead_mib");
-    let (_, search_p95) = get_metric_stats("memory-retention", "search_first_page_ms");
-
-    let (shutdown_mean, shutdown_p95) =
-        get_metric_stats("workers-shutdown", "shutdown_duration_ms");
-
     let mut file = File::create(path)?;
+    writeln!(file, "# Truff headless component measurements\n")?;
     writeln!(
         file,
-        "# Truff v2 Performance & Release Readiness Report (Stage P7 / T13)\n"
-    )?;
-    writeln!(file, "> **Evaluation Date:** October 2026  ")?;
-    writeln!(file, "> **Git Branch:** `feat/truff-v2`  ")?;
-    writeln!(
-        file,
-        "> **Harness:** Standalone headless benchmarking via `truff-ui --scenario all` and `tools/perf/measure.sh`  "
+        "`--scenario` runs Core/Store/Shell and Parley without a native window. \
+        These samples exclude window rendering and presentation; they do not certify GUI budgets, \
+        native keyboard workflows, idle CPU, or v1 release readiness.\n"
     )?;
     writeln!(
         file,
-        "> **Corpus Seeds:** seed=20261010 (1k small and 10k normal notes)\n"
+        "`startup` measures in-process initialization and a layout probe; \
+        `note_open_1mib_ms` measures Rope construction. `scroll_frame_*` measures paragraph \
+        layout work, not a presented frame. RSS/PSS belong to this headless process.\n"
     )?;
-
-    writeln!(file, "## 1. Executive Summary\n")?;
+    if samples.is_empty() {
+        writeln!(file, "No samples supplied; no measurements reported.")?;
+        return Ok(());
+    }
+    // Report only supplied metrics. Means aggregate run-level samples, including named percentiles.
+    let mut groups = std::collections::BTreeMap::new();
+    for sample in samples {
+        groups
+            .entry((&sample.scenario, &sample.metric, &sample.unit))
+            .or_insert_with(Vec::new)
+            .push(sample.value);
+    }
     writeln!(
         file,
-        "All performance, memory, latency, and shutdown criteria specified in §10.2 of the Truff v2 plan have been measured on the reference Linux benchmark host. **All limits were met with significant headroom**.\n"
+        "| Scenario | Metric | Samples | Mean | Min | Max | Unit |"
     )?;
-
-    writeln!(file, "## 2. Comparison against §10.2 Budgets\n")?;
+    writeln!(file, "| --- | --- | ---: | ---: | ---: | ---: | --- |")?;
+    for ((scenario, metric, unit), values) in groups {
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        writeln!(
+            file,
+            "| {scenario} | {metric} | {} | {mean:.4} | {min:.4} | {max:.4} | {unit} |",
+            values.len()
+        )?;
+    }
     writeln!(
         file,
-        "| Сценарий / Метрика | Цель (§10.2) | Измеренное значение | Статус |"
+        "\nMeans of metrics named p50/p95/p99 are means of per-run percentiles, \
+        not pooled event percentiles. Raw records are in `samples.csv`. \
+        Native integration evidence is recorded separately in `docs/perf/p7/summary.md`."
     )?;
-    writeln!(file, "| :--- | :--- | :--- | :---: |")?;
-    writeln!(
-        file,
-        "| **Empty Window RSS** | ≤100 MiB (цель ≤60 MiB) | **{:.2} MiB** (peak {:.2} MiB) | ✅ PASS |",
-        rss_steady_mean, rss_peak_mean
-    )?;
-    writeln!(
-        file,
-        "| **Vault 10k × 4 KiB RSS** | ≤160 MiB (overhead ≤60 MiB) | **{:.2} MiB** (overhead {:.2} MiB) | ✅ PASS |",
-        if vault_10k_rss_mean > 0.0 {
-            vault_10k_rss_mean
-        } else {
-            rss_steady_mean + 1.2
-        },
-        if vault_10k_overhead_mean > 0.0 {
-            vault_10k_overhead_mean
-        } else {
-            1.2
-        }
-    )?;
-    writeln!(
-        file,
-        "| **Core Edit / Motion Latency (p95)** | ≤2.0 ms | **{:.3} ms** (p50: {:.3} ms, p99: {:.3} ms) | ✅ PASS |",
-        edit_p95_mean, edit_p50_mean, edit_p99_mean
-    )?;
-    writeln!(
-        file,
-        "| **Warm Viewport Scroll Frame (p95)** | ≤16.7 ms (60 FPS) | **{:.3} ms** (p50: {:.3} ms) | ✅ PASS |",
-        scroll_p95_mean, scroll_p50_mean
-    )?;
-    writeln!(
-        file,
-        "| **Layout Cache Hit Ratio** | >90% warm reuse | **{:.1}%** hit rate | ✅ PASS |",
-        cache_hit_mean
-    )?;
-    writeln!(
-        file,
-        "| **Paragraph Edit Layout Ready (p95)** | ≤50.0 ms | **{:.3} ms** | ✅ PASS |",
-        para_ready_p95
-    )?;
-    writeln!(
-        file,
-        "| **Note Open ≤1 MiB (p95)** | ≤100.0 ms | **{:.3} ms** | ✅ PASS |",
-        note_open_p95
-    )?;
-    writeln!(
-        file,
-        "| **Search / Picker 10k First Page (p95)** | ≤100.0 ms | **{:.3} ms** | ✅ PASS |",
-        search_p95
-    )?;
-    writeln!(
-        file,
-        "| **Flash Labels in Viewport (p95)** | ≤30.0 ms | **{:.3} ms** | ✅ PASS |",
-        flash_p95
-    )?;
-    writeln!(
-        file,
-        "| **Warm Startup to Ready (p95)** | ≤700.0 ms | **{:.2} ms** (mean: {:.2} ms) | ✅ PASS |",
-        startup_p95, startup_mean
-    )?;
-    writeln!(
-        file,
-        "| **Memory Churn Retention (Delta)** | 0 MiB leaks | **{:.2} MiB** delta | ✅ PASS |",
-        mem_delta_mean
-    )?;
-    writeln!(
-        file,
-        "| **Background Workers Shutdown** | Clean completion, 0 data loss | **{:.2} ms** (p95: {:.2} ms), 0 lost writes | ✅ PASS |",
-        shutdown_mean, shutdown_p95
-    )?;
-    writeln!(
-        file,
-        "| **Idle 30s CPU Consumption** | ≤1.0% single core | **0.0%** (no spin loops) | ✅ PASS |\n"
-    )?;
-
-    writeln!(file, "## 3. Detailed Benchmark Findings\n")?;
-    writeln!(file, "### 3.1. Startup & Memory Profile")?;
-    writeln!(
-        file,
-        "- The cold/warm startup reaches editing readiness in **{:.2} ms**, well below the 700 ms target.",
-        startup_p95
-    )?;
-    writeln!(
-        file,
-        "- Steady process RSS rests at **{:.2} MiB**, meeting the strict ≤60 MiB target.",
-        rss_steady_mean
-    )?;
-    writeln!(
-        file,
-        "- With 10,000 files in the vault and lazy inactive buffers, RSS remains bounded at **{:.2} MiB**, proving that directory traversal does not eagerly ingest note bodies.\n",
-        if vault_10k_rss_mean > 0.0 {
-            vault_10k_rss_mean
-        } else {
-            rss_steady_mean + 1.2
-        }
-    )?;
-
-    writeln!(file, "### 3.2. Edit Latency & Vim Responsiveness")?;
-    writeln!(
-        file,
-        "- Core typing, deletion, and cursor movements yield a p95 latency of **{:.3} ms** (p50: {:.3} ms).",
-        edit_p95_mean, edit_p50_mean
-    )?;
-    writeln!(
-        file,
-        "- All single-character edits and motions remain under 0.1 ms on average, guaranteeing instant responsiveness.\n"
-    )?;
-
-    writeln!(
-        file,
-        "### 3.3. Scrolling, HeightIndex, and Layout Virtualization"
-    )?;
-    writeln!(
-        file,
-        "- `HeightIndex` and `VirtualizedLayout` format only visible paragraphs (viewport ± 1 screen)."
-    )?;
-    writeln!(
-        file,
-        "- During warm scroll, layout cache reuse reached **{:.1}%**, resulting in a frame p95 latency of **{:.3} ms**, far beating the 16.7 ms frame budget (60 FPS).\n",
-        cache_hit_mean, scroll_p95_mean
-    )?;
-
-    writeln!(file, "### 3.4. Concurrency & Graceful Shutdown")?;
-    writeln!(
-        file,
-        "- The bounded worker queue cleanly drained all 32 pending durable I/O and recovery jobs in **{:.2} ms** without dropping any writes.\n",
-        shutdown_mean
-    )?;
-
-    writeln!(file, "## 4. End-to-End Keyboard Workflow Verification\n")?;
-    writeln!(
-        file,
-        "Automated integration test `crates/ui/tests/e2e_workflow.rs` confirms that all phases P1 through P5 connect seamlessly without errors:"
-    )?;
-    writeln!(
-        file,
-        "1. `vault`: Initialized cleanly with schema and disk paths."
-    )?;
-    writeln!(file, "2. `open note`: Loaded into `Shell` buffer.")?;
-    writeln!(
-        file,
-        "3. `vim edit`: Normal to Insert mode text edits executed."
-    )?;
-    writeln!(
-        file,
-        "4. `flash jump`: Target labels generated, character match jumps cursor directly to target."
-    )?;
-    writeln!(
-        file,
-        "5. `wrap color`: `<span style=\"color:#3388ff\">...</span>` applied atomically."
-    )?;
-    writeln!(
-        file,
-        "6. `create link`: Selection converted into `[[target_note|notes ref]]`."
-    )?;
-    writeln!(
-        file,
-        "7. `resolve backlinks`: SQLite index verified exact resolution and reverse backlink presence."
-    )?;
-    writeln!(
-        file,
-        "8. `rename file with link cascade`: `target_note.md` renamed to `target_note_v2.md` and link in `main_note.md` automatically rewritten on disk."
-    )?;
-    writeln!(
-        file,
-        "9. `atomic save`: Atomic write and SHA-256 fingerprint verification succeeded."
-    )?;
-    writeln!(
-        file,
-        "10. `restart session`: Full shutdown and state restore verified all active and lazy buffer invariants.\n"
-    )?;
-
-    writeln!(file, "## 5. Release Readiness Checklist (v1)\n")?;
-    writeln!(
-        file,
-        "- [x] GPUI completely excluded from workspace dependencies."
-    )?;
-    writeln!(
-        file,
-        "- [x] Cyrillic, emoji, combining marks, CRLF, and IME boundaries preserved."
-    )?;
-    writeln!(
-        file,
-        "- [x] All 5 performance scenarios tested and budgets met."
-    )?;
-    writeln!(file, "- [x] Full end-to-end integration workflow verified.")?;
-    writeln!(
-        file,
-        "- [x] Workspace compilation passes cleanly under `--locked --release`."
-    )?;
-    writeln!(
-        file,
-        "- [x] `cargo test --locked --workspace` passes with zero failures."
-    )?;
-    writeln!(
-        file,
-        "- [x] `cargo clippy --locked --workspace --all-targets --all-features` has zero warnings."
-    )?;
-    writeln!(
-        file,
-        "- [x] `cargo fmt --all -- --check` formatted cleanly.\n"
-    )?;
-
     Ok(())
 }

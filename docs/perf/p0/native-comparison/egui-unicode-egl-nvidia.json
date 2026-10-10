@@ -1,0 +1,96 @@
+[
+  {
+    "backend": "default",
+    "boundary": "whole native GUI process",
+    "note_bytes": 1048576,
+    "startup_seconds": 4.110278087006009,
+    "window_size": [
+      956,
+      522
+    ],
+    "status": "Name:\ttruff-egui-prob\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1701477\nNgid:\t0\nPid:\t1701477\nPPid:\t1701474\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t98 949 985 995 998 1000 \nNStgid:\t1701477\nNSpid:\t1701477\nNSpgid:\t1701461\nNSsid:\t1701461\nKthread:\t0\nVmPeak:\t  454064 kB\nVmSize:\t  356392 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  146364 kB\nVmRSS:\t  143496 kB\nRssAnon:\t   24800 kB\nRssFile:\t  105820 kB\nRssShmem:\t   12876 kB\nVmData:\t   41320 kB\nVmStk:\t     136 kB\nVmExe:\t    5988 kB\nVmLib:\t   92704 kB\nVmPTE:\t     220 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t3\nSigQ:\t0/127173\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000800000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tfff\nCpus_allowed_list:\t0-11\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t151\nnonvoluntary_ctxt_switches:\t2\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n",
+    "smaps_rollup": "40826000-7ffc1cdd2000 ---p 00000000 00:00 0                              [rollup]\nRss:              137972 kB\nPss:               51638 kB\nPss_Dirty:         37524 kB\nPss_Anon:          24800 kB\nPss_File:          19501 kB\nPss_Shmem:          7336 kB\nShared_Clean:     100432 kB\nShared_Dirty:         20 kB\nPrivate_Clean:         0 kB\nPrivate_Dirty:     37520 kB\nReferenced:       137972 kB\nAnonymous:         24800 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:         0 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:     90112 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n",
+    "largest_rss_mappings_kib": [
+      [
+        "/usr/lib/libnvidia-gpucomp.so.615.71.09",
+        77320
+      ],
+      [
+        "/usr/lib/libnvidia-eglcore.so.615.71.09",
+        21084
+      ],
+      [
+        "[heap]",
+        10264
+      ],
+      [
+        "[anonymous]",
+        8904
+      ],
+      [
+        "/tmp/truff-egui-probe/target/release/truff-egui-probe",
+        7688
+      ],
+      [
+        "/dev/nvidiactl",
+        5392
+      ],
+      [
+        "/usr/lib/libc.so.6",
+        1492
+      ],
+      [
+        "/usr/lib/libEGL_nvidia.so.615.71.09",
+        928
+      ],
+      [
+        "/usr/lib/libm.so.6",
+        652
+      ],
+      [
+        "/usr/lib/libnvidia-glsi.so.615.71.09",
+        536
+      ],
+      [
+        "/usr/lib/libxkbcommon.so.0.13.2",
+        380
+      ],
+      [
+        "/usr/lib/libsystemd.so.0.45.0",
+        332
+      ],
+      [
+        "/usr/lib/libdbus-1.so.3.38.3",
+        328
+      ],
+      [
+        "/usr/lib/libGLdispatch.so.0.0.0",
+        324
+      ],
+      [
+        "/usr/lib/libX11.so.6.4.0",
+        272
+      ],
+      [
+        "/etc/ld.so.cache",
+        272
+      ],
+      [
+        "/usr/lib/ld-linux-x86-64.so.2",
+        256
+      ],
+      [
+        "/usr/lib/libnvidia-allocator.so.615.71.09",
+        152
+      ],
+      [
+        "/usr/lib/libxcb.so.1.1.0",
+        120
+      ],
+      [
+        "/usr/lib/libexpat.so.1.12.5",
+        112
+      ]
+    ]
+  }
+]

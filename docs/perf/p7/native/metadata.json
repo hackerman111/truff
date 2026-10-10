@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-10",
+  "command": "rtk proxy python3 tools/gui/native_smoke.py --binary target/release/truff",
+  "binary_sha256": "80cb6662aaa390685679252bf5b6f2655018fd18cb88a3448d9a7d0781643287",
+  "binary_size_bytes": 28804368,
+  "rustc": "1.95.0 (59807616e 2026-04-14)",
+  "cpu": "Intel Core i5-12400F",
+  "gpu": "NVIDIA GeForce RTX 5060",
+  "gpu_driver": "615.71.09",
+  "native_workflow_exit_code": 0,
+  "presentation_latency_measured": false,
+  "native_artifact_source": "/tmp/truff-native-kmtq3d2b"
+}

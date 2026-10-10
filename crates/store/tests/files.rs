@@ -232,3 +232,235 @@ fn shutdown_preserves_accepted_save() {
     let content = fs::read_to_string(&file_path).expect("File must exist after shutdown");
     assert_eq!(content, "important data saved before exit\n");
 }
+
+#[test]
+fn recovery_retains_only_two_valid_snapshots() {
+    let vault = temp_test_dir("recovery_retention");
+    let manager = RecoveryManager::new(vault, 4096);
+    let id = truff_core::text::BufferId::new(73);
+    for revision in 1..=20 {
+        manager
+            .write_snapshot(
+                SnapshotKey::new(VaultEpoch::new(1), id, revision),
+                "note.md",
+                "draft",
+                None,
+            )
+            .unwrap();
+    }
+    let snapshots: Vec<_> = fs::read_dir(manager.recovery_dir())
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(snapshots.len(), 2);
+    let newest = manager
+        .write_snapshot(
+            SnapshotKey::new(VaultEpoch::new(1), id, 21),
+            "note.md",
+            "draft",
+            None,
+        )
+        .unwrap();
+    fs::write(newest, "truncated").unwrap();
+    assert_eq!(
+        manager
+            .recover_latest_valid_snapshot(id)
+            .unwrap()
+            .key
+            .revision,
+        20
+    );
+}
+
+#[test]
+fn protected_paths_and_symlink_parents_are_rejected() {
+    let vault = temp_test_dir("path_boundary");
+    let paths = truff_store::VaultPaths::new(vault.clone());
+    assert!(
+        paths
+            .resolve_path(std::path::Path::new(".truff/vault.lock"))
+            .is_err()
+    );
+    assert!(paths.resolve_path(std::path::Path::new(".")).is_err());
+    #[cfg(unix)]
+    {
+        let outside = temp_test_dir("outside_boundary");
+        std::os::unix::fs::symlink(&outside, vault.join("linked")).unwrap();
+        assert!(
+            paths
+                .resolve_path(std::path::Path::new("linked/new.md"))
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn fingerprint_is_sha256() {
+    assert_eq!(
+        truff_store::compute_fingerprint(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:3"
+    );
+}
+
+#[test]
+fn deleted_base_file_is_never_silently_recreated() {
+    let vault = temp_test_dir("deleted_base");
+    let path = vault.join("note.md");
+    fs::write(&path, "base").unwrap();
+    let fp = truff_store::compute_file_fingerprint(&path).unwrap();
+    fs::remove_file(&path).unwrap();
+    let mut store = Store::new(vault).unwrap();
+    store
+        .try_submit(StoreJob::SaveFile {
+            key: SnapshotKey::new(VaultEpoch::new(0), truff_core::text::BufferId::new(1), 1),
+            path: path.clone(),
+            content: "draft".into(),
+            base_fingerprint: Some(fp),
+        })
+        .unwrap();
+    // Joining must retain every reply, even when the caller did not poll first.
+    for _ in 0..100 {
+        let events = store.poll_events();
+        if !events.is_empty() {
+            assert!(matches!(
+                events[0],
+                StoreEvent::Conflict { .. } | StoreEvent::SaveFailed { .. }
+            ));
+            assert!(!path.exists());
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("missing save outcome");
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_save_preserves_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let vault = temp_test_dir("permissions");
+    let path = vault.join("note.md");
+    fs::write(&path, "old").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    truff_store::atomic_write_file(&path, "new").unwrap();
+    assert_eq!(
+        fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn unread_outcomes_apply_backpressure_and_shutdown_does_not_deadlock() {
+    let vault = temp_test_dir("unread_outcomes");
+    let mut worker = truff_store::StoreWorker::start(vault.clone(), 2).unwrap();
+    let wakes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = wakes.clone();
+    worker.set_event_waker(std::sync::Arc::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    }));
+    let job = |revision| StoreJob::SaveFile {
+        key: SnapshotKey::new(
+            VaultEpoch::new(0),
+            truff_core::text::BufferId::new(72),
+            revision,
+        ),
+        path: vault.join(format!("note{revision}.md")),
+        content: "draft".into(),
+        base_fingerprint: None,
+    };
+    worker.try_submit(job(1)).unwrap();
+    worker.try_submit(job(2)).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(worker.try_submit(job(3)), Err(SubmitError::QueueFull));
+    worker.shutdown();
+    assert_eq!(
+        wakes.load(Ordering::Relaxed),
+        1,
+        "unread outcomes share one adapter wakeup"
+    );
+    let outcomes = worker.poll_events();
+    assert_eq!(outcomes.len(), 2);
+    assert!(
+        outcomes
+            .iter()
+            .all(|event| matches!(event, StoreEvent::SaveAck { .. }))
+    );
+}
+
+#[test]
+fn concurrent_lock_acquisition_has_exactly_one_owner() {
+    let vault = temp_test_dir("lock_race");
+    fs::create_dir_all(vault.join(".truff")).unwrap();
+    fs::write(vault.join(".truff/vault.lock"), "4294967294\n").unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(17));
+    let threads: Vec<_> = (0..16)
+        .map(|_| {
+            let barrier = barrier.clone();
+            let vault = vault.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                truff_store::VaultLock::acquire(&vault)
+            })
+        })
+        .collect();
+    barrier.wait();
+    let owners: Vec<_> = threads
+        .into_iter()
+        .filter_map(|thread| thread.join().unwrap().ok())
+        .collect();
+    assert_eq!(owners.len(), 1);
+    drop(owners);
+    assert!(truff_store::VaultLock::acquire(&vault).is_ok());
+}
+
+#[test]
+fn recovery_budget_failure_keeps_the_only_valid_copy_and_bounds_malformed_reads() {
+    let vault = temp_test_dir("recovery_budget");
+    let manager = RecoveryManager::new(vault, 1024);
+    let id = truff_core::text::BufferId::new(74);
+    let key = SnapshotKey::new(VaultEpoch::new(0), id, 1);
+    manager
+        .write_snapshot(key, "note.md", "sole draft", None)
+        .unwrap();
+    assert!(
+        manager
+            .write_snapshot(
+                SnapshotKey { revision: 2, ..key },
+                "note.md",
+                &"x".repeat(1024),
+                None
+            )
+            .is_err()
+    );
+    fs::write(
+        manager.recovery_dir().join("74_r99999999.snap"),
+        "TRUFF_SNAP_V2\ncontent_len:18446744073709551615\n---DATA---\n",
+    )
+    .unwrap();
+    assert_eq!(
+        manager.recover_latest_valid_snapshot(id).unwrap().content,
+        "sole draft"
+    );
+}
+
+#[test]
+fn new_file_save_never_replaces_an_existing_destination() {
+    let vault = temp_test_dir("create_collision");
+    let path = vault.join("note.md");
+    fs::write(&path, "external").unwrap();
+    let mut worker = truff_store::StoreWorker::start(vault, 1).unwrap();
+    worker
+        .try_submit(StoreJob::SaveFile {
+            key: SnapshotKey::new(VaultEpoch::new(0), truff_core::text::BufferId::new(1), 0),
+            path: path.clone(),
+            content: "local".into(),
+            base_fingerprint: None,
+        })
+        .unwrap();
+    worker.shutdown();
+    assert!(matches!(
+        worker.poll_events()[0],
+        StoreEvent::SaveFailed { .. }
+    ));
+    assert_eq!(fs::read_to_string(path).unwrap(), "external");
+}

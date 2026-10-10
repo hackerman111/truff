@@ -15,10 +15,7 @@ truff-core = { path = "../core" }
 truff-store = { path = "../store" }
 crop.workspace = true
 unicode-segmentation.workspace = true
-masonry.workspace = true
-masonry_winit.workspace = true
-parley.workspace = true
-winit.workspace = true
+eframe = { version = "=0.36.2", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
 
 [features]
 default = []

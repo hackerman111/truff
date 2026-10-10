@@ -89,6 +89,15 @@ pub struct FlashTarget {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FlashKind {
+    #[default]
+    Word,
+    Sentence,
+    Paragraph,
+    SyntaxObject,
+}
+
 /// Controller managing Flash-style letter jump overlays (§8).
 #[derive(Debug, Clone, Default)]
 pub struct FlashOverlay {
@@ -185,36 +194,49 @@ impl FlashOverlay {
                 let start = source_offset + idx;
                 let end = start + word.len();
                 candidates.push((start..end, word.to_string()));
+                if candidates.len() == 100 {
+                    break;
+                }
             }
         }
 
-        let max_targets = 100.min(candidates.len());
-        let selected_candidates = &candidates[..max_targets];
+        Self::label_candidates(candidates)
+    }
 
+    /// Syntax/semantic producers provide source ranges; labeling stays UI-owned.
+    pub fn activate_ranges(&mut self, ranges: impl IntoIterator<Item = std::ops::Range<usize>>) {
+        self.targets = Self::label_candidates(
+            ranges
+                .into_iter()
+                .take(100)
+                .map(|range| (range, String::new()))
+                .collect(),
+        );
+        self.query.clear();
+        self.active = !self.targets.is_empty();
+    }
+    fn label_candidates(candidates: Vec<(std::ops::Range<usize>, String)>) -> Vec<FlashTarget> {
         let alphabet = Self::HOME_ROW_LETTERS;
-        let mut targets = Vec::with_capacity(selected_candidates.len());
-
-        if selected_candidates.len() <= alphabet.len() {
-            for (i, (range, text)) in selected_candidates.iter().enumerate() {
-                targets.push(FlashTarget {
-                    label: alphabet[i].to_string(),
-                    source_range: range.clone(),
-                    text: text.clone(),
-                });
-            }
-        } else {
-            for (key_idx, (range, text)) in selected_candidates.iter().enumerate() {
-                let first = alphabet[(key_idx / alphabet.len()) % alphabet.len()];
-                let second = alphabet[key_idx % alphabet.len()];
-                let label = format!("{}{}", first, second);
-                targets.push(FlashTarget {
+        let double = candidates.len() > alphabet.len();
+        candidates
+            .into_iter()
+            .enumerate()
+            .map(|(i, (range, text))| {
+                let label = if double {
+                    format!(
+                        "{}{}",
+                        alphabet[i / alphabet.len()],
+                        alphabet[i % alphabet.len()]
+                    )
+                } else {
+                    alphabet[i].to_string()
+                };
+                FlashTarget {
                     label,
-                    source_range: range.clone(),
-                    text: text.clone(),
-                });
-            }
-        }
-
-        targets
+                    source_range: range,
+                    text,
+                }
+            })
+            .collect()
     }
 }

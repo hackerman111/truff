@@ -58,6 +58,32 @@ pub enum Command {
         count: usize,
     },
     ColonCommand(String),
+    TextCommit(String),
+    InsertKey(Key),
+    DeleteSurrounding {
+        before_chars: usize,
+        after_chars: usize,
+    },
+    OperatorSelection(Operator),
+    OperatorExtent {
+        op: Operator,
+        graphemes: usize,
+        lines: Option<usize>,
+    },
+    OperatorRange {
+        op: Operator,
+        range: std::ops::Range<usize>,
+        linewise: bool,
+    },
+    Search {
+        query: String,
+        forward: bool,
+        count: usize,
+    },
+    RepeatSearch {
+        reverse: bool,
+        count: usize,
+    },
 }
 
 /// Result of parsing a sequence of keys.
@@ -66,6 +92,8 @@ pub enum ParseResult {
     Complete(Command),
     Incomplete,
     Invalid,
+    Overflow,
+    TextLimit,
 }
 
 /// Key sequence parser for Vim commands.
@@ -76,6 +104,7 @@ pub struct VimParser {
     buffer: Vec<Key>,
     in_colon: bool,
     colon_buffer: String,
+    search: Option<(bool, usize, String)>,
 }
 
 impl VimParser {
@@ -90,6 +119,7 @@ impl VimParser {
         self.buffer.clear();
         self.in_colon = false;
         self.colon_buffer.clear();
+        self.search = None;
     }
 
     /// Feeds a key and attempts to produce a complete Vim `Command`.
@@ -100,6 +130,40 @@ impl VimParser {
             return ParseResult::Complete(Command::Escape);
         }
 
+        if let Some((forward, count, query)) = &mut self.search {
+            match key {
+                Key::Enter => {
+                    let cmd = Command::Search {
+                        query: std::mem::take(query),
+                        forward: *forward,
+                        count: *count,
+                    };
+                    self.reset();
+                    return ParseResult::Complete(cmd);
+                }
+                Key::Backspace => {
+                    query.pop();
+                }
+                Key::Char(c) => {
+                    if query.len() + c.len_utf8() > 65536 {
+                        self.reset();
+                        return ParseResult::TextLimit;
+                    }
+                    query.push(c);
+                }
+                _ => {}
+            }
+            return ParseResult::Incomplete;
+        }
+        if self.buffer.is_empty() && self.operator.is_none() && matches!(key, Key::Char('/' | '?'))
+        {
+            self.search = Some((
+                key == Key::Char('/'),
+                self.count_prefix.take().unwrap_or(1),
+                String::new(),
+            ));
+            return ParseResult::Incomplete;
+        }
         // Colon command mode
         if self.in_colon {
             match key {
@@ -117,6 +181,10 @@ impl VimParser {
                     return ParseResult::Incomplete;
                 }
                 Key::Char(c) => {
+                    if self.colon_buffer.len() + c.len_utf8() > 65536 {
+                        self.reset();
+                        return ParseResult::TextLimit;
+                    }
                     self.colon_buffer.push(c);
                     return ParseResult::Incomplete;
                 }
@@ -141,7 +209,15 @@ impl VimParser {
             // '0' as first key is line-start motion, not count 0
             if !(c == '0' && is_first_digit) {
                 let digit = c.to_digit(10).unwrap() as usize;
-                let new_count = self.count_prefix.unwrap_or(0) * 10 + digit;
+                let Some(new_count) = self
+                    .count_prefix
+                    .unwrap_or(0)
+                    .checked_mul(10)
+                    .and_then(|n| n.checked_add(digit))
+                else {
+                    self.reset();
+                    return ParseResult::Overflow;
+                };
                 self.count_prefix = Some(new_count);
                 return ParseResult::Incomplete;
             }
@@ -149,6 +225,28 @@ impl VimParser {
 
         self.buffer.push(key);
         self.parse_buffer(mode)
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.count_prefix.is_none()
+            && self.operator.is_none()
+            && self.buffer.is_empty()
+            && !self.in_colon
+            && self.search.is_none()
+    }
+    pub fn take_count(&mut self) -> usize {
+        let count = self.count_prefix.take().unwrap_or(1);
+        self.reset();
+        count
+    }
+    pub fn take_operator(&mut self) -> Option<Operator> {
+        let op = self.operator.map(|(op, _)| op);
+        self.reset();
+        op
+    }
+
+    pub fn search_query(&self) -> Option<&str> {
+        self.search.as_ref().map(|(_, _, q)| q.as_str())
     }
 
     fn parse_buffer(&mut self, mode: Mode) -> ParseResult {
@@ -207,6 +305,10 @@ impl VimParser {
 
             if let Some(op) = op {
                 let count = self.count_prefix.take().unwrap_or(1);
+                if matches!(mode, Mode::VisualChar | Mode::VisualLine) {
+                    self.reset();
+                    return ParseResult::Complete(Command::OperatorSelection(op));
+                }
                 self.operator = Some((op, count));
                 self.buffer.clear();
                 return ParseResult::Incomplete;
@@ -227,7 +329,10 @@ impl VimParser {
 
             if double_match {
                 let motion_count = self.count_prefix.take().unwrap_or(1);
-                let total_count = op_count * motion_count;
+                let Some(total_count) = op_count.checked_mul(motion_count) else {
+                    self.reset();
+                    return ParseResult::Overflow;
+                };
                 self.reset();
                 return ParseResult::Complete(Command::OperatorMotion {
                     op,
@@ -270,7 +375,10 @@ impl VimParser {
 
                 if let Some(target) = target {
                     let motion_count = self.count_prefix.take().unwrap_or(1);
-                    let total_count = op_count * motion_count;
+                    let Some(total_count) = op_count.checked_mul(motion_count) else {
+                        self.reset();
+                        return ParseResult::Overflow;
+                    };
                     self.reset();
                     return ParseResult::Complete(Command::OperatorTextObject {
                         op,
@@ -287,7 +395,10 @@ impl VimParser {
             match self.parse_motion() {
                 ParseMotionResult::Complete(motion) => {
                     let motion_count = self.count_prefix.take().unwrap_or(1);
-                    let total_count = op_count * motion_count;
+                    let Some(total_count) = op_count.checked_mul(motion_count) else {
+                        self.reset();
+                        return ParseResult::Overflow;
+                    };
                     self.reset();
                     return ParseResult::Complete(Command::OperatorMotion {
                         op,
@@ -306,6 +417,13 @@ impl VimParser {
         // 6. Direct commands in Normal / Visual mode
         let count = self.count_prefix.take().unwrap_or(1);
         match first {
+            Key::Char('n') | Key::Char('N') => {
+                self.reset();
+                ParseResult::Complete(Command::RepeatSearch {
+                    reverse: first == Key::Char('N'),
+                    count,
+                })
+            }
             Key::Char('i') => {
                 self.reset();
                 ParseResult::Complete(Command::Insert(InsertEntry::AtCursor))

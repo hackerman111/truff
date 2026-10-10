@@ -15,6 +15,7 @@ pub use recovery::{
 pub use vault::{VaultError, VaultLock, VaultPaths};
 pub use worker::{DEFAULT_MAX_DURABLE_SLOTS, JobId, StoreWorker, SubmitError};
 
+pub mod catalog;
 pub mod files;
 pub mod index;
 pub mod operations;
@@ -72,7 +73,8 @@ impl Store {
     pub fn new_with_capacity(vault_dir: PathBuf, capacity: usize) -> Result<Self, StoreError> {
         let paths = VaultPaths::new(vault_dir.clone());
         let lock = VaultLock::acquire(paths.root())?;
-        let worker = StoreWorker::start(vault_dir, capacity);
+        let worker =
+            StoreWorker::start(paths.root().to_path_buf(), capacity).map_err(VaultError::Io)?;
 
         Ok(Self {
             paths,
@@ -91,14 +93,35 @@ impl Store {
         self.worker.try_submit(job)
     }
 
+    pub fn set_watch_targets(&mut self, targets: worker::WatchTargets) {
+        self.worker.set_watch_targets(targets);
+    }
+
+    /// Registers an adapter wakeup; invoked only for a new storage/watcher result.
+    pub fn set_event_waker(&mut self, callback: worker::EventWaker) {
+        self.worker.set_event_waker(callback);
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.worker.is_running()
+    }
+
     /// Drains all available asynchronous store events produced by completed jobs.
     pub fn poll_events(&mut self) -> Vec<StoreEvent> {
         self.worker.poll_events()
     }
 
     /// Shuts down the store worker, guaranteeing that all accepted durable jobs are completed.
-    pub fn shutdown(mut self) -> Result<(), StoreError> {
+    pub fn shutdown(mut self) -> Result<Vec<StoreEvent>, StoreError> {
         self.worker.shutdown();
-        Ok(())
+        Ok(self.worker.poll_events())
+    }
+}
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Struct field drop order must never unlock before accepted disk jobs drain.
+        self.worker.shutdown();
+        self._lock.take();
     }
 }

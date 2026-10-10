@@ -58,6 +58,7 @@ pub struct RowModel {
     items: Vec<RowItem>,
     visible_indices: Vec<usize>,
     selected_visible_idx: usize,
+    filter: String,
 }
 
 impl RowModel {
@@ -70,6 +71,17 @@ impl RowModel {
         self.items = items;
         self.selected_visible_idx = 0;
         self.recompute_visibility();
+    }
+
+    /// Literal panel filtering uses the same parsed `/` query as editor search.
+    pub fn set_filter(&mut self, query: &str) {
+        self.filter.clear();
+        self.filter.push_str(query);
+        self.selected_visible_idx = 0;
+        self.recompute_visibility();
+    }
+    pub fn filter(&self) -> &str {
+        &self.filter
     }
 
     /// Total count of all items (visible and collapsed).
@@ -118,7 +130,8 @@ impl RowModel {
 
         match m {
             Move::Down(n) => {
-                self.selected_visible_idx = (self.selected_visible_idx + n).min(count - 1);
+                self.selected_visible_idx =
+                    (self.selected_visible_idx.saturating_add(n)).min(count - 1);
             }
             Move::Up(n) => {
                 self.selected_visible_idx = self.selected_visible_idx.saturating_sub(n);
@@ -246,7 +259,9 @@ impl RowModel {
                 }
             }
 
-            self.visible_indices.push(i);
+            if self.filter.is_empty() || item.title.contains(&self.filter) {
+                self.visible_indices.push(i);
+            }
 
             if item.is_folder && item.is_collapsed {
                 collapsed_depth_cutoff = Some(item.depth);

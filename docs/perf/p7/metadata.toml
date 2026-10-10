@@ -1,3 +1,6 @@
+# Historical headless run. Host/display/profile fields below were hardcoded by
+# the old generator and are not verified native environment measurements.
+# This file does not certify GUI budgets or v1 readiness; see summary.md.
 # Performance Test Run Metadata (Stage P7 / T13)
 # Generated automatically on benchmark completion.
 

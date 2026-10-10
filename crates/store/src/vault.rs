@@ -1,6 +1,6 @@
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 
 /// Errors relating to vault operations and paths.
@@ -45,6 +45,13 @@ pub struct VaultPaths {
 impl VaultPaths {
     /// Creates a new `VaultPaths` manager for the given vault root.
     pub fn new(root: PathBuf) -> Self {
+        let root = root.canonicalize().unwrap_or_else(|_| {
+            if root.is_absolute() {
+                root
+            } else {
+                std::env::current_dir().unwrap_or_default().join(root)
+            }
+        });
         let truff_dir = root.join(".truff");
         let recovery_dir = truff_dir.join("recovery");
         let trash_dir = truff_dir.join("trash");
@@ -84,9 +91,7 @@ impl VaultPaths {
                 Component::Normal(c) => normalized.push(c),
                 Component::CurDir => {}
                 Component::ParentDir => {
-                    if !normalized.pop() {
-                        return Err(VaultError::PathOutsideVault(rel.to_path_buf()));
-                    }
+                    return Err(VaultError::PathOutsideVault(rel.to_path_buf()));
                 }
                 Component::RootDir | Component::Prefix(_) => {
                     // Absolute path: check if inside root
@@ -97,7 +102,25 @@ impl VaultPaths {
                 }
             }
         }
-        Ok(self.root.join(normalized))
+        if normalized.as_os_str().is_empty()
+            || normalized.components().next()
+                == Some(Component::Normal(std::ffi::OsStr::new(".truff")))
+        {
+            return Err(VaultError::PathOutsideVault(rel.to_path_buf()));
+        }
+        let mut checked = self.root.clone();
+        for component in normalized.components() {
+            checked.push(component);
+            match fs::symlink_metadata(&checked) {
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Err(VaultError::PathOutsideVault(rel.to_path_buf()));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(checked)
     }
 
     /// Strips the vault root prefix from an absolute path.
@@ -109,53 +132,43 @@ impl VaultPaths {
 
 /// Advisory lock file preventing multiple Truff instances from conflicting on the same vault.
 pub struct VaultLock {
-    lock_file: PathBuf,
+    // The same inode must survive unlock; unlinking would let a third owner bypass a waiter.
+    _file: File,
 }
 
 impl VaultLock {
-    /// Acquires an advisory lock for the vault at `.truff/vault.lock`.
     pub fn acquire(vault_root: &Path) -> Result<Self, VaultError> {
         let truff_dir = vault_root.join(".truff");
-        fs::create_dir_all(&truff_dir)?;
-        let lock_file = truff_dir.join("vault.lock");
-
-        if lock_file.exists()
-            && let Ok(contents) = fs::read_to_string(&lock_file)
-            && let Ok(pid) = contents.trim().parse::<u32>()
-        {
-            // Check if process with PID is alive on Unix
-            #[cfg(unix)]
-            {
-                // kill(pid, 0) checks if process is alive
-                let is_alive = unsafe { libc_kill_check(pid) };
-                if is_alive {
-                    return Err(VaultError::LockBusy { pid });
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                return Err(VaultError::LockBusy { pid });
-            }
+        if fs::symlink_metadata(&truff_dir).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(VaultError::PathOutsideVault(truff_dir));
         }
-
-        let pid = std::process::id();
-        let mut f = File::create(&lock_file)?;
-        writeln!(f, "{pid}")?;
-        f.sync_all()?;
-
-        Ok(Self { lock_file })
+        fs::create_dir_all(&truff_dir)?;
+        let lock_path = truff_dir.join("vault.lock");
+        if fs::symlink_metadata(&lock_path).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(VaultError::PathOutsideVault(lock_path));
+        }
+        let mut file = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_path)?;
+        if let Err(error) = file.try_lock() {
+            if matches!(error, std::fs::TryLockError::WouldBlock) {
+                let mut contents = String::new();
+                Read::by_ref(&mut file)
+                    .take(32)
+                    .read_to_string(&mut contents)?;
+                return Err(VaultError::LockBusy {
+                    pid: contents.trim().parse().unwrap_or(0),
+                });
+            }
+            return Err(VaultError::Io(io::Error::other(error)));
+        }
+        file.set_len(0)?;
+        file.rewind()?;
+        writeln!(file, "{}", std::process::id())?;
+        file.sync_all()?;
+        Ok(Self { _file: file })
     }
-}
-
-impl Drop for VaultLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.lock_file);
-    }
-}
-
-#[cfg(unix)]
-unsafe fn libc_kill_check(pid: u32) -> bool {
-    // libc::kill(pid as i32, 0)
-    // In safe std Rust without libc crate, /proc/<pid> check is available on Linux:
-    Path::new(&format!("/proc/{pid}")).exists()
 }

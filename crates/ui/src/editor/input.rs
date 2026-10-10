@@ -6,10 +6,10 @@
 //! - Grapheme cluster preservation on all edits and motions.
 
 use truff_core::Buffer;
+use truff_core::BytePos;
 use truff_core::text::{ChangeSet, EditError, Transaction};
-use unicode_segmentation::UnicodeSegmentation;
 
-use super::layout::snap_to_grapheme_boundary;
+use truff_core::vim::motion::snap_grapheme;
 
 /// Actions that can be performed on the editor buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +23,10 @@ pub enum EditorInput {
     ImeCancel,
     /// IME text commit. Must be inserted into the buffer exactly once.
     ImeCommit(String),
+    ImeDeleteSurrounding {
+        before_chars: usize,
+        after_chars: usize,
+    },
     /// Plain text insertion (e.g. keyboard typing).
     InsertText(String),
     /// Backspace (delete previous grapheme or selection).
@@ -76,6 +80,24 @@ impl InputAdapter {
         selection: &mut Option<(usize, usize)>,
         input: EditorInput,
     ) -> Result<Option<ChangeSet>, EditError> {
+        if !matches!(
+            input,
+            EditorInput::ImePreedit { .. } | EditorInput::ImeCancel
+        ) {
+            for position in
+                std::iter::once(*cursor).chain(selection.iter().flat_map(|&(a, b)| [a, b]))
+            {
+                if position > buffer.byte_len() {
+                    return Err(EditError::InvalidByteRange {
+                        range: position..position,
+                        len: buffer.byte_len(),
+                    });
+                }
+                if !buffer.is_char_boundary(position) {
+                    return Err(EditError::NotCharBoundary { pos: position });
+                }
+            }
+        }
         match input {
             EditorInput::ImePreedit { text, cursor: cur } => {
                 if text.is_empty() {
@@ -99,6 +121,25 @@ impl InputAdapter {
                     return Ok(None);
                 }
                 let changes = self.insert_str(buffer, cursor, selection, &commit_text)?;
+                Ok(Some(changes))
+            }
+            EditorInput::ImeDeleteSurrounding {
+                before_chars,
+                after_chars,
+            } => {
+                let range = truff_core::vim::execute::surrounding_char_range(
+                    buffer,
+                    *cursor,
+                    before_chars,
+                    after_chars,
+                );
+                if range.is_empty() {
+                    return Ok(None);
+                }
+                let start = range.start;
+                let changes = buffer.apply(Transaction::delete(range))?;
+                *cursor = start;
+                *selection = None;
                 Ok(Some(changes))
             }
             EditorInput::InsertText(text) => {
@@ -127,9 +168,8 @@ impl InputAdapter {
             }
             EditorInput::SetSelection { anchor, head } => {
                 let max_len = buffer.byte_len();
-                let text = buffer.as_str();
-                let snapped_anchor = snap_to_grapheme_boundary(&text, anchor.min(max_len));
-                let snapped_head = snap_to_grapheme_boundary(&text, head.min(max_len));
+                let snapped_anchor = snap_grapheme(buffer, anchor.min(max_len));
+                let snapped_head = snap_grapheme(buffer, head.min(max_len));
                 *cursor = snapped_head;
                 *selection = Some((
                     snapped_anchor.min(snapped_head),
@@ -152,15 +192,12 @@ impl InputAdapter {
         selection: &mut Option<(usize, usize)>,
         s: &str,
     ) -> Result<ChangeSet, EditError> {
-        let tx = if let Some((start, end)) = selection.take() {
-            *cursor = start + s.len();
-            Transaction::replace(start..end, s)
-        } else {
-            let cur = *cursor;
-            *cursor = cur + s.len();
-            Transaction::insert(cur, s)
-        };
-        buffer.apply(tx)
+        let (start, end) = selection.unwrap_or((*cursor, *cursor));
+        let tx = Transaction::replace(start..end, s);
+        let changes = buffer.apply(tx)?;
+        *cursor = start + s.len();
+        *selection = None;
+        Ok(changes)
     }
 
     fn delete_backward(
@@ -169,10 +206,11 @@ impl InputAdapter {
         cursor: &mut usize,
         selection: &mut Option<(usize, usize)>,
     ) -> Result<Option<ChangeSet>, EditError> {
-        if let Some((start, end)) = selection.take() {
+        if let Some((start, end)) = *selection {
+            let changes = buffer.apply(Transaction::delete(start..end))?;
             *cursor = start;
-            let tx = Transaction::delete(start..end);
-            return buffer.apply(tx).map(Some);
+            *selection = None;
+            return Ok(Some(changes));
         }
 
         let cur = *cursor;
@@ -180,19 +218,12 @@ impl InputAdapter {
             return Ok(None);
         }
 
-        let text = buffer.as_str();
-        let mut prev = 0;
-        for (idx, cluster) in text.grapheme_indices(true) {
-            let next = idx + cluster.len();
-            if next >= cur {
-                prev = idx;
-                break;
-            }
-        }
-
+        let prev = buffer
+            .grapheme_prev(BytePos::new(cur))
+            .map_or(0, BytePos::get);
+        let changes = buffer.apply(Transaction::delete(prev..cur))?;
         *cursor = prev;
-        let tx = Transaction::delete(prev..cur);
-        buffer.apply(tx).map(Some)
+        Ok(Some(changes))
     }
 
     fn delete_forward(
@@ -201,10 +232,11 @@ impl InputAdapter {
         cursor: &mut usize,
         selection: &mut Option<(usize, usize)>,
     ) -> Result<Option<ChangeSet>, EditError> {
-        if let Some((start, end)) = selection.take() {
+        if let Some((start, end)) = *selection {
+            let changes = buffer.apply(Transaction::delete(start..end))?;
             *cursor = start;
-            let tx = Transaction::delete(start..end);
-            return buffer.apply(tx).map(Some);
+            *selection = None;
+            return Ok(Some(changes));
         }
 
         let cur = *cursor;
@@ -212,18 +244,11 @@ impl InputAdapter {
             return Ok(None);
         }
 
-        let text = buffer.as_str();
-        let mut next = cur;
-        for (idx, cluster) in text.grapheme_indices(true) {
-            if idx >= cur {
-                next = idx + cluster.len();
-                break;
-            }
-        }
-
+        let next = buffer
+            .grapheme_next(BytePos::new(cur))
+            .map_or(cur, BytePos::get);
         if next > cur {
-            let tx = Transaction::delete(cur..next);
-            buffer.apply(tx).map(Some)
+            buffer.apply(Transaction::delete(cur..next)).map(Some)
         } else {
             Ok(None)
         }
@@ -250,15 +275,9 @@ impl InputAdapter {
             return;
         }
 
-        let text = buffer.as_str();
-        let mut target = 0;
-        for (idx, cluster) in text.grapheme_indices(true) {
-            let end = idx + cluster.len();
-            if end >= cur {
-                target = idx;
-                break;
-            }
-        }
+        let target = buffer
+            .grapheme_prev(BytePos::new(cur))
+            .map_or(0, BytePos::get);
 
         *cursor = target;
         if extend_selection && let Some((anchor, _)) = *selection {
@@ -287,14 +306,9 @@ impl InputAdapter {
             return;
         }
 
-        let text = buffer.as_str();
-        let mut target = cur;
-        for (idx, cluster) in text.grapheme_indices(true) {
-            if idx >= cur {
-                target = idx + cluster.len();
-                break;
-            }
-        }
+        let target = buffer
+            .grapheme_next(BytePos::new(cur))
+            .map_or(cur, BytePos::get);
 
         *cursor = target;
         if extend_selection && let Some((anchor, _)) = *selection {

@@ -4,6 +4,46 @@ use truff_ui::rows::VirtualRows;
 use truff_ui::shell::{Focus, Shell, ShellAction};
 
 #[test]
+fn requesting_write_does_not_mark_unsaved_text_clean() {
+    use truff_core::vim::{InputContext, InputResult, VimState};
+    use truff_core::workspace::{View, ViewId};
+    let mut buffer = truff_core::Buffer::from_str("");
+    let mut view = View::new(ViewId::next(), buffer.id());
+    let mut vim = VimState::new();
+    for key in [
+        Key::Char('i'),
+        Key::Char('x'),
+        Key::Esc,
+        Key::Char(':'),
+        Key::Char('w'),
+        Key::Enter,
+    ] {
+        vim.feed_key(
+            key,
+            InputContext::Editor {
+                view_id: view.id(),
+                buffer: &mut buffer,
+                view: &mut view,
+            },
+        );
+    }
+    // A failed or still pending write must continue to block :q.
+    for key in [Key::Char(':'), Key::Char('q'), Key::Enter] {
+        let action = vim.feed_key(
+            key,
+            InputContext::Editor {
+                view_id: view.id(),
+                buffer: &mut buffer,
+                view: &mut view,
+            },
+        );
+        if key == Key::Enter {
+            assert!(matches!(action, InputResult::Error(_)), "{action:?}");
+        }
+    }
+}
+
+#[test]
 fn row_motion_shared() {
     let mut model = RowModel::new();
     let mut items = Vec::new();

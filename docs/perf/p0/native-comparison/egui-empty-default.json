@@ -1,0 +1,96 @@
+[
+  {
+    "backend": "default",
+    "boundary": "whole native GUI process",
+    "note_bytes": 0,
+    "startup_seconds": 4.167641723004635,
+    "window_size": [
+      956,
+      1047
+    ],
+    "status": "Name:\ttruff-egui-prob\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1695111\nNgid:\t0\nPid:\t1695111\nPPid:\t1695108\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t98 949 985 995 998 1000 \nNStgid:\t1695111\nNSpid:\t1695111\nNSpgid:\t1695097\nNSsid:\t1695097\nKthread:\t0\nVmPeak:\t  658100 kB\nVmSize:\t  658092 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  317592 kB\nVmRSS:\t  315744 kB\nRssAnon:\t   72260 kB\nRssFile:\t  230864 kB\nRssShmem:\t   12620 kB\nVmData:\t   77648 kB\nVmStk:\t     136 kB\nVmExe:\t    5988 kB\nVmLib:\t  226512 kB\nVmPTE:\t     352 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t3\nSigQ:\t0/127173\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000800000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tfff\nCpus_allowed_list:\t0-11\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t147\nnonvoluntary_ctxt_switches:\t5\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n",
+    "smaps_rollup": "40693000-7ffd460ae000 ---p 00000000 00:00 0                              [rollup]\nRss:              310220 kB\nPss:              137774 kB\nPss_Dirty:         84724 kB\nPss_Anon:          72260 kB\nPss_File:          58433 kB\nPss_Shmem:          7080 kB\nShared_Clean:     225320 kB\nShared_Dirty:         20 kB\nPrivate_Clean:       160 kB\nPrivate_Dirty:     84720 kB\nReferenced:       310220 kB\nAnonymous:         72260 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:     12288 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:    206848 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n",
+    "largest_rss_mappings_kib": [
+      [
+        "/usr/lib/libnvidia-gpucomp.so.615.71.09",
+        95816
+      ],
+      [
+        "/usr/lib/libLLVM.so.23.1",
+        79656
+      ],
+      [
+        "[heap]",
+        37252
+      ],
+      [
+        "[anonymous]",
+        25988
+      ],
+      [
+        "/usr/lib/libnvidia-eglcore.so.615.71.09",
+        24880
+      ],
+      [
+        "/usr/lib/libgallium-26.2.4-arch1.1.so",
+        20648
+      ],
+      [
+        "/tmp/truff-egui-probe/target/release/truff-egui-probe",
+        7432
+      ],
+      [
+        "/dev/nvidiactl",
+        5392
+      ],
+      [
+        "/usr/lib/libicudata.so.78.3",
+        2068
+      ],
+      [
+        "/usr/lib/libstdc++.so.6.0.36",
+        1508
+      ],
+      [
+        "/usr/lib/libc.so.6",
+        1492
+      ],
+      [
+        "/usr/lib/libEGL_nvidia.so.615.71.09",
+        960
+      ],
+      [
+        "/usr/lib/libm.so.6",
+        672
+      ],
+      [
+        "/usr/lib/libnvidia-glsi.so.615.71.09",
+        536
+      ],
+      [
+        "/usr/lib/libicuuc.so.78.3",
+        460
+      ],
+      [
+        "/usr/lib/libxkbcommon.so.0.13.2",
+        380
+      ],
+      [
+        "/usr/lib/libGLdispatch.so.0.0.0",
+        356
+      ],
+      [
+        "/usr/lib/libdbus-1.so.3.38.3",
+        328
+      ],
+      [
+        "/usr/lib/libsystemd.so.0.45.0",
+        284
+      ],
+      [
+        "/usr/lib/libX11.so.6.4.0",
+        272
+      ]
+    ]
+  }
+]

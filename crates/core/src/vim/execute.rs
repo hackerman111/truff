@@ -1,16 +1,20 @@
 use std::collections::HashMap;
-
+mod editing;
 use super::motion::{
-    FindKind, Motion, eval_motion, eval_operator_motion_range, eval_text_object_range,
+    FindKind, Motion, SyntaxObjectRange, eval_motion, eval_operator_motion_range,
+    eval_text_object_range, line_content_end, literal_search,
 };
 use super::parser::{Command, InsertEntry, Operator, ParseResult, VimParser};
 use super::{Key, Mode};
-use crate::commands::Action;
+use crate::commands::{Action, CommandId};
 use crate::config::LimitsConfig;
-use crate::text::{Buffer, BytePos, Register, RegisterKind, Registers, Transaction};
+use crate::navigation::{Move, RowModel};
+use crate::text::{
+    Buffer, BytePos, ChangeSet, EditError, Register, RegisterKind, Registers, Transaction,
+    UndoGroup,
+};
 use crate::workspace::views::{View, ViewId};
 
-/// Context passed to `VimState::feed_key` representing the active target.
 pub enum InputContext<'a> {
     Editor {
         view_id: ViewId,
@@ -22,10 +26,9 @@ pub enum InputContext<'a> {
         selected_index: usize,
         total_rows: usize,
     },
+    Rows(&'a mut RowModel),
     None,
 }
-
-/// Result returned from feeding a key to `VimState`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputResult {
     Consumed,
@@ -34,25 +37,42 @@ pub enum InputResult {
     Actions(Vec<Action>),
     Ignored,
     Error(String),
+    /// Renderer resolves wrapped row movement in source coordinates.
+    VisualRow {
+        down: bool,
+        count: usize,
+    },
+    Command {
+        id: CommandId,
+        argument: String,
+    },
 }
 
-/// Central Vim state machine for the application.
+/// One parsed command or committed text event is one macro instruction.
 pub struct VimState {
     pub mode: Mode,
     parser: VimParser,
     registers: Registers,
     selected_reg: Option<char>,
-    macros: HashMap<char, Vec<Key>>,
+    macros: HashMap<char, Vec<Command>>,
     recording_macro: Option<char>,
-    macro_buffer: Vec<Key>,
+    macro_buffer: Vec<Command>,
+    macro_bytes: usize,
+    macro_text_budget: usize,
     macro_stack: Vec<char>,
     total_macro_steps: usize,
     last_find: Option<(FindKind, char)>,
-    last_edit: Option<Vec<Key>>,
-    current_edit: Vec<Key>,
+    last_search: Option<(String, bool)>,
+    last_edit: Option<Vec<Command>>,
+    current_edit: Vec<Command>,
+    current_edit_bytes: usize,
+    insert_group: Option<UndoGroup>,
     last_error: Option<String>,
+    changes: Vec<ChangeSet>,
+    syntax_revision: Option<u64>,
+    syntax_objects: Vec<SyntaxObjectRange>,
+    replaying_edit: bool,
 }
-
 impl Default for VimState {
     fn default() -> Self {
         Self {
@@ -63,483 +83,725 @@ impl Default for VimState {
             macros: HashMap::new(),
             recording_macro: None,
             macro_buffer: Vec::new(),
+            macro_bytes: 0,
+            macro_text_budget: LimitsConfig::DEFAULT_MAX_HISTORY_BYTES,
             macro_stack: Vec::new(),
             total_macro_steps: 0,
             last_find: None,
+            last_search: None,
             last_edit: None,
             current_edit: Vec::new(),
+            current_edit_bytes: 0,
+            insert_group: None,
             last_error: None,
+            changes: Vec::new(),
+            syntax_revision: None,
+            syntax_objects: Vec::new(),
+            replaying_edit: false,
         }
     }
 }
-
 impl VimState {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Returns the length of recorded commands in macro register `reg`.
-    pub fn macro_length(&self, reg: char) -> usize {
-        self.macros.get(&reg).map_or(0, |v| v.len())
+    pub fn cancel_input(&mut self) {
+        if !self.current_edit.is_empty() {
+            let edit = std::mem::take(&mut self.current_edit);
+            if !self.replaying_edit {
+                self.last_edit = Some(edit);
+            }
+        }
+        self.current_edit_bytes = 0;
+        self.mode = Mode::Normal;
+        self.parser.reset();
+        self.selected_reg = None;
+        self.insert_group = None;
+        self.last_error = None;
     }
-
-    /// Returns the last error message, if any.
+    pub fn macro_length(&self, reg: char) -> usize {
+        self.macros.get(&reg).map_or(0, Vec::len)
+    }
     pub fn last_error(&self) -> Option<&str> {
         self.last_error.as_deref()
     }
-
-    /// Feeds a key with the given input context.
+    pub fn search_query(&self) -> Option<&str> {
+        self.parser.search_query()
+    }
+    pub fn take_changes(&mut self) -> Vec<ChangeSet> {
+        std::mem::take(&mut self.changes)
+    }
+    pub fn set_syntax_objects(&mut self, revision: u64, objects: Vec<SyntaxObjectRange>) {
+        self.syntax_revision = Some(revision);
+        self.syntax_objects = objects;
+    }
+    pub fn clear_syntax_objects(&mut self) {
+        self.syntax_revision = None;
+        self.syntax_objects.clear();
+    }
+    pub fn syntax_object_ranges(&self, revision: u64) -> Option<&[SyntaxObjectRange]> {
+        (self.syntax_revision == Some(revision)).then_some(self.syntax_objects.as_slice())
+    }
+    pub fn text_object_range(
+        &self,
+        buffer: &Buffer,
+        position: BytePos,
+        obj: super::motion::TextObject,
+    ) -> Result<std::ops::Range<usize>, String> {
+        if matches!(
+            obj.target,
+            super::motion::TextObjectTarget::MarkdownLink
+                | super::motion::TextObjectTarget::MarkdownHeading
+                | super::motion::TextObjectTarget::MarkdownCodeBlock
+        ) {
+            if self.syntax_revision != Some(buffer.revision()) {
+                return Err("Syntax object ranges unavailable at this revision".into());
+            }
+            self.syntax_objects
+                .iter()
+                .filter(|r| {
+                    r.target == obj.target
+                        && r.around.start <= position.get()
+                        && position.get() < r.around.end
+                })
+                .min_by_key(|r| r.around.len())
+                .map(|r| {
+                    if obj.kind == super::motion::TextObjectKind::Inner {
+                        r.inner.clone()
+                    } else {
+                        r.around.clone()
+                    }
+                })
+                .ok_or_else(|| "Syntax object target unavailable".into())
+        } else {
+            eval_text_object_range(buffer, position, obj)
+                .ok_or_else(|| "Text object target unavailable".into())
+        }
+    }
+    pub fn apply_visual_row(&mut self, view: &mut View, target: BytePos) {
+        let anchor = if matches!(self.mode, Mode::VisualChar | Mode::VisualLine) {
+            view.anchor()
+        } else {
+            target
+        };
+        view.set_cursor(anchor, target);
+    }
+    pub fn target_range(
+        &mut self,
+        range: std::ops::Range<usize>,
+        ctx: InputContext<'_>,
+    ) -> InputResult {
+        if let Some(op) = self.parser.take_operator() {
+            return self.run_command(
+                Command::OperatorRange {
+                    op,
+                    range,
+                    linewise: false,
+                },
+                ctx,
+            );
+        }
+        if let InputContext::Editor { buffer, view, .. } = ctx {
+            if range.start > range.end
+                || range.end > buffer.byte_len()
+                || !buffer.is_char_boundary(range.start)
+                || !buffer.is_char_boundary(range.end)
+            {
+                return self.error("Invalid source target range");
+            }
+            if matches!(self.mode, Mode::VisualChar | Mode::VisualLine) {
+                let end = buffer
+                    .grapheme_prev(BytePos::new(range.end))
+                    .unwrap_or(BytePos::new(range.start));
+                view.set_cursor(BytePos::new(range.start), end);
+            } else {
+                let p = BytePos::new(range.start);
+                view.set_cursor_with_jump(p, p);
+            }
+            InputResult::Consumed
+        } else {
+            self.error("Editor target unavailable")
+        }
+    }
+    fn error(&mut self, message: impl Into<String>) -> InputResult {
+        let message = message.into();
+        self.last_error = Some(message.clone());
+        InputResult::Error(message)
+    }
+    fn record(&mut self, cmd: &Command) -> Result<(), String> {
+        if self.recording_macro.is_none() || !self.macro_stack.is_empty() {
+            return Ok(());
+        }
+        let bytes = match cmd {
+            Command::TextCommit(t)
+            | Command::ColonCommand(t)
+            | Command::Search { query: t, .. } => t.len(),
+            _ => 0,
+        };
+        if self.macro_buffer.len() >= LimitsConfig::DEFAULT_MAX_MACRO_COMMANDS
+            || self.macro_bytes.saturating_add(bytes) > self.macro_text_budget
+        {
+            self.recording_macro = None;
+            self.macro_buffer.clear();
+            self.macro_bytes = 0;
+            return Err(
+                "Macro definition exceeds command or text memory limit; recording discarded".into(),
+            );
+        }
+        self.macro_bytes += bytes;
+        self.macro_buffer.push(cmd.clone());
+        Ok(())
+    }
     pub fn feed_key(&mut self, key: Key, ctx: InputContext<'_>) -> InputResult {
         self.last_error = None;
-
-        // In Insert mode, handle text insertion directly
         if self.mode == Mode::Insert {
-            return self.handle_insert_key(key, ctx);
+            let cmd = if let Key::Char(c) = key {
+                Command::TextCommit(c.to_string())
+            } else {
+                Command::InsertKey(key)
+            };
+            return self.run_command(cmd, ctx);
         }
-
-        // Handle Esc in Normal or Visual mode
-        if key == Key::Esc {
-            self.mode = Mode::Normal;
-            self.parser.reset();
-            if let InputContext::Editor { view, .. } = ctx {
-                view.set_cursor(view.head(), view.head());
-            }
+        if key == Key::Char('q') && self.recording_macro.is_some() && self.parser.is_idle() {
+            let reg = self.recording_macro.take().unwrap();
+            self.macros
+                .insert(reg, std::mem::take(&mut self.macro_buffer));
+            self.macro_bytes = 0;
             return InputResult::Consumed;
         }
-
-        // Handle macro recording key capture
-        if let Some(rec_reg) = self.recording_macro {
-            if key == Key::Char('q') && self.macro_buffer.is_empty() {
-                // Initial 'q' was start; second 'q' handled in parser
-            } else if key == Key::Char('q') {
-                // Stop recording
-                let recorded = std::mem::take(&mut self.macro_buffer);
-                self.macros.insert(rec_reg, recorded);
-                self.recording_macro = None;
-                return InputResult::Consumed;
-            } else if self.macro_buffer.len() < LimitsConfig::DEFAULT_MAX_MACRO_COMMANDS {
-                self.macro_buffer.push(key);
-            }
-        }
-
         match self.parser.feed(key, self.mode) {
             ParseResult::Incomplete => InputResult::Incomplete,
             ParseResult::Invalid => InputResult::Ignored,
-            ParseResult::Complete(cmd) => self.execute_command(cmd, ctx),
+            ParseResult::Overflow => self.error("Vim count arithmetic overflow"),
+            ParseResult::TextLimit => self.error("Vim query text limit exceeded"),
+            ParseResult::Complete(cmd) => self.run_command(cmd, ctx),
         }
     }
-
-    fn handle_insert_key(&mut self, key: Key, ctx: InputContext<'_>) -> InputResult {
-        if self.recording_macro.is_some()
-            && self.macro_buffer.len() < LimitsConfig::DEFAULT_MAX_MACRO_COMMANDS
-        {
-            self.macro_buffer.push(key);
+    /// Canonical Text/IME/Paste event. This never splits a multi-character commit into keys.
+    pub fn commit_text(&mut self, text: &str, ctx: InputContext<'_>) -> InputResult {
+        if text.is_empty() {
+            return InputResult::Consumed;
         }
-
-        self.current_edit.push(key);
-
-        match key {
-            Key::Esc => {
-                self.mode = Mode::Normal;
-                if let InputContext::Editor { buffer, view, .. } = ctx {
-                    // In Vim, moving out of Insert mode moves cursor left one grapheme
-                    let head = view.head();
-                    let line_start = buffer.byte_of_line(buffer.line_of_byte(head.get()));
-                    if head.get() > line_start
-                        && let Some(prev) = buffer.grapheme_prev(head)
+        if text.len() > LimitsConfig::DEFAULT_MAX_HISTORY_BYTES {
+            return self.error("Committed text repeat memory limit exceeded");
+        }
+        self.run_command(Command::TextCommit(text.into()), ctx)
+    }
+    pub fn run_binding(&mut self, mut cmd: Command, ctx: InputContext<'_>) -> InputResult {
+        let count = self.parser.take_count();
+        match &mut cmd {
+            Command::Motion { count: n, .. }
+            | Command::OperatorMotion { count: n, .. }
+            | Command::OperatorTextObject { count: n, .. }
+            | Command::DeleteChar(n)
+            | Command::Paste { count: n, .. } => *n = count,
+            _ => {}
+        }
+        self.run_command(cmd, ctx)
+    }
+    pub fn run_command(&mut self, cmd: Command, ctx: InputContext<'_>) -> InputResult {
+        if let InputContext::Editor { buffer, view, .. } = &ctx {
+            if [view.anchor().get(), view.head().get()]
+                .into_iter()
+                .any(|p| p > buffer.byte_len() || !buffer.is_char_boundary(p))
+            {
+                return self.error("Editor cursor is not a valid source boundary");
+            }
+        }
+        if !self.macro_stack.is_empty() {
+            self.total_macro_steps += 1;
+            if self.total_macro_steps > LimitsConfig::DEFAULT_MAX_MACRO_STEPS {
+                return self.error("Macro execution step limit exceeded");
+            }
+        }
+        let repeat_command = if let InputContext::Editor { buffer, view, .. } = &ctx {
+            let resolved = match &cmd {
+                Command::OperatorSelection(op) => {
+                    let (range, linewise) = Self::selection_range(buffer, view, self.mode);
+                    Some((*op, range, linewise))
+                }
+                Command::OperatorRange {
+                    op,
+                    range,
+                    linewise,
+                } => Some((*op, range.clone(), *linewise)),
+                _ => None,
+            };
+            resolved
+                .map(|(op, range, linewise)| {
+                    let mut graphemes = 0;
+                    let mut cursor = BytePos::new(range.start);
+                    if range.start <= range.end
+                        && range.end <= buffer.byte_len()
+                        && buffer.is_char_boundary(range.start)
                     {
-                        view.set_cursor(prev, prev);
+                        while cursor.get() < range.end {
+                            let Some(next) = buffer.grapheme_next(cursor) else {
+                                break;
+                            };
+                            graphemes += 1;
+                            cursor = next;
+                        }
                     }
-                }
-                self.last_edit = Some(std::mem::take(&mut self.current_edit));
-                InputResult::Consumed
-            }
-            Key::Backspace => {
-                if let InputContext::Editor { buffer, view, .. } = ctx {
-                    let head = view.head();
-                    if let Some(prev) = buffer.grapheme_prev(head) {
-                        let _ = buffer.apply(Transaction::delete(prev.get()..head.get()));
-                        view.set_cursor(prev, prev);
+                    let lines = linewise.then(|| {
+                        buffer.line_of_byte(range.end.saturating_sub(1).max(range.start))
+                            - buffer.line_of_byte(range.start)
+                            + 1
+                    });
+                    Command::OperatorExtent {
+                        op,
+                        graphemes,
+                        lines,
                     }
-                }
-                InputResult::Consumed
-            }
-            Key::Enter => {
-                if let InputContext::Editor { buffer, view, .. } = ctx {
-                    let head = view.head();
-                    let nl = match buffer.line_ending() {
-                        crate::text::LineEnding::Lf => "\n",
-                        crate::text::LineEnding::CrLf => "\r\n",
-                    };
-                    let _ = buffer.apply(Transaction::insert(head.get(), nl));
-                    let new_head = head + nl.len();
-                    view.set_cursor(new_head, new_head);
-                }
-                InputResult::Consumed
-            }
-            Key::Char(c) => {
-                if let InputContext::Editor { buffer, view, .. } = ctx {
-                    let head = view.head();
-                    let mut s = String::new();
-                    s.push(c);
-                    let _ = buffer.apply(Transaction::insert(head.get(), &s));
-                    let new_head = head + s.len();
-                    view.set_cursor(new_head, new_head);
-                }
-                InputResult::Consumed
-            }
-            _ => InputResult::Ignored,
+                })
+                .unwrap_or_else(|| cmd.clone())
+        } else {
+            cmd.clone()
+        };
+        if !matches!(
+            cmd,
+            Command::ToggleMacroRecord(_) | Command::StopMacroRecord
+        ) && let Err(e) = self.record(&repeat_command)
+        {
+            return self.error(e);
         }
+        let is_edit = matches!(
+            cmd,
+            Command::OperatorMotion {
+                op: Operator::Delete | Operator::Change | Operator::Indent | Operator::Dedent,
+                ..
+            } | Command::OperatorTextObject {
+                op: Operator::Delete | Operator::Change | Operator::Indent | Operator::Dedent,
+                ..
+            } | Command::OperatorSelection(
+                Operator::Delete | Operator::Change | Operator::Indent | Operator::Dedent
+            ) | Command::OperatorRange {
+                op: Operator::Delete | Operator::Change | Operator::Indent | Operator::Dedent,
+                ..
+            } | Command::OperatorExtent {
+                op: Operator::Delete | Operator::Change | Operator::Indent | Operator::Dedent,
+                ..
+            } | Command::DeleteChar(_)
+                | Command::Paste { .. }
+                | Command::Insert(_)
+                | Command::TextCommit(_)
+                | Command::DeleteSurrounding { .. }
+        );
+        let starts_insert = matches!(
+            cmd,
+            Command::Insert(_)
+                | Command::OperatorMotion {
+                    op: Operator::Change,
+                    ..
+                }
+                | Command::OperatorTextObject {
+                    op: Operator::Change,
+                    ..
+                }
+                | Command::OperatorSelection(Operator::Change)
+                | Command::OperatorRange {
+                    op: Operator::Change,
+                    ..
+                }
+                | Command::OperatorExtent {
+                    op: Operator::Change,
+                    ..
+                }
+        );
+        if starts_insert {
+            self.insert_group = Some(UndoGroup::next());
+            self.current_edit = vec![repeat_command.clone()];
+            self.current_edit_bytes = command_text_bytes(&repeat_command);
+        } else if self.mode == Mode::Insert && !self.replaying_edit {
+            let added = command_text_bytes(&cmd);
+            if self.current_edit_bytes.saturating_add(added)
+                > LimitsConfig::DEFAULT_MAX_HISTORY_BYTES
+                || self.current_edit.len() >= 10000
+            {
+                return self.error("Insert repeat memory limit exceeded");
+            }
+            self.current_edit_bytes += added;
+            self.current_edit.push(cmd.clone());
+        }
+        let saved = repeat_command;
+        let res = self.execute_command(cmd, ctx);
+        if is_edit
+            && self.mode != Mode::Insert
+            && !self.replaying_edit
+            && !matches!(res, InputResult::Error(_))
+        {
+            self.last_edit = Some(vec![saved]);
+        }
+        res
     }
-
+    fn selection_range(buffer: &Buffer, view: &View, mode: Mode) -> (std::ops::Range<usize>, bool) {
+        let start = view.anchor().get().min(view.head().get());
+        let end = view.anchor().get().max(view.head().get());
+        let linewise = mode == Mode::VisualLine;
+        let range = if linewise {
+            let first = buffer.line_of_byte(start);
+            let last = buffer.line_of_byte(end);
+            let end = if last + 1 < buffer.line_len() {
+                buffer.byte_of_line(last + 1)
+            } else {
+                buffer.byte_len()
+            };
+            buffer.byte_of_line(first)..end
+        } else {
+            start
+                ..buffer
+                    .grapheme_next(BytePos::new(end))
+                    .map_or(end, BytePos::get)
+        };
+        (range, linewise)
+    }
+    fn apply(
+        &mut self,
+        buffer: &mut Buffer,
+        view: &mut View,
+        mut tx: Transaction,
+    ) -> Result<(), EditError> {
+        if let Some(group) = self.insert_group {
+            tx.undo_group = Some(group);
+        }
+        let explicit = tx.cursor;
+        let changes = buffer.apply(tx)?;
+        view.apply_change_set(&changes);
+        if let Some(cursor) = explicit {
+            view.set_cursor(cursor.anchor, cursor.head);
+        }
+        self.changes.push(changes);
+        Ok(())
+    }
     fn execute_command(&mut self, cmd: Command, mut ctx: InputContext<'_>) -> InputResult {
         match cmd {
             Command::Escape => {
-                self.mode = Mode::Normal;
+                self.cancel_input();
                 if let InputContext::Editor { view, .. } = ctx {
                     view.set_cursor(view.head(), view.head());
                 }
                 InputResult::Consumed
             }
-            Command::Visual(new_mode) => {
-                self.mode = new_mode;
+            Command::Visual(mode) => {
+                self.mode = mode;
                 InputResult::Consumed
             }
             Command::SelectRegister(reg) => {
+                if !reg.is_ascii_alphabetic() && !matches!(reg, '"' | '+' | '*') {
+                    return self.error("Unsupported register name");
+                }
                 self.selected_reg = Some(reg);
                 InputResult::Consumed
             }
             Command::ToggleMacroRecord(reg) => {
-                if self.recording_macro.is_some() {
-                    let prev_reg = self.recording_macro.take().unwrap();
-                    let recorded = std::mem::take(&mut self.macro_buffer);
-                    self.macros.insert(prev_reg, recorded);
-                } else {
-                    self.recording_macro = Some(reg);
-                    self.macro_buffer.clear();
+                if !reg.is_ascii_lowercase() {
+                    return self.error("Macro register must be a-z");
                 }
+                let used = self
+                    .macros
+                    .iter()
+                    .filter(|(name, _)| **name != reg)
+                    .flat_map(|(_, commands)| commands)
+                    .map(command_text_bytes)
+                    .sum::<usize>();
+                self.macro_text_budget =
+                    LimitsConfig::DEFAULT_MAX_HISTORY_BYTES.saturating_sub(used);
+                self.recording_macro = Some(reg);
+                self.macro_buffer.clear();
+                self.macro_bytes = 0;
                 InputResult::Consumed
             }
             Command::StopMacroRecord => {
                 if let Some(reg) = self.recording_macro.take() {
-                    let recorded = std::mem::take(&mut self.macro_buffer);
-                    self.macros.insert(reg, recorded);
+                    self.macros
+                        .insert(reg, std::mem::take(&mut self.macro_buffer));
                 }
                 InputResult::Consumed
             }
             Command::ReplayMacro { reg, count } => {
-                // Recursion check: reject if reg is currently replaying
                 if self.macro_stack.contains(&reg) {
-                    let err = format!("Recursive macro execution detected for register '{reg}'");
-                    self.last_error = Some(err.clone());
-                    return InputResult::Error(err);
+                    return self.error("Recursive macro execution rejected");
                 }
-
-                let keys = match self.macros.get(&reg) {
-                    Some(k) => k.clone(),
-                    None => return InputResult::Consumed,
+                if self.macro_stack.is_empty() {
+                    self.total_macro_steps = 0;
+                }
+                let Some(commands) = self.macros.get(&reg).cloned() else {
+                    return self.error(format!("Macro register '{reg}' unavailable"));
                 };
-
-                if keys.len() > LimitsConfig::DEFAULT_MAX_MACRO_COMMANDS {
-                    let err = format!(
-                        "Macro in register '{reg}' exceeds limit of {} commands",
-                        LimitsConfig::DEFAULT_MAX_MACRO_COMMANDS
-                    );
-                    self.last_error = Some(err.clone());
-                    return InputResult::Error(err);
+                if commands
+                    .len()
+                    .checked_mul(count)
+                    .is_none_or(|steps| steps > LimitsConfig::DEFAULT_MAX_MACRO_STEPS)
+                {
+                    return self.error("Macro execution step limit exceeded");
                 }
-
                 self.macro_stack.push(reg);
                 for _ in 0..count {
-                    for &k in &keys {
-                        self.total_macro_steps += 1;
-                        if self.total_macro_steps > LimitsConfig::DEFAULT_MAX_MACRO_STEPS {
+                    for command in &commands {
+                        let result = self.run_command(command.clone(), reborrow(&mut ctx));
+                        if matches!(
+                            result,
+                            InputResult::Error(_)
+                                | InputResult::Action(_)
+                                | InputResult::Actions(_)
+                                | InputResult::Command { .. }
+                                | InputResult::VisualRow { .. }
+                        ) {
                             self.macro_stack.pop();
-                            let err = "Macro execution halted: step limit exceeded".to_string();
-                            self.last_error = Some(err.clone());
-                            return InputResult::Error(err);
-                        }
-                        // Re-bind context for each replay step
-                        // (if ctx is editor, we borrow it)
-                        if let InputContext::Editor {
-                            view_id,
-                            buffer,
-                            view,
-                        } = &mut ctx
-                        {
-                            let sub_ctx = InputContext::Editor {
-                                view_id: *view_id,
-                                buffer,
-                                view,
-                            };
-                            let res = self.feed_key(k, sub_ctx);
-                            if let InputResult::Error(_) = res {
-                                self.macro_stack.pop();
-                                return res;
-                            }
+                            return result;
                         }
                     }
                 }
                 self.macro_stack.pop();
                 InputResult::Consumed
             }
-            Command::Undo => {
-                if let InputContext::Editor { buffer, view, .. } = ctx
-                    && let Ok(Some(cs)) = buffer.undo()
-                {
-                    if let Some(first_change) = cs.changes.first() {
-                        let pos = BytePos::new(first_change.old_range.start);
-                        view.set_cursor(pos, pos);
-                    } else {
-                        view.apply_change_set(&cs);
-                    }
-                }
-                InputResult::Consumed
-            }
-            Command::Redo => {
-                if let InputContext::Editor { buffer, view, .. } = ctx
-                    && let Ok(Some(cs)) = buffer.redo()
-                {
-                    view.apply_change_set(&cs);
-                }
-                InputResult::Consumed
-            }
             Command::RepeatLastEdit => {
-                if let Some(keys) = self.last_edit.clone() {
-                    for k in keys {
-                        if let InputContext::Editor {
-                            view_id,
-                            buffer,
-                            view,
-                        } = &mut ctx
-                        {
-                            let sub_ctx = InputContext::Editor {
-                                view_id: *view_id,
-                                buffer,
-                                view,
-                            };
-                            self.feed_key(k, sub_ctx);
-                        }
+                let commands = self.last_edit.clone().unwrap_or_default();
+                self.replaying_edit = true;
+                for command in commands {
+                    let result = self.run_command(command, reborrow(&mut ctx));
+                    if matches!(result, InputResult::Error(_)) {
+                        self.replaying_edit = false;
+                        return result;
                     }
                 }
+                self.replaying_edit = false;
                 InputResult::Consumed
+            }
+            Command::Undo | Command::Redo => {
+                let redo = cmd == Command::Redo;
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    match if redo { buffer.redo() } else { buffer.undo() } {
+                        Ok(Some(cs)) => {
+                            view.apply_change_set(&cs);
+                            if !redo
+                                && let Some(start) =
+                                    cs.changes().iter().map(|c| c.old_range.start).min()
+                            {
+                                let pos = BytePos::new(start.min(buffer.byte_len()));
+                                view.set_cursor(pos, pos);
+                            }
+                            self.changes.push(cs);
+                        }
+                        Ok(None) => {}
+                        Err(e) => return self.error(e.to_string()),
+                    }
+                    InputResult::Consumed
+                } else {
+                    self.error("Editor target unavailable")
+                }
+            }
+            Command::Search {
+                query,
+                forward,
+                count,
+            } => {
+                let query = if query.is_empty() {
+                    self.last_search
+                        .as_ref()
+                        .map(|(q, _)| q.clone())
+                        .unwrap_or_default()
+                } else {
+                    query
+                };
+                self.last_search = Some((query.clone(), forward));
+                self.search(&query, forward, count, ctx)
+            }
+            Command::RepeatSearch { reverse, count } => {
+                let Some((query, forward)) = self.last_search.clone() else {
+                    return self.error("No previous search");
+                };
+                self.search(&query, if reverse { !forward } else { forward }, count, ctx)
             }
             Command::Motion { motion, count } => {
-                match ctx {
-                    InputContext::RowModel {
-                        selected_index,
-                        total_rows,
-                        ..
-                    } => {
-                        // Route shared motions to row navigation
-                        let _new_idx = match motion {
-                            Motion::Down => {
-                                (selected_index + count).min(total_rows.saturating_sub(1))
-                            }
-                            Motion::Up => selected_index.saturating_sub(count),
-                            Motion::FirstLine => 0,
-                            Motion::LastLine => total_rows.saturating_sub(1),
-                            _ => selected_index,
+                if let InputContext::Rows(model) = ctx {
+                    let movement = match motion {
+                        Motion::Down => Move::Down(count),
+                        Motion::Up => Move::Up(count),
+                        Motion::FirstLine => Move::Top,
+                        Motion::LastLine => Move::Bottom,
+                        Motion::Left => Move::Parent,
+                        Motion::Right => Move::Child,
+                        _ => return InputResult::Ignored,
+                    };
+                    model.move_selection(movement);
+                    return InputResult::Consumed;
+                }
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    if matches!(motion, Motion::ScreenDown | Motion::ScreenUp) {
+                        return InputResult::VisualRow {
+                            down: motion == Motion::ScreenDown,
+                            count,
                         };
-                        InputResult::Consumed
                     }
-                    InputContext::Editor { buffer, view, .. } => {
-                        let (new_pos, updated_find) =
-                            eval_motion(buffer, view.head(), &motion, count, self.last_find);
-                        self.last_find = updated_find;
-
-                        if self.mode == Mode::VisualChar || self.mode == Mode::VisualLine {
-                            view.set_cursor(view.anchor(), new_pos);
-                        } else {
-                            view.set_cursor(new_pos, new_pos);
+                    let (pos, find) =
+                        eval_motion(buffer, view.head(), &motion, count, self.last_find);
+                    self.last_find = find;
+                    let anchor = if matches!(self.mode, Mode::VisualChar | Mode::VisualLine) {
+                        view.anchor()
+                    } else {
+                        pos
+                    };
+                    view.set_cursor(anchor, pos);
+                }
+                InputResult::Consumed
+            }
+            Command::OperatorExtent {
+                op,
+                graphemes,
+                lines,
+            } => {
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    let (range, linewise) = if let Some(lines) = lines {
+                        let (r, l, _) = eval_operator_motion_range(
+                            buffer,
+                            view.head(),
+                            &Motion::CurrentLine,
+                            lines,
+                            None,
+                        );
+                        (r, l)
+                    } else {
+                        let start = view.head();
+                        let mut end = start;
+                        for _ in 0..graphemes {
+                            let Some(next) = buffer.grapheme_next(end) else {
+                                break;
+                            };
+                            end = next;
                         }
-                        InputResult::Consumed
-                    }
-                    InputContext::None => InputResult::Consumed,
+                        (start.get()..end.get(), false)
+                    };
+                    self.operator(op, range, linewise, buffer, view)
+                } else {
+                    self.error("Editor target unavailable")
+                }
+            }
+            Command::OperatorSelection(op) => {
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    let (range, linewise) = Self::selection_range(buffer, view, self.mode);
+                    self.operator(op, range, linewise, buffer, view)
+                } else {
+                    self.error("Editor target unavailable")
+                }
+            }
+            Command::OperatorRange {
+                op,
+                range,
+                linewise,
+            } => {
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    self.operator(op, range, linewise, buffer, view)
+                } else {
+                    self.error("Editor target unavailable")
                 }
             }
             Command::OperatorMotion { op, motion, count } => {
-                match ctx {
-                    InputContext::RowModel { panel, .. } => {
-                        // 'd' in file tree row model deletes / trashes row
-                        if op == Operator::Delete {
-                            return InputResult::Action(Action::TrashPath(
-                                std::path::PathBuf::from(panel),
-                            ));
-                        }
-                        InputResult::Consumed
-                    }
-                    InputContext::Editor { buffer, view, .. } => {
-                        let (range, is_linewise, updated_find) = eval_operator_motion_range(
-                            buffer,
-                            view.head(),
-                            &motion,
-                            count,
-                            self.last_find,
-                        );
-                        self.last_find = updated_find;
-                        self.execute_operator_on_range(op, range, is_linewise, buffer, view)
-                    }
-                    InputContext::None => InputResult::Consumed,
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    let (range, linewise, find) = eval_operator_motion_range(
+                        buffer,
+                        view.head(),
+                        &motion,
+                        count,
+                        self.last_find,
+                    );
+                    self.last_find = find;
+                    self.operator(op, range, linewise, buffer, view)
+                } else {
+                    InputResult::Ignored
                 }
             }
-            Command::OperatorTextObject { op, obj, count: _ } => {
-                if let InputContext::Editor { buffer, view, .. } = ctx
-                    && let Some(range) = eval_text_object_range(buffer, view.head(), obj)
-                {
-                    return self.execute_operator_on_range(op, range, false, buffer, view);
+            Command::OperatorTextObject { op, obj, count } => {
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    let mut range = match self.text_object_range(buffer, view.head(), obj) {
+                        Ok(range) => Some(range),
+                        Err(e) => return self.error(e),
+                    };
+                    for _ in 1..count {
+                        if let Some(r) = &mut range
+                            && let Some(next) =
+                                eval_text_object_range(buffer, BytePos::new(r.end), obj)
+                        {
+                            if next.end <= r.end {
+                                break;
+                            }
+                            r.end = next.end;
+                        }
+                    }
+                    if let Some(range) = range {
+                        self.operator(op, range, false, buffer, view)
+                    } else {
+                        self.error("Text object target unavailable")
+                    }
+                } else {
+                    self.error("Editor target unavailable")
                 }
-                InputResult::Consumed
             }
             Command::DeleteChar(count) => {
                 if let InputContext::Editor { buffer, view, .. } = ctx {
-                    let head = view.head();
-                    let mut end = head;
+                    let mut end = view.head();
                     for _ in 0..count {
-                        if let Some(next) = buffer.grapheme_next(end) {
-                            end = next;
-                        } else {
+                        let Some(next) = buffer.grapheme_next(end) else {
                             break;
-                        }
+                        };
+                        end = next;
                     }
-                    let range = head.get()..end.get();
-                    if !range.is_empty() {
-                        let text = buffer.slice(range.clone()).to_string();
-                        self.registers.set(
-                            self.selected_reg.take(),
-                            Register::new(text, RegisterKind::Characterwise),
-                        );
-                        let _ = buffer.apply(Transaction::delete(range));
-                        view.set_cursor(head, head);
-                        self.last_edit = Some(vec![Key::Char('x')]);
-                    }
+                    self.operator(
+                        Operator::Delete,
+                        view.head().get()..end.get(),
+                        false,
+                        buffer,
+                        view,
+                    )
+                } else {
+                    self.error("Editor target unavailable")
                 }
-                InputResult::Consumed
             }
-            Command::Paste { after, count } => {
-                if let InputContext::Editor { buffer, view, .. } = ctx
-                    && let Some(reg) = self.registers.get(self.selected_reg.take()).cloned()
-                {
-                    for _ in 0..count {
-                        let head = view.head();
-                        match reg.kind {
-                            RegisterKind::Linewise => {
-                                let line_idx = buffer.line_of_byte(head.get());
-                                let insert_pos = if after {
-                                    if line_idx + 1 < buffer.line_len() {
-                                        buffer.byte_of_line(line_idx + 1)
-                                    } else {
-                                        buffer.byte_len()
-                                    }
-                                } else {
-                                    buffer.byte_of_line(line_idx)
-                                };
-                                let _ = buffer.apply(Transaction::insert(insert_pos, &reg.text));
-                                view.set_cursor(BytePos::new(insert_pos), BytePos::new(insert_pos));
-                            }
-                            RegisterKind::Characterwise | RegisterKind::Blockwise => {
-                                let insert_pos = if after {
-                                    if let Some(next) = buffer.grapheme_next(head) {
-                                        next.get()
-                                    } else {
-                                        head.get()
-                                    }
-                                } else {
-                                    head.get()
-                                };
-                                let _ = buffer.apply(Transaction::insert(insert_pos, &reg.text));
-                                let new_pos = BytePos::new(insert_pos + reg.text.len());
-                                view.set_cursor(new_pos, new_pos);
-                            }
-                        }
-                    }
-                    let key_used = if after {
-                        Key::Char('p')
-                    } else {
-                        Key::Char('P')
-                    };
-                    self.last_edit = Some(vec![key_used]);
-                }
-                InputResult::Consumed
-            }
-            Command::Insert(entry) => {
-                self.mode = Mode::Insert;
-                self.current_edit.clear();
-
+            Command::Paste { after, count } => self.paste(after, count, ctx),
+            Command::Insert(entry) => self.enter_insert(entry, ctx),
+            Command::TextCommit(text) => {
                 if let InputContext::Editor { buffer, view, .. } = ctx {
-                    let head = view.head();
-                    match entry {
-                        InsertEntry::AtCursor => {
-                            self.current_edit.push(Key::Char('i'));
-                        }
-                        InsertEntry::AfterCursor => {
-                            self.current_edit.push(Key::Char('a'));
-                            if let Some(next) = buffer.grapheme_next(head) {
-                                let line_idx = buffer.line_of_byte(head.get());
-                                let next_line_start = if line_idx + 1 < buffer.line_len() {
-                                    buffer.byte_of_line(line_idx + 1)
-                                } else {
-                                    buffer.byte_len()
-                                };
-                                if next.get() < next_line_start {
-                                    view.set_cursor(next, next);
-                                }
-                            }
-                        }
-                        InsertEntry::LineStart => {
-                            self.current_edit.push(Key::Char('I'));
-                            let (pos, _) =
-                                eval_motion(buffer, head, &Motion::LineFirstNonBlank, 1, None);
-                            view.set_cursor(pos, pos);
-                        }
-                        InsertEntry::LineEnd => {
-                            self.current_edit.push(Key::Char('A'));
-                            let line_idx = buffer.line_of_byte(head.get());
-                            let next_line_start = if line_idx + 1 < buffer.line_len() {
-                                buffer.byte_of_line(line_idx + 1)
-                            } else {
-                                buffer.byte_len()
-                            };
-                            let slice = buffer.slice(head.get()..next_line_start).to_string();
-                            let mut trim = 0;
-                            if slice.ends_with("\r\n") {
-                                trim = 2;
-                            } else if slice.ends_with('\n') {
-                                trim = 1;
-                            }
-                            let pos = BytePos::new(next_line_start.saturating_sub(trim));
-                            view.set_cursor(pos, pos);
-                        }
-                        InsertEntry::NewLineBelow => {
-                            self.current_edit.push(Key::Char('o'));
-                            let line_idx = buffer.line_of_byte(head.get());
-                            let next_line_start = if line_idx + 1 < buffer.line_len() {
-                                buffer.byte_of_line(line_idx + 1)
-                            } else {
-                                buffer.byte_len()
-                            };
-                            let _ = buffer.apply(Transaction::insert(next_line_start, "\n"));
-                            let pos = BytePos::new(next_line_start);
-                            view.set_cursor(pos, pos);
-                        }
-                        InsertEntry::NewLineAbove => {
-                            self.current_edit.push(Key::Char('O'));
-                            let line_idx = buffer.line_of_byte(head.get());
-                            let line_start = buffer.byte_of_line(line_idx);
-                            let _ = buffer.apply(Transaction::insert(line_start, "\n"));
-                            let pos = BytePos::new(line_start);
-                            view.set_cursor(pos, pos);
-                        }
+                    let start = view.anchor().get().min(view.head().get());
+                    let end = view.anchor().get().max(view.head().get());
+                    let pos = BytePos::new(start + text.len());
+                    let tx = Transaction::replace(start..end, text).with_cursor(pos, pos);
+                    match self.apply(buffer, view, tx) {
+                        Ok(()) => InputResult::Consumed,
+                        Err(e) => self.error(e.to_string()),
                     }
+                } else {
+                    self.error("Editor target unavailable")
                 }
-                InputResult::Consumed
+            }
+            Command::InsertKey(key) => self.insert_key(key, ctx),
+            Command::DeleteSurrounding {
+                before_chars,
+                after_chars,
+            } => {
+                if let InputContext::Editor { buffer, view, .. } = ctx {
+                    let range = surrounding_char_range(
+                        buffer,
+                        view.head().get(),
+                        before_chars,
+                        after_chars,
+                    );
+                    if range.is_empty() {
+                        return InputResult::Consumed;
+                    }
+                    let p = BytePos::new(range.start);
+                    match self.apply(buffer, view, Transaction::delete(range).with_cursor(p, p)) {
+                        Ok(()) => InputResult::Consumed,
+                        Err(e) => self.error(e.to_string()),
+                    }
+                } else {
+                    self.error("Editor target unavailable")
+                }
             }
             Command::ColonCommand(cmd) => {
                 let trimmed = cmd.trim();
                 match trimmed {
                     "w" => {
                         if let InputContext::Editor { buffer, .. } = ctx {
-                            buffer.set_savepoint();
                             return InputResult::Action(Action::SaveBuffer(buffer.id()));
                         }
                         InputResult::Consumed
@@ -563,7 +825,6 @@ impl VimState {
                     }
                     "wq" => {
                         if let InputContext::Editor { buffer, view, .. } = ctx {
-                            buffer.set_savepoint();
                             return InputResult::Actions(vec![
                                 Action::SaveBuffer(buffer.id()),
                                 Action::CloseView(view.id()),
@@ -582,68 +843,74 @@ impl VimState {
                         }
                         InputResult::Consumed
                     }
-                    _ => InputResult::Ignored,
+                    _ => {
+                        let (name, argument) = trimmed.split_once(' ').unwrap_or((trimmed, ""));
+                        let id = match name {
+                            "e" => "buffer.open",
+                            "b" => "buffer.select",
+                            "bn" => "buffer.next",
+                            "bp" => "buffer.previous",
+                            _ => return self.error(format!("Unknown command: {name}")),
+                        };
+                        InputResult::Command {
+                            id: CommandId::new(id),
+                            argument: argument.into(),
+                        }
+                    }
                 }
             }
         }
     }
+}
 
-    fn execute_operator_on_range(
-        &mut self,
-        op: Operator,
-        range: std::ops::Range<usize>,
-        is_linewise: bool,
-        buffer: &mut Buffer,
-        view: &mut View,
-    ) -> InputResult {
-        if range.is_empty() {
-            return InputResult::Consumed;
-        }
-
-        let kind = if is_linewise {
-            RegisterKind::Linewise
-        } else {
-            RegisterKind::Characterwise
-        };
-        let text = buffer.slice(range.clone()).to_string();
-        self.registers
-            .set(self.selected_reg.take(), Register::new(text, kind));
-
-        match op {
-            Operator::Delete => {
-                let _ = buffer.apply(Transaction::delete(range.clone()));
-                let pos = BytePos::new(range.start);
-                view.set_cursor(pos, pos);
-                let edit_keys = if is_linewise {
-                    vec![Key::Char('d'), Key::Char('d')]
-                } else {
-                    vec![Key::Char('d'), Key::Char('w')]
-                };
-                self.last_edit = Some(edit_keys);
-            }
-            Operator::Change => {
-                let _ = buffer.apply(Transaction::delete(range.clone()));
-                let pos = BytePos::new(range.start);
-                view.set_cursor(pos, pos);
-                self.mode = Mode::Insert;
-                self.current_edit = vec![Key::Char('c'), Key::Char('i'), Key::Char('w')];
-            }
-            Operator::Yank => {
-                // Yank leaves cursor and buffer intact
-            }
-            Operator::Indent => {
-                let _ = buffer.apply(Transaction::insert(range.start, "    "));
-            }
-            Operator::Dedent => {
-                let slice = buffer
-                    .slice(range.start..(range.start + 4.min(buffer.byte_len() - range.start)))
-                    .to_string();
-                if slice.starts_with("    ") {
-                    let _ = buffer.apply(Transaction::delete(range.start..(range.start + 4)));
-                }
-            }
-        }
-
-        InputResult::Consumed
+fn reborrow<'a>(ctx: &'a mut InputContext<'_>) -> InputContext<'a> {
+    match ctx {
+        InputContext::Editor {
+            view_id,
+            buffer,
+            view,
+        } => InputContext::Editor {
+            view_id: *view_id,
+            buffer,
+            view,
+        },
+        InputContext::Rows(model) => InputContext::Rows(model),
+        InputContext::RowModel {
+            panel,
+            selected_index,
+            total_rows,
+        } => InputContext::RowModel {
+            panel,
+            selected_index: *selected_index,
+            total_rows: *total_rows,
+        },
+        InputContext::None => InputContext::None,
     }
+}
+
+fn command_text_bytes(command: &Command) -> usize {
+    match command {
+        Command::TextCommit(t) | Command::ColonCommand(t) | Command::Search { query: t, .. } => {
+            t.len()
+        }
+        _ => 0,
+    }
+}
+
+/// IME deletion uses Unicode scalar counts supplied by the OS, not byte or grapheme counts.
+pub fn surrounding_char_range(
+    buffer: &Buffer,
+    cursor: usize,
+    before: usize,
+    after: usize,
+) -> std::ops::Range<usize> {
+    let mut start = cursor;
+    let mut end = cursor;
+    for c in buffer.slice(0..cursor).chars().rev().take(before) {
+        start -= c.len_utf8();
+    }
+    for c in buffer.slice(cursor..buffer.byte_len()).chars().take(after) {
+        end += c.len_utf8();
+    }
+    start..end
 }

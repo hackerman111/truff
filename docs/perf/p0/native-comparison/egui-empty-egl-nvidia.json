@@ -1,0 +1,96 @@
+[
+  {
+    "backend": "default",
+    "boundary": "whole native GUI process",
+    "note_bytes": 0,
+    "startup_seconds": 4.218838377004431,
+    "window_size": [
+      956,
+      1047
+    ],
+    "status": "Name:\ttruff-egui-prob\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1706957\nNgid:\t0\nPid:\t1706957\nPPid:\t1706954\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t64\nGroups:\t98 949 985 995 998 1000 \nNStgid:\t1706957\nNSpid:\t1706957\nNSpgid:\t1706944\nNSsid:\t1706944\nKthread:\t0\nVmPeak:\t  386412 kB\nVmSize:\t  335644 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  136216 kB\nVmRSS:\t  134584 kB\nRssAnon:\t   16096 kB\nRssFile:\t  105868 kB\nRssShmem:\t   12620 kB\nVmData:\t   20572 kB\nVmStk:\t     136 kB\nVmExe:\t    5988 kB\nVmLib:\t   92704 kB\nVmPTE:\t     192 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t3\nSigQ:\t0/127173\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000800000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tfff\nCpus_allowed_list:\t0-11\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t152\nnonvoluntary_ctxt_switches:\t7\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n",
+    "smaps_rollup": "41455000-7fffc7977000 ---p 00000000 00:00 0                              [rollup]\nRss:              129060 kB\nPss:               44906 kB\nPss_Dirty:         28308 kB\nPss_Anon:          16096 kB\nPss_File:          21730 kB\nPss_Shmem:          7080 kB\nShared_Clean:     100324 kB\nShared_Dirty:         20 kB\nPrivate_Clean:       412 kB\nPrivate_Dirty:     28304 kB\nReferenced:       129060 kB\nAnonymous:         16096 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:         0 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:     90112 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n",
+    "largest_rss_mappings_kib": [
+      [
+        "/usr/lib/libnvidia-gpucomp.so.615.71.09",
+        77320
+      ],
+      [
+        "/usr/lib/libnvidia-eglcore.so.615.71.09",
+        21084
+      ],
+      [
+        "[anonymous]",
+        7872
+      ],
+      [
+        "/tmp/truff-egui-probe/target/release/truff-egui-probe",
+        7432
+      ],
+      [
+        "/dev/nvidiactl",
+        5392
+      ],
+      [
+        "[heap]",
+        2596
+      ],
+      [
+        "/usr/lib/libc.so.6",
+        1492
+      ],
+      [
+        "/usr/lib/libEGL_nvidia.so.615.71.09",
+        960
+      ],
+      [
+        "/usr/lib/libm.so.6",
+        720
+      ],
+      [
+        "/usr/lib/libnvidia-glsi.so.615.71.09",
+        536
+      ],
+      [
+        "/usr/lib/libxkbcommon.so.0.13.2",
+        380
+      ],
+      [
+        "/usr/lib/libGLdispatch.so.0.0.0",
+        356
+      ],
+      [
+        "/usr/lib/libdbus-1.so.3.38.3",
+        328
+      ],
+      [
+        "/usr/lib/libsystemd.so.0.45.0",
+        272
+      ],
+      [
+        "/usr/lib/libX11.so.6.4.0",
+        272
+      ],
+      [
+        "/etc/ld.so.cache",
+        272
+      ],
+      [
+        "/usr/lib/ld-linux-x86-64.so.2",
+        256
+      ],
+      [
+        "/usr/lib/libnvidia-allocator.so.615.71.09",
+        152
+      ],
+      [
+        "/usr/lib/libxcb.so.1.1.0",
+        120
+      ],
+      [
+        "/usr/lib/libgcc_s.so.1",
+        104
+      ]
+    ]
+  }
+]

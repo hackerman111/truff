@@ -162,6 +162,7 @@ pub struct BufferRegistry {
     replaced_by: HashMap<BufferId, BufferId>,
     epoch: VaultEpoch,
     max_buffers: usize,
+    watch_generation: u64,
 }
 
 impl BufferRegistry {
@@ -174,6 +175,7 @@ impl BufferRegistry {
             replaced_by: HashMap::new(),
             epoch,
             max_buffers: DEFAULT_MAX_BUFFERS,
+            watch_generation: 0,
         }
     }
 
@@ -185,6 +187,12 @@ impl BufferRegistry {
     /// Updates the current vault epoch.
     pub fn set_epoch(&mut self, epoch: VaultEpoch) {
         self.epoch = epoch;
+        self.watch_generation = self.watch_generation.wrapping_add(1);
+    }
+
+    /// Changes only when watched identities, paths or vault epoch change.
+    pub fn watch_generation(&self) -> u64 {
+        self.watch_generation
     }
 
     /// Number of tracked buffers.
@@ -210,6 +218,65 @@ impl BufferRegistry {
     /// Returns a mutable entry by `BufferId`.
     pub fn get_mut(&mut self, id: BufferId) -> Option<&mut BufferEntry> {
         self.buffers.get_mut(&id)
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = &BufferEntry> {
+        self.buffers.values()
+    }
+
+    /// Registers the identity before issuing a load so replies have a live destination.
+    pub fn register_unloaded(&mut self, path: PathBuf) -> Result<BufferId, AppError> {
+        if let Some(id) = self.get_by_path(&path) {
+            return Ok(id);
+        }
+        if self.buffers.len() >= self.max_buffers {
+            return Err(AppError::MaxBuffersExceeded(self.max_buffers));
+        }
+        self.watch_generation = self.watch_generation.wrapping_add(1);
+        let id = BufferId::next();
+        if let Some(old_id) = self.closed_paths.remove(&path) {
+            self.replaced_by.insert(old_id, id);
+        }
+        self.path_to_id.insert(path.clone(), id);
+        self.buffers
+            .insert(id, BufferEntry::new(id, Some(path), None));
+        Ok(id)
+    }
+
+    pub fn rename_path(&mut self, from: &Path, to: PathBuf) -> Result<(), AppError> {
+        if self.path_to_id.contains_key(&to) {
+            return Err(AppError::BufferAlreadyOpen(to));
+        }
+        if let Some(id) = self.path_to_id.remove(from) {
+            self.watch_generation = self.watch_generation.wrapping_add(1);
+            self.buffers
+                .get_mut(&id)
+                .expect("registered path has a buffer")
+                .path = Some(to.clone());
+            self.path_to_id.insert(to, id);
+        }
+        Ok(())
+    }
+
+    /// Rebinds an existing identity only after its save-as destination is durable.
+    pub fn assign_path(&mut self, id: BufferId, path: PathBuf) -> Result<(), AppError> {
+        if self
+            .path_to_id
+            .get(&path)
+            .is_some_and(|existing| *existing != id)
+        {
+            return Err(AppError::BufferAlreadyOpen(path));
+        }
+        let entry = self
+            .buffers
+            .get_mut(&id)
+            .ok_or(AppError::BufferNotFound(id))?;
+        self.watch_generation = self.watch_generation.wrapping_add(1);
+        if let Some(old) = entry.path.replace(path.clone()) {
+            self.path_to_id.remove(&old);
+        }
+        self.path_to_id.insert(path, id);
+        Ok(())
     }
 
     /// Returns reference to the text `Buffer` if loaded.
@@ -254,6 +321,7 @@ impl BufferRegistry {
             return Err(AppError::MaxBuffersExceeded(self.max_buffers));
         }
 
+        self.watch_generation = self.watch_generation.wrapping_add(1);
         let id = BufferId::next();
         let buf = Buffer::from_text(id, text)?;
         let mut entry = BufferEntry::new(id, path.clone(), Some(buf));
@@ -277,6 +345,7 @@ impl BufferRegistry {
             .buffers
             .remove(&id)
             .ok_or(AppError::BufferNotFound(id))?;
+        self.watch_generation = self.watch_generation.wrapping_add(1);
         if let Some(p) = entry.path() {
             self.closed_paths.insert(p.to_path_buf(), id);
             if self.path_to_id.get(p) == Some(&id) {

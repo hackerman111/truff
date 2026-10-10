@@ -1,0 +1,22 @@
+{
+  "boundary": "whole native GUI process, two-note vault, after restart",
+  "binary": "/home/papayka/Rust_project/Truff_v2/target/release/truff",
+  "profile_directory": "release",
+  "host": [
+    "Linux",
+    "papayka",
+    "7.2.9-arch1-1",
+    "#1 SMP PREEMPT_DYNAMIC Sat, 03 Oct 2026 11:43:28 +0000",
+    "x86_64"
+  ],
+  "window_size": [
+    956,
+    1047
+  ],
+  "rss": "VmRSS:\t  601772 kB",
+  "smaps_rollup": "41d4a000-7ffd26182000 ---p 00000000 00:00 0                              [rollup]\nRss:              456692 kB\nPss:              271958 kB\nPss_Dirty:         75028 kB\nPss_Anon:          53236 kB\nPss_File:         218681 kB\nPss_Shmem:            40 kB\nShared_Clean:     241152 kB\nShared_Dirty:         20 kB\nPrivate_Clean:    140492 kB\nPrivate_Dirty:     75028 kB\nReferenced:       456692 kB\nAnonymous:         53236 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:         0 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:    215040 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n",
+  "idle_seconds": 30.000085664003564,
+  "idle_cpu_ticks": 46,
+  "clock_ticks_per_second": 100,
+  "idle_cpu_one_core_percent": 1.5333289549634312
+}

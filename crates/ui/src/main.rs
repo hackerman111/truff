@@ -1,28 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use masonry::core::{ErasedAction, NewWidget, WidgetId};
-use masonry::dpi::LogicalSize;
-use masonry::theme::default_property_set;
-use masonry_winit::app::{AppDriver, DriverCtx, NewWindow, WindowId};
-use masonry_winit::winit::window::Window;
-use truff_ui::editor::{EditorProbe, EditorWidget};
+use eframe::egui;
+use truff_ui::app::Application;
+use truff_ui::native::NativeApp;
+use truff_ui::editor::EditorProbe;
 use truff_ui::perf_scenarios::{
     PerfSample, run_edit_latency, run_memory_retention, run_scroll_layout, run_startup,
     run_workers_shutdown, write_metadata_toml, write_samples_csv, write_summary_md,
 };
-
-struct TruffDriver;
-
-impl AppDriver for TruffDriver {
-    fn on_action(
-        &mut self,
-        _window_id: WindowId,
-        _ctx: &mut DriverCtx<'_, '_>,
-        _widget_id: WidgetId,
-        _action: ErasedAction,
-    ) {
-    }
-}
 
 fn print_help() {
     println!("Truff v2 — Native Markdown Editor & Knowledge Workspace");
@@ -31,9 +16,9 @@ fn print_help() {
     println!();
     println!("Options:");
     println!(
-        "  --scenario <NAME>    Run benchmark scenario (startup, edit-latency, scroll-layout, memory-retention, workers-shutdown, all)"
+        "  --scenario <NAME>    Run headless component benchmark (startup, edit-latency, scroll-layout, memory-retention, workers-shutdown, all)"
     );
-    println!("  --vault <PATH>       Vault directory for benchmark data");
+    println!("  --vault <PATH>       Vault directory to open (or benchmark data)");
     println!("  --runs <N>           Number of benchmark iterations (default: 5)");
     println!(
         "  --out <DIR>          Output directory for benchmark reports (samples.csv, metadata.toml, summary.md)"
@@ -166,8 +151,8 @@ fn main() {
     {
         println!("Truff v2 Editor Probe (headless benchmark)");
         let mut probe = EditorProbe::new(
-            "Truff v2 editor probe initial text\nTesting Parley & Crop\nПривет мир!",
-        );
+            "Truff v2 editor viewport probe\nTesting egui & Crop\nПривет мир!",
+        ).expect("small probe text is valid");
         probe.relayout(Some(800.0));
         let hit = probe.hit_test(100.0, 10.0);
         println!(
@@ -177,28 +162,28 @@ fn main() {
         return;
     }
 
-    let sample_text = "Welcome to Truff v2!\n\nMinimal retained editor probe using crop::Rope and Parley.\nПоддержка Unicode, кириллицы, emoji 🦀 и IME.\n";
-    let editor = EditorWidget::new(sample_text);
-
-    let window_size = LogicalSize::new(900.0, 600.0);
-    let window_attributes = Window::default_attributes()
-        .with_title("Truff v2 — Editor Probe")
-        .with_resizable(true)
-        .with_min_inner_size(window_size);
-
-    let driver = TruffDriver;
-    let event_loop = masonry_winit::app::EventLoop::with_user_event()
-        .build()
-        .expect("Failed to create event loop");
-
-    masonry_winit::app::run_with(
-        event_loop,
-        vec![NewWindow::new(
-            window_attributes,
-            NewWidget::new(editor).erased(),
-        )],
-        driver,
-        default_property_set(),
-    )
-    .expect("Failed to run Masonry application");
+    let mut application = Application::new();
+    if let Some(pos) = args.iter().position(|arg| arg == "--vault") {
+        let Some(path) = args.get(pos + 1) else {
+            eprintln!("--vault requires a directory");
+            std::process::exit(1);
+        };
+        if let Err(error) = application.open_vault(Path::new(path)) {
+            eprintln!("Cannot open vault: {error}");
+            std::process::exit(1);
+        }
+    }
+    let options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Glow,
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1100.0, 700.0])
+            .with_min_inner_size([640.0, 400.0]),
+        ..Default::default()
+    };
+    if let Err(error) = eframe::run_native("Truff v2", options, Box::new(move |context| {
+        Ok(Box::new(NativeApp::new(application, &context.egui_ctx)))
+    })) {
+        eprintln!("Cannot run Truff: {error}");
+        std::process::exit(1);
+    }
 }

@@ -76,6 +76,11 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
+fn word_continuation(buffer: &Buffer, position: usize, c: char, category: u8) -> bool {
+    char_category(c) == category
+        || (category != 0 && !c.is_whitespace() && snap_grapheme(buffer, position) != position)
+}
+
 fn char_category(c: char) -> u8 {
     if c.is_whitespace() {
         0
@@ -123,8 +128,8 @@ pub fn eval_motion(
                         total_len
                     };
                     // In normal mode don't move past end of line
-                    let slice = buffer.slice(current..next_line_start).to_string();
-                    if slice.starts_with('\n') || slice.starts_with("\r\n") {
+                    let first = buffer.slice(current..next_line_start).chars().next();
+                    if matches!(first, Some('\n' | '\r')) {
                         break;
                     }
                     if next.get() < next_line_start {
@@ -147,7 +152,8 @@ pub fn eval_motion(
         }
         Motion::Down | Motion::ScreenDown => {
             let line_idx = buffer.line_of_byte(current);
-            let target_line = (line_idx + count).min(buffer.line_len().saturating_sub(1));
+            let target_line =
+                (line_idx.saturating_add(count)).min(buffer.line_len().saturating_sub(1));
             let col = current - buffer.byte_of_line(line_idx);
             let target_start = buffer.byte_of_line(target_line);
             let target_end = if target_line + 1 < buffer.line_len() {
@@ -169,7 +175,7 @@ pub fn eval_motion(
             } else {
                 total_len
             };
-            let text = buffer.slice(line_start..line_end).to_string();
+            let text = buffer.slice(line_start..line_end);
             let mut offset = 0;
             for c in text.chars() {
                 if c == '\n' || c == '\r' || !c.is_whitespace() {
@@ -181,19 +187,7 @@ pub fn eval_motion(
         }
         Motion::LineEnd => {
             let line_idx = buffer.line_of_byte(current);
-            let line_end = if line_idx + 1 < buffer.line_len() {
-                buffer.byte_of_line(line_idx + 1)
-            } else {
-                total_len
-            };
-            let slice = buffer.slice(current..line_end).to_string();
-            let mut trim = 0;
-            if slice.ends_with("\r\n") {
-                trim = 2;
-            } else if slice.ends_with('\n') {
-                trim = 1;
-            }
-            current = line_end.saturating_sub(trim);
+            current = line_content_end(buffer, line_idx);
             if current > buffer.byte_of_line(line_idx)
                 && let Some(prev) = buffer.grapheme_prev(BytePos::new(current))
             {
@@ -234,44 +228,41 @@ pub fn eval_motion(
                 current = word_end(buffer, current);
             }
         }
-        Motion::ParagraphBackward => {
+        Motion::ParagraphBackward | Motion::ParagraphForward => {
+            let forward = *motion == Motion::ParagraphForward;
             let mut line = buffer.line_of_byte(current);
-            while line > 0 {
-                line -= 1;
-                let start = buffer.byte_of_line(line);
-                let end = if line + 1 < buffer.line_len() {
-                    buffer.byte_of_line(line + 1)
+            for _ in 0..count {
+                if forward {
+                    if line + 1 >= buffer.line_len() {
+                        current = total_len;
+                        break;
+                    }
+                    line += 1;
+                    while line + 1 < buffer.line_len() && blank_line(buffer, line) {
+                        line += 1;
+                    }
+                    while line + 1 < buffer.line_len() && !blank_line(buffer, line) {
+                        line += 1;
+                    }
+                    current = if line + 1 >= buffer.line_len() && !blank_line(buffer, line) {
+                        total_len
+                    } else {
+                        buffer.byte_of_line(line)
+                    };
                 } else {
-                    total_len
-                };
-                let text = buffer.slice(start..end).to_string();
-                if text.trim().is_empty() {
-                    current = start;
-                    break;
+                    if line == 0 {
+                        current = 0;
+                        break;
+                    }
+                    line -= 1;
+                    while line > 0 && blank_line(buffer, line) {
+                        line -= 1;
+                    }
+                    while line > 0 && !blank_line(buffer, line) {
+                        line -= 1;
+                    }
+                    current = buffer.byte_of_line(line);
                 }
-            }
-            if line == 0 {
-                current = 0;
-            }
-        }
-        Motion::ParagraphForward => {
-            let mut line = buffer.line_of_byte(current);
-            while line + 1 < buffer.line_len() {
-                line += 1;
-                let start = buffer.byte_of_line(line);
-                let end = if line + 1 < buffer.line_len() {
-                    buffer.byte_of_line(line + 1)
-                } else {
-                    total_len
-                };
-                let text = buffer.slice(start..end).to_string();
-                if text.trim().is_empty() {
-                    current = start;
-                    break;
-                }
-            }
-            if line + 1 >= buffer.line_len() {
-                current = total_len;
             }
         }
         Motion::FindCharForward(c) => {
@@ -358,7 +349,7 @@ pub fn eval_motion(
         }
     }
 
-    (BytePos::new(current), new_find)
+    (BytePos::new(snap_grapheme(buffer, current)), new_find)
 }
 
 /// Evaluates an operator motion into a byte range.
@@ -373,7 +364,7 @@ pub fn eval_operator_motion_range(
     if *motion == Motion::CurrentLine {
         let line_idx = buffer.line_of_byte(pos.get());
         let line_start = buffer.byte_of_line(line_idx);
-        let end_line_idx = (line_idx + count).min(buffer.line_len());
+        let end_line_idx = (line_idx.saturating_add(count)).min(buffer.line_len());
         let end = if end_line_idx < buffer.line_len() {
             buffer.byte_of_line(end_line_idx)
         } else {
@@ -383,13 +374,57 @@ pub fn eval_operator_motion_range(
     }
 
     let (dest, new_find) = eval_motion(buffer, pos, motion, count, last_find);
+    let find = match motion {
+        Motion::FindCharForward(c) => Some((*c, true, false)),
+        Motion::FindCharBackward(c) => Some((*c, false, false)),
+        Motion::TillCharForward(c) => Some((*c, true, true)),
+        Motion::TillCharBackward(c) => Some((*c, false, true)),
+        Motion::RepeatFind | Motion::ReverseRepeatFind => last_find.map(|(kind, c)| {
+            let forward = matches!(kind, FindKind::FindForward | FindKind::TillForward);
+            (
+                c,
+                if *motion == Motion::ReverseRepeatFind {
+                    !forward
+                } else {
+                    forward
+                },
+                matches!(kind, FindKind::TillForward | FindKind::TillBackward),
+            )
+        }),
+        _ => None,
+    };
+    if let Some((c, forward, till)) = find
+        && find_char_on_line(buffer, pos.get(), c, forward, till, count).is_none()
+    {
+        return (pos.get()..pos.get(), false, new_find);
+    }
+    if matches!(
+        motion,
+        Motion::Up | Motion::Down | Motion::FirstLine | Motion::LastLine | Motion::Line(_)
+    ) {
+        let first = buffer.line_of_byte(pos.get().min(dest.get()));
+        let last = buffer.line_of_byte(pos.get().max(dest.get()));
+        let end = if last + 1 < buffer.line_len() {
+            buffer.byte_of_line(last + 1)
+        } else {
+            buffer.byte_len()
+        };
+        return (buffer.byte_of_line(first)..end, true, new_find);
+    }
     let start = pos.get().min(dest.get());
     let mut end = pos.get().max(dest.get());
 
     // In Vim, motions like 'w' are exclusive, but 'e' or '$' are inclusive
     if matches!(
         motion,
-        Motion::WordEnd | Motion::LineEnd | Motion::FindCharForward(_)
+        Motion::WordEnd
+            | Motion::LineEnd
+            | Motion::FindCharForward(_)
+            | Motion::FindCharBackward(_)
+            | Motion::TillCharForward(_)
+            | Motion::TillCharBackward(_)
+            | Motion::RepeatFind
+            | Motion::ReverseRepeatFind
     ) && let Some(next) = buffer.grapheme_next(BytePos::new(end))
     {
         end = next.get();
@@ -412,70 +447,45 @@ pub fn eval_text_object_range(
 
     match obj.target {
         TextObjectTarget::Word => {
-            let line_idx = buffer.line_of_byte(current);
-            let line_start = buffer.byte_of_line(line_idx);
-            let line_end = if line_idx + 1 < buffer.line_len() {
-                buffer.byte_of_line(line_idx + 1)
-            } else {
-                total_len
-            };
-
-            let text = buffer.slice(line_start..line_end).to_string();
-            let rel = current.saturating_sub(line_start);
-            let chars: Vec<(usize, char)> = text.char_indices().collect();
-            if chars.is_empty() {
-                return None;
-            }
-
-            let mut char_idx = 0;
-            for (i, &(byte_idx, _)) in chars.iter().enumerate() {
-                if byte_idx <= rel {
-                    char_idx = i;
-                } else {
+            let category = buffer
+                .slice(current..total_len)
+                .chars()
+                .next()
+                .map(char_category)?;
+            let mut start = current;
+            for c in buffer.slice(0..current).chars().rev() {
+                if matches!(c, '\r' | '\n')
+                    || !word_continuation(buffer, start - c.len_utf8(), c, category)
+                {
                     break;
                 }
+                start -= c.len_utf8();
             }
-
-            let target_cat = char_category(chars[char_idx].1);
-            let mut start_idx = char_idx;
-            while start_idx > 0 && char_category(chars[start_idx - 1].1) == target_cat {
-                start_idx -= 1;
+            let mut end = current;
+            for c in buffer.slice(current..total_len).chars() {
+                if matches!(c, '\r' | '\n') || !word_continuation(buffer, end, c, category) {
+                    break;
+                }
+                end += c.len_utf8();
             }
-
-            let mut end_idx = char_idx + 1;
-            while end_idx < chars.len() && char_category(chars[end_idx].1) == target_cat {
-                end_idx += 1;
+            if obj.kind == TextObjectKind::Around {
+                let original = end;
+                for c in buffer.slice(end..total_len).chars() {
+                    if matches!(c, '\r' | '\n') || !c.is_whitespace() {
+                        break;
+                    }
+                    end += c.len_utf8();
+                }
+                if end == original {
+                    for c in buffer.slice(0..start).chars().rev() {
+                        if matches!(c, '\r' | '\n') || !c.is_whitespace() {
+                            break;
+                        }
+                        start -= c.len_utf8();
+                    }
+                }
             }
-
-            let inner_start = line_start + chars[start_idx].0;
-            let inner_end = if end_idx < chars.len() {
-                line_start + chars[end_idx].0
-            } else {
-                line_end
-            };
-
-            if obj.kind == TextObjectKind::Inner {
-                return Some(inner_start..inner_end);
-            }
-
-            // Around word includes trailing whitespace if present, else leading
-            let mut around_end = inner_end;
-            let mut temp_end = end_idx;
-            while temp_end < chars.len()
-                && chars[temp_end].1.is_whitespace()
-                && chars[temp_end].1 != '\n'
-            {
-                temp_end += 1;
-            }
-            if temp_end > end_idx {
-                around_end = if temp_end < chars.len() {
-                    line_start + chars[temp_end].0
-                } else {
-                    line_end
-                };
-            }
-
-            Some(inner_start..around_end)
+            Some(start..end)
         }
         TextObjectTarget::DoubleQuote
         | TextObjectTarget::SingleQuote
@@ -492,109 +502,106 @@ pub fn eval_text_object_range(
         TextObjectTarget::Bracket => find_pair_on_line(buffer, current, '[', ']', obj.kind),
         TextObjectTarget::Brace => find_pair_on_line(buffer, current, '{', '}', obj.kind),
         TextObjectTarget::AngleBracket => find_pair_on_line(buffer, current, '<', '>', obj.kind),
-        TextObjectTarget::MarkdownLink => find_markdown_link_range(buffer, current, obj.kind),
-        TextObjectTarget::MarkdownHeading => find_markdown_heading_range(buffer, current, obj.kind),
-        TextObjectTarget::MarkdownCodeBlock => {
-            find_markdown_code_block_range(buffer, current, obj.kind)
-        }
-        TextObjectTarget::Paragraph | TextObjectTarget::Sentence => {
-            // Simplified paragraph range
-            let line_idx = buffer.line_of_byte(current);
-            let start = buffer.byte_of_line(line_idx);
-            let end = if line_idx + 1 < buffer.line_len() {
-                buffer.byte_of_line(line_idx + 1)
-            } else {
-                total_len
-            };
-            Some(start..end)
-        }
+        TextObjectTarget::MarkdownLink
+        | TextObjectTarget::MarkdownHeading
+        | TextObjectTarget::MarkdownCodeBlock => None,
+        TextObjectTarget::Paragraph => Some(paragraph_range(buffer, current, obj.kind)),
+        TextObjectTarget::Sentence => Some(sentence_range(buffer, current, obj.kind)),
     }
 }
 
 fn word_forward(buffer: &Buffer, pos: usize) -> usize {
-    let total_len = buffer.byte_len();
-    if pos >= total_len {
-        return total_len;
-    }
-    let slice = buffer.slice(pos..total_len).to_string();
-    let chars: Vec<(usize, char)> = slice.char_indices().collect();
-    if chars.is_empty() {
-        return total_len;
-    }
-
-    let initial_cat = char_category(chars[0].1);
-    let mut idx = 0;
-
-    // Advance while same category (if not whitespace)
-    if initial_cat != 0 {
-        while idx < chars.len() && char_category(chars[idx].1) == initial_cat {
-            idx += 1;
+    let slice = buffer.slice(pos..buffer.byte_len());
+    let mut chars = slice.chars().peekable();
+    let category = chars.peek().copied().map(char_category).unwrap_or(0);
+    let mut current = pos;
+    if category != 0 {
+        while chars
+            .peek()
+            .is_some_and(|c| word_continuation(buffer, current, *c, category))
+        {
+            current += chars.next().unwrap().len_utf8();
         }
     }
-
-    // Skip whitespace
-    while idx < chars.len() && char_category(chars[idx].1) == 0 {
-        idx += 1;
+    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+        current += chars.next().unwrap().len_utf8();
     }
-
-    if idx < chars.len() {
-        pos + chars[idx].0
-    } else {
-        total_len
-    }
+    current
 }
-
 fn word_backward(buffer: &Buffer, pos: usize) -> usize {
-    if pos == 0 {
-        return 0;
+    let slice = buffer.slice(0..pos);
+    let mut chars = slice.chars().rev().peekable();
+    let mut current = pos;
+    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+        current -= chars.next().unwrap().len_utf8();
     }
-    let slice = buffer.slice(0..pos).to_string();
-    let chars: Vec<(usize, char)> = slice.char_indices().collect();
-    if chars.is_empty() {
-        return 0;
+    let cluster = buffer
+        .grapheme_prev(BytePos::new(current))
+        .map_or(0, BytePos::get);
+    let category = buffer
+        .slice(cluster..current)
+        .chars()
+        .next()
+        .map(char_category)
+        .unwrap_or(0);
+    while chars
+        .peek()
+        .is_some_and(|c| word_continuation(buffer, current - c.len_utf8(), *c, category))
+    {
+        current -= chars.next().unwrap().len_utf8();
     }
-
-    let mut idx = chars.len() - 1;
-    // Skip trailing whitespace
-    while idx > 0 && char_category(chars[idx].1) == 0 {
-        idx -= 1;
+    current
+}
+fn word_end(buffer: &Buffer, pos: usize) -> usize {
+    let start = buffer
+        .grapheme_next(BytePos::new(pos))
+        .map_or(pos, BytePos::get);
+    let slice = buffer.slice(start..buffer.byte_len());
+    let mut chars = slice.chars().peekable();
+    let mut current = start;
+    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+        current += chars.next().unwrap().len_utf8();
     }
-
-    let target_cat = char_category(chars[idx].1);
-    while idx > 0 && char_category(chars[idx - 1].1) == target_cat {
-        idx -= 1;
+    let category = chars.peek().copied().map(char_category).unwrap_or(0);
+    let mut result = current;
+    while chars
+        .peek()
+        .is_some_and(|c| word_continuation(buffer, current, *c, category))
+    {
+        result = current;
+        current += chars.next().unwrap().len_utf8();
     }
-
-    chars[idx].0
+    snap_grapheme(buffer, result)
 }
 
-fn word_end(buffer: &Buffer, pos: usize) -> usize {
-    let total_len = buffer.byte_len();
-    if pos >= total_len {
-        return total_len;
+/// End of content before LF/CRLF, without copying a logical line.
+pub fn line_content_end(buffer: &Buffer, line: usize) -> usize {
+    let end = if line + 1 < buffer.line_len() {
+        buffer.byte_of_line(line + 1)
+    } else {
+        buffer.byte_len()
+    };
+    let start = buffer.byte_of_line(line);
+    let slice = buffer.slice(start..end);
+    let mut chars = slice.chars().rev();
+    if chars.next() == Some('\n') {
+        end - if chars.next() == Some('\r') { 2 } else { 1 }
+    } else {
+        end
     }
-    let slice = buffer.slice(pos..total_len).to_string();
-    let chars: Vec<(usize, char)> = slice.char_indices().collect();
-    if chars.len() <= 1 {
-        return total_len;
-    }
+}
 
-    let mut idx = 1;
-    // Skip whitespace
-    while idx < chars.len() && char_category(chars[idx].1) == 0 {
-        idx += 1;
+pub fn snap_grapheme(buffer: &Buffer, pos: usize) -> usize {
+    let mut pos = pos.min(buffer.byte_len());
+    while !buffer.is_char_boundary(pos) {
+        pos -= 1;
     }
-
-    if idx >= chars.len() {
-        return total_len;
+    if pos == 0 || pos == buffer.byte_len() {
+        return pos;
     }
-
-    let target_cat = char_category(chars[idx].1);
-    while idx + 1 < chars.len() && char_category(chars[idx + 1].1) == target_cat {
-        idx += 1;
-    }
-
-    pos + chars[idx].0
+    let next = buffer.grapheme_next(BytePos::new(pos));
+    next.and_then(|n| buffer.grapheme_prev(n))
+        .map_or(pos, BytePos::get)
 }
 
 fn find_char_on_line(
@@ -605,44 +612,62 @@ fn find_char_on_line(
     till: bool,
     count: usize,
 ) -> Option<usize> {
-    let line_idx = buffer.line_of_byte(pos);
-    let line_start = buffer.byte_of_line(line_idx);
-    let line_end = if line_idx + 1 < buffer.line_len() {
-        buffer.byte_of_line(line_idx + 1)
-    } else {
-        buffer.byte_len()
-    };
-
-    let text = buffer.slice(line_start..line_end).to_string();
-    let rel = pos.saturating_sub(line_start);
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-
-    let mut matches = 0;
+    let line = buffer.line_of_byte(pos);
+    let start = buffer.byte_of_line(line);
+    let end = line_content_end(buffer, line);
+    let slice = buffer.slice(start..end);
     if forward {
-        for &(byte_idx, c) in &chars {
-            if byte_idx > rel && c == target {
-                matches += 1;
-                if matches == count {
-                    let mut result = line_start + byte_idx;
-                    if till && let Some(prev) = buffer.grapheme_prev(BytePos::new(result)) {
-                        result = prev.get();
+        find_in_chars(buffer, slice.chars(), start, pos, target, true, till, count)
+    } else {
+        find_in_chars(
+            buffer,
+            slice.chars().rev(),
+            end,
+            pos,
+            target,
+            false,
+            till,
+            count,
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn find_in_chars(
+    buffer: &Buffer,
+    chars: impl Iterator<Item = char>,
+    mut offset: usize,
+    pos: usize,
+    target: char,
+    forward: bool,
+    till: bool,
+    count: usize,
+) -> Option<usize> {
+    let mut matches = 0;
+    for c in chars {
+        if !forward {
+            offset -= c.len_utf8();
+        }
+        if ((forward && offset > pos) || (!forward && offset < pos)) && c == target {
+            matches += 1;
+            if matches == count {
+                return Some(if till {
+                    if forward {
+                        buffer
+                            .grapheme_prev(BytePos::new(offset))
+                            .map_or(offset, BytePos::get)
+                    } else {
+                        buffer
+                            .grapheme_next(BytePos::new(offset))
+                            .map_or(offset, BytePos::get)
                     }
-                    return Some(result);
-                }
+                } else {
+                    snap_grapheme(buffer, offset)
+                });
             }
         }
-    } else {
-        for &(byte_idx, c) in chars.iter().rev() {
-            if byte_idx < rel && c == target {
-                matches += 1;
-                if matches == count {
-                    let mut result = line_start + byte_idx;
-                    if till && let Some(next) = buffer.grapheme_next(BytePos::new(result)) {
-                        result = next.get();
-                    }
-                    return Some(result);
-                }
-            }
+        if forward {
+            offset += c.len_utf8();
         }
     }
     None
@@ -655,122 +680,191 @@ fn find_pair_on_line(
     close: char,
     kind: TextObjectKind,
 ) -> Option<Range<usize>> {
-    let line_idx = buffer.line_of_byte(pos);
-    let line_start = buffer.byte_of_line(line_idx);
-    let line_end = if line_idx + 1 < buffer.line_len() {
-        buffer.byte_of_line(line_idx + 1)
+    let line = buffer.line_of_byte(pos);
+    let (start, end) = if open == close {
+        (buffer.byte_of_line(line), line_content_end(buffer, line))
     } else {
-        buffer.byte_len()
+        (0, buffer.byte_len())
     };
-
-    let text = buffer.slice(line_start..line_end).to_string();
-    let rel = pos.saturating_sub(line_start);
-
-    // Find opening before or at pos, closing after pos
-    let open_pos = text[..rel].rfind(open)?;
-    let close_pos = text[rel..].find(close).map(|i| rel + i)?;
-
-    let abs_open = line_start + open_pos;
-    let abs_close = line_start + close_pos;
-
-    if kind == TextObjectKind::Inner {
-        let inner_start = abs_open + open.len_utf8();
-        Some(inner_start..abs_close)
-    } else {
-        let outer_end = abs_close + close.len_utf8();
-        Some(abs_open..outer_end)
+    let prefix = buffer.slice(start..pos);
+    let mut cursor = pos;
+    let mut depth = 0;
+    let mut left = None;
+    // Include an opening delimiter at the cursor.
+    if buffer.slice(pos..end).chars().next() == Some(open) {
+        left = Some(pos);
     }
-}
-
-fn find_markdown_link_range(
-    buffer: &Buffer,
-    pos: usize,
-    kind: TextObjectKind,
-) -> Option<Range<usize>> {
-    let line_idx = buffer.line_of_byte(pos);
-    let line_start = buffer.byte_of_line(line_idx);
-    let line_end = if line_idx + 1 < buffer.line_len() {
-        buffer.byte_of_line(line_idx + 1)
-    } else {
-        buffer.byte_len()
-    };
-    let text = buffer.slice(line_start..line_end).to_string();
-    let rel = pos.saturating_sub(line_start);
-
-    // Look for [[...]] or [...]
-    if let Some(open) = text[..rel].rfind("[[")
-        && let Some(close) = text[rel..].find("]]")
-    {
-        let start = line_start + open;
-        let end = line_start + rel + close + 2;
-        return if kind == TextObjectKind::Inner {
-            Some((start + 2)..(end - 2))
-        } else {
-            Some(start..end)
-        };
-    }
-    None
-}
-
-fn find_markdown_heading_range(
-    buffer: &Buffer,
-    pos: usize,
-    kind: TextObjectKind,
-) -> Option<Range<usize>> {
-    let line_idx = buffer.line_of_byte(pos);
-    let line_start = buffer.byte_of_line(line_idx);
-    let line_end = if line_idx + 1 < buffer.line_len() {
-        buffer.byte_of_line(line_idx + 1)
-    } else {
-        buffer.byte_len()
-    };
-    let text = buffer.slice(line_start..line_end).to_string();
-    if text.starts_with('#') {
-        if kind == TextObjectKind::Inner {
-            let trimmed = text.trim_start_matches('#').trim_start();
-            let offset = text.len() - trimmed.len();
-            let end_offset = if text.ends_with('\n') {
-                line_end.saturating_sub(1)
-            } else {
-                line_end
-            };
-            return Some((line_start + offset)..end_offset);
-        } else {
-            return Some(line_start..line_end);
-        }
-    }
-    None
-}
-
-fn find_markdown_code_block_range(
-    buffer: &Buffer,
-    pos: usize,
-    kind: TextObjectKind,
-) -> Option<Range<usize>> {
-    let total_len = buffer.byte_len();
-    let text = buffer.slice(0..total_len).to_string();
-    // Scan for ``` boundaries enclosing pos
-    let mut in_block = false;
-    let mut block_start = 0;
-    for (line_num, line) in text.lines().enumerate() {
-        let line_offset = buffer.byte_of_line(line_num);
-        if line.starts_with("```") {
-            if !in_block {
-                in_block = true;
-                block_start = line_offset;
-            } else {
-                let block_end = line_offset + line.len() + 1;
-                if pos >= block_start && pos <= block_end {
-                    return if kind == TextObjectKind::Inner {
-                        let inner_start = buffer.byte_of_line(line_num.saturating_sub(1));
-                        Some(inner_start..line_offset)
-                    } else {
-                        Some(block_start..block_end.min(total_len))
-                    };
+    if left.is_none() {
+        for c in prefix.chars().rev() {
+            cursor -= c.len_utf8();
+            if open != close && c == close {
+                depth += 1;
+            }
+            if c == open {
+                if depth == 0 {
+                    left = Some(cursor);
+                    break;
                 }
-                in_block = false;
+                depth -= 1;
             }
         }
     }
+    let left = left?;
+    cursor = left + open.len_utf8();
+    depth = 0;
+    let suffix = buffer.slice(cursor..end);
+    for c in suffix.chars() {
+        if c == close {
+            if depth == 0 {
+                if cursor < pos {
+                    return None;
+                }
+                return Some(if kind == TextObjectKind::Inner {
+                    left + open.len_utf8()..cursor
+                } else {
+                    left..cursor + close.len_utf8()
+                });
+            }
+            depth -= 1;
+        } else if open != close && c == open {
+            depth += 1;
+        }
+        cursor += c.len_utf8();
+    }
     None
+}
+
+fn blank_line(buffer: &Buffer, line: usize) -> bool {
+    buffer
+        .slice(buffer.byte_of_line(line)..line_content_end(buffer, line))
+        .chars()
+        .all(char::is_whitespace)
+}
+
+fn paragraph_range(buffer: &Buffer, pos: usize, kind: TextObjectKind) -> Range<usize> {
+    let mut first = buffer.line_of_byte(pos);
+    let mut last = first;
+    let blank = blank_line(buffer, first);
+    while first > 0 && blank_line(buffer, first - 1) == blank {
+        first -= 1;
+    }
+    while last + 1 < buffer.line_len() && blank_line(buffer, last + 1) == blank {
+        last += 1;
+    }
+    if kind == TextObjectKind::Around {
+        while last + 1 < buffer.line_len() && blank_line(buffer, last + 1) {
+            last += 1;
+        }
+    }
+    let end = if last + 1 < buffer.line_len() {
+        buffer.byte_of_line(last + 1)
+    } else {
+        buffer.byte_len()
+    };
+    buffer.byte_of_line(first)..end
+}
+
+fn sentence_range(buffer: &Buffer, pos: usize, kind: TextObjectKind) -> Range<usize> {
+    let paragraph = paragraph_range(buffer, pos, TextObjectKind::Inner);
+    let slice = buffer.slice(paragraph.clone());
+    let mut start = paragraph.start;
+    let mut offset = start;
+    let mut end = paragraph.end;
+    let mut boundary = false;
+    for c in slice.chars() {
+        if boundary && c.is_whitespace() {
+            if offset >= pos {
+                end = offset;
+                break;
+            }
+            start = offset + c.len_utf8();
+        } else {
+            boundary = matches!(c, '.' | '!' | '?');
+        }
+        offset += c.len_utf8();
+    }
+    if kind == TextObjectKind::Around {
+        for c in buffer.slice(end..paragraph.end).chars() {
+            if !c.is_whitespace() {
+                break;
+            }
+            end += c.len_utf8();
+        }
+    }
+    start..end
+}
+
+/// Syntax producer supplies source coordinates at the current buffer revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxObjectRange {
+    pub target: TextObjectTarget,
+    pub inner: Range<usize>,
+    pub around: Range<usize>,
+}
+
+/// Literal UTF-8 search with O(query length) working memory; Rope chunks stay borrowed.
+pub fn literal_search(
+    buffer: &Buffer,
+    pos: usize,
+    query: &str,
+    forward: bool,
+    count: usize,
+) -> Option<usize> {
+    if query.is_empty() {
+        return None;
+    }
+    let needle = query.as_bytes();
+    let mut failure = vec![0; needle.len()];
+    let mut matched = 0;
+    for i in 1..needle.len() {
+        while matched > 0 && needle[i] != needle[matched] {
+            matched = failure[matched - 1];
+        }
+        if needle[i] == needle[matched] {
+            matched += 1;
+        }
+        failure[i] = matched;
+    }
+    let find = |position: usize| {
+        let slice = buffer.slice(0..buffer.byte_len());
+        let mut matched = 0;
+        let mut offset = 0;
+        let mut first = None;
+        let mut last = None;
+        let mut before = None;
+        let mut after = None;
+        for chunk in slice.chunks() {
+            for &byte in chunk.as_bytes() {
+                while matched > 0 && byte != needle[matched] {
+                    matched = failure[matched - 1];
+                }
+                if byte == needle[matched] {
+                    matched += 1;
+                }
+                offset += 1;
+                if matched == needle.len() {
+                    let start = offset - needle.len();
+                    first.get_or_insert(start);
+                    last = Some(start);
+                    if start < position {
+                        before = Some(start);
+                    }
+                    if start > position && after.is_none() {
+                        after = Some(start);
+                    }
+                    matched = failure[matched - 1];
+                }
+            }
+        }
+        if forward {
+            after.or(first)
+        } else {
+            before.or(last)
+        }
+    };
+    let mut current = pos.min(buffer.byte_len());
+    for _ in 0..count {
+        current = find(current)?;
+    }
+    Some(snap_grapheme(buffer, current))
 }

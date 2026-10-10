@@ -1,0 +1,96 @@
+[
+  {
+    "backend": "vulkan",
+    "boundary": "whole native GUI process",
+    "note_bytes": 1048576,
+    "startup_seconds": 4.3787551849964075,
+    "window_size": [
+      956,
+      1047
+    ],
+    "status": "Name:\ttruff\nUmask:\t0022\nState:\tS (sleeping)\nTgid:\t1701534\nNgid:\t0\nPid:\t1701534\nPPid:\t1701529\nTracerPid:\t0\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nFDSize:\t128\nGroups:\t98 949 985 995 998 1000 \nNStgid:\t1701534\nNSpid:\t1701534\nNSpgid:\t1701519\nNSsid:\t1701519\nKthread:\t0\nVmPeak:\t 1304076 kB\nVmSize:\t 1304076 kB\nVmLck:\t       0 kB\nVmPin:\t       0 kB\nVmHWM:\t  502052 kB\nVmRSS:\t  502052 kB\nRssAnon:\t   70932 kB\nRssFile:\t  289476 kB\nRssShmem:\t  141644 kB\nVmData:\t  185040 kB\nVmStk:\t     152 kB\nVmExe:\t   15048 kB\nVmLib:\t  127964 kB\nVmPTE:\t     756 kB\nVmSwap:\t       0 kB\nHugetlbPages:\t       0 kB\nCoreDumping:\t0\nTHP_enabled:\t1\nuntag_mask:\t0xffffffffffffffff\nThreads:\t12\nSigQ:\t0/127173\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\nSigBlk:\t0000000000000000\nSigIgn:\t0000000000001000\nSigCgt:\t0000000100000440\nCapInh:\t0000000800000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t000001ffffffffff\nCapAmb:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t0\nSeccomp_filters:\t0\nSpeculation_Store_Bypass:\tthread vulnerable\nSpeculationIndirectBranch:\tconditional enabled\nCpus_allowed:\tfff\nCpus_allowed_list:\t0-11\nMems_allowed:\t00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000000,00000001\nMems_allowed_list:\t0\nvoluntary_ctxt_switches:\t178\nnonvoluntary_ctxt_switches:\t23\nx86_Thread_features:\t\nx86_Thread_features_locked:\t\n",
+    "smaps_rollup": "55deac3c4000-7fff72e72000 ---p 00000000 00:00 0                          [rollup]\nRss:              360444 kB\nPss:              256632 kB\nPss_Dirty:         89252 kB\nPss_Anon:          70932 kB\nPss_File:         185668 kB\nPss_Shmem:            32 kB\nShared_Clean:     129240 kB\nShared_Dirty:          4 kB\nPrivate_Clean:    141948 kB\nPrivate_Dirty:     89252 kB\nReferenced:       360444 kB\nAnonymous:         70932 kB\nKSM:                   0 kB\nLazyFree:              0 kB\nAnonHugePages:     12288 kB\nShmemPmdMapped:        0 kB\nFilePmdMapped:    106496 kB\nShared_Hugetlb:        0 kB\nPrivate_Hugetlb:       0 kB\nSwap:                  0 kB\nSwapPss:               0 kB\nLocked:                0 kB\n",
+    "largest_rss_mappings_kib": [
+      [
+        "/dev/nvidiactl",
+        141444
+      ],
+      [
+        "/usr/lib/libnvidia-gpucomp.so.615.71.09",
+        77432
+      ],
+      [
+        "[heap]",
+        45200
+      ],
+      [
+        "/usr/lib/libnvidia-glcore.so.615.71.09",
+        25328
+      ],
+      [
+        "[anonymous]",
+        18780
+      ],
+      [
+        "/home/papayka/Rust_project/Truff_v2/target/release/truff",
+        17876
+      ],
+      [
+        "/usr/lib/libnvidia-glvkspirv.so.615.71.09",
+        7356
+      ],
+      [
+        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+        4216
+      ],
+      [
+        "/usr/share/fonts/kanjistrokeorders/KanjiStrokeOrders.ttf",
+        2048
+      ],
+      [
+        "/usr/lib/libc.so.6",
+        1744
+      ],
+      [
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        1528
+      ],
+      [
+        "/var/cache/fontconfig/923e285e415b1073c8df160bee08820f-le64.cache-12",
+        1128
+      ],
+      [
+        "/usr/lib/libGLX_nvidia.so.615.71.09",
+        1064
+      ],
+      [
+        "/usr/lib/libvulkan.so.1.4.363",
+        672
+      ],
+      [
+        "/var/cache/fontconfig/17090aa38d5c6f09fb8c5c354938f1d7-le64.cache-12",
+        648
+      ],
+      [
+        "/var/cache/fontconfig/df311e82a1a24c41a75c2c930223552e-le64.cache-12",
+        648
+      ],
+      [
+        "/usr/lib/libX11.so.6.4.0",
+        612
+      ],
+      [
+        "/usr/lib/libm.so.6",
+        604
+      ],
+      [
+        "/usr/lib/libnvidia-glsi.so.615.71.09",
+        536
+      ],
+      [
+        "/var/cache/fontconfig/f6b893a7224233d96cb72fd88691c0b4-le64.cache-12",
+        504
+      ]
+    ]
+  }
+]

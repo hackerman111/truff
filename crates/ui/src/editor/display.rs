@@ -92,6 +92,8 @@ pub struct DisplayMap {
     selection: Option<(BytePos, BytePos)>,
     chunks: Vec<DisplayChunk>,
     visual_text: String,
+    colors: Vec<truff_core::markdown::style::ColorSpan>,
+    markers: Vec<(Range<usize>, Option<Range<usize>>)>,
 }
 
 impl DisplayMap {
@@ -104,7 +106,10 @@ impl DisplayMap {
             selection: None,
             chunks: Vec::new(),
             visual_text: String::new(),
+            colors: truff_core::markdown::style::color_spans(text),
+            markers: Vec::new(),
         };
+        map.scan_markers();
         map.rebuild();
         map
     }
@@ -125,7 +130,33 @@ impl DisplayMap {
     /// Updates the source text.
     pub fn set_text(&mut self, text: &str) {
         self.source_text = text.to_string();
+        self.colors = truff_core::markdown::style::color_spans(text);
+        self.scan_markers();
         self.rebuild();
+    }
+
+    pub fn color_spans(&self) -> &[truff_core::markdown::style::ColorSpan] {
+        &self.colors
+    }
+
+    /// Synchronizes a view projection with at most one marker rebuild.
+    pub fn update(
+        &mut self,
+        text: Option<&str>,
+        cursor: BytePos,
+        selection: Option<(BytePos, BytePos)>,
+    ) {
+        if let Some(text) = text {
+            self.source_text.clear();
+            self.source_text.push_str(text);
+            self.colors = truff_core::markdown::style::color_spans(text);
+            self.scan_markers();
+        }
+        if text.is_some() || self.cursor != cursor || self.selection != selection {
+            self.cursor = cursor;
+            self.selection = selection;
+            self.rebuild();
+        }
     }
 
     /// Current source text.
@@ -248,73 +279,55 @@ impl DisplayMap {
         }
     }
 
-    /// Rebuilds the chunk partitioning and projected visual text.
+    pub(crate) fn matches_view(
+        &self,
+        cursor: BytePos,
+        selection: Option<(BytePos, BytePos)>,
+    ) -> bool {
+        self.cursor == cursor && self.selection == selection
+    }
+
+    fn scan_markers(&mut self) {
+        self.markers = scan_markdown_markers(&self.source_text);
+        // Marker parsing belongs to source changes, never to caret movement or scrolling.
+        for span in &self.colors {
+            self.markers.retain(|(range, _)| {
+                !ranges_touch(range, &span.opening) && !ranges_touch(range, &span.closing)
+            });
+            let enclosing = Some(span.opening.start..span.closing.end);
+            self.markers.push((span.opening.clone(), enclosing.clone()));
+            self.markers.push((span.closing.clone(), enclosing));
+        }
+        self.markers.sort_by_key(|(range, _)| range.start);
+    }
+
+    /// Rebuilds projection visibility from cached source markers.
     fn rebuild(&mut self) {
         if self.mode == ProjectionMode::Source {
-            self.visual_text = self.source_text.clone();
-            self.chunks = vec![DisplayChunk {
+            self.visual_text.clear();
+            self.visual_text.push_str(&self.source_text);
+            self.chunks.clear();
+            self.chunks.push(DisplayChunk {
                 source_range: 0..self.source_text.len(),
                 is_marker: false,
                 enclosing_span: None,
                 hidden: false,
                 visual_len: self.source_text.len(),
-            }];
+            });
             return;
         }
-
-        // LivePreview: scan markers and compute visibility
-        let markers = scan_markdown_markers(&self.source_text);
         let cursor_offset = self.cursor.get();
-        let selection_range = self.selection.map(|(a, h)| {
-            let start = a.get().min(h.get());
-            let end = a.get().max(h.get());
-            start..end
-        });
-
-        // Determine which markers are revealed by caret or selection
-        let mut revealed_markers = Vec::new();
-        for (marker_range, span_range) in &markers {
-            let mut reveal = false;
-
-            // 1. Caret touches marker directly (inclusive)
-            if cursor_offset >= marker_range.start && cursor_offset <= marker_range.end {
-                reveal = true;
-            }
-
-            // 2. Caret is inside the enclosing span
-            if let Some(span) = span_range
-                && cursor_offset >= span.start
-                && cursor_offset <= span.end
-            {
-                reveal = true;
-            }
-
-            // 3. Selection touches marker or span
-            if let Some(ref sel) = selection_range {
-                if ranges_touch(sel, marker_range) {
-                    reveal = true;
-                }
-                if let Some(span) = span_range
-                    && ranges_touch(sel, span)
-                {
-                    reveal = true;
-                }
-            }
-
-            if reveal {
-                revealed_markers.push(marker_range.clone());
-            }
-        }
-
-        // Partition source text into chunks (alternating markers and text)
-        let mut chunks = Vec::new();
+        let selection_range = self
+            .selection
+            .map(|(a, h)| a.get().min(h.get())..a.get().max(h.get()));
+        let mut chunks = std::mem::take(&mut self.chunks);
+        chunks.clear();
         let mut last_idx = 0;
-
-        // Sort markers by start offset
-        let mut sorted_markers = markers.clone();
-        sorted_markers.sort_by_key(|(m, _)| m.start);
-
-        for (marker_range, span_range) in sorted_markers {
+        for (marker_range, span_range) in &self.markers {
+            // Some Markdown constructs share delimiters. One source byte appears once.
+            if marker_range.start < last_idx {
+                continue;
+            }
             if marker_range.start > last_idx {
                 chunks.push(DisplayChunk {
                     source_range: last_idx..marker_range.start,
@@ -324,21 +337,26 @@ impl DisplayMap {
                     visual_len: marker_range.start - last_idx,
                 });
             }
-
-            let hidden = !revealed_markers.contains(&marker_range);
-            let visual_len = if hidden { 0 } else { marker_range.len() };
-
+            let caret_touches =
+                |range: &Range<usize>| cursor_offset >= range.start && cursor_offset <= range.end;
+            let revealed = caret_touches(marker_range)
+                || span_range.as_ref().is_some_and(caret_touches)
+                || selection_range.as_ref().is_some_and(|selection| {
+                    ranges_touch(selection, marker_range)
+                        || span_range
+                            .as_ref()
+                            .is_some_and(|span| ranges_touch(selection, span))
+                });
+            let hidden = !revealed;
             chunks.push(DisplayChunk {
                 source_range: marker_range.clone(),
                 is_marker: true,
-                enclosing_span: span_range,
+                enclosing_span: span_range.clone(),
                 hidden,
-                visual_len,
+                visual_len: if hidden { 0 } else { marker_range.len() },
             });
-
             last_idx = marker_range.end;
         }
-
         if last_idx < self.source_text.len() {
             chunks.push(DisplayChunk {
                 source_range: last_idx..self.source_text.len(),
@@ -350,7 +368,8 @@ impl DisplayMap {
         }
 
         // Construct projected visual text from non-hidden chunks
-        let mut visual = String::with_capacity(self.source_text.len());
+        let mut visual = std::mem::take(&mut self.visual_text);
+        visual.clear();
         for chunk in &chunks {
             if !chunk.hidden {
                 visual.push_str(&self.source_text[chunk.source_range.clone()]);

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Truff v2 Benchmark and Performance Metric Runner (P6-P7 / T13)
+# Headless component runner; it does not measure native GUI or presentation.
 # Accepts: --vault <PATH> --scenario <NAME> --runs <N> --out <DIR>
 
 VAULT=""
 SCENARIO="all"
 RUNS=5
-OUT="docs/perf/p7"
+OUT="docs/perf/p7/headless"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -41,7 +41,7 @@ done
 
 mkdir -p "$OUT"
 
-echo "=== Truff v2 Performance Measurement Harness ==="
+echo "=== Truff v2 Headless Component Measurement Harness ==="
 echo "Scenario: $SCENARIO"
 echo "Vault: ${VAULT:-<in-memory/synthetic>}"
 echo "Runs: $RUNS"

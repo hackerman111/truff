@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::commands::CommandId;
+use crate::commands::{CommandContext, CommandId, CommandRegistry, RegistryError};
 use crate::vim::{Key, Mode};
 
 /// Limits and safety thresholds for editing, macros, and history.
@@ -49,6 +48,12 @@ pub enum KeymapError {
         conflicting_key: Key,
     },
     InvalidBinding(String),
+    DuplicateBinding {
+        mode: Mode,
+        keys: Vec<Key>,
+    },
+    Registry(RegistryError),
+    InvalidToml(String),
 }
 
 impl fmt::Display for KeymapError {
@@ -65,6 +70,11 @@ impl fmt::Display for KeymapError {
                 )
             }
             Self::InvalidBinding(msg) => write!(f, "invalid binding: {msg}"),
+            Self::DuplicateBinding { mode, keys } => {
+                write!(f, "duplicate binding in {mode}: {keys:?}")
+            }
+            Self::Registry(e) => e.fmt(f),
+            Self::InvalidToml(e) => write!(f, "invalid keymap TOML: {e}"),
         }
     }
 }
@@ -242,52 +252,44 @@ impl Default for KeymapConfig {
 impl KeymapConfig {
     /// Checks whether a key sequence is a complete binding or an exact prefix of an existing binding.
     pub fn has_binding_or_prefix(&self, mode: Mode, keys: &[Key]) -> bool {
-        for b in &self.bindings {
-            if b.mode == mode && b.keys.starts_with(keys) {
-                return true;
-            }
-        }
-        false
+        self.compile().is_ok_and(|map| {
+            map.lookup(mode, keys, CommandContext::Editor) != BindingLookup::Missing
+        })
     }
 
     /// Returns available key hints for which-key given an entered prefix.
     pub fn available_hints(&self, mode: Mode, prefix: &[Key]) -> Vec<KeyHint> {
-        let mut hints = Vec::new();
-        let mut seen = HashMap::new();
-
-        for b in &self.bindings {
-            if b.mode != mode {
-                continue;
-            }
-            if b.keys.len() > prefix.len() && b.keys.starts_with(prefix) {
-                let next_key = b.keys[prefix.len()];
-                let is_prefix = b.keys.len() > prefix.len() + 1;
-                let desc = if is_prefix {
-                    format!("+{}", next_key)
-                } else {
-                    b.description.clone()
-                };
-
-                seen.entry(next_key).or_insert((desc, is_prefix));
-            }
-        }
-
-        for (key, (description, is_prefix)) in seen {
-            hints.push(KeyHint {
-                key,
-                description,
-                is_prefix,
-            });
-        }
-        hints.sort_by_key(|h| h.key);
-        hints
+        self.compile()
+            .map(|map| map.hints(mode, prefix, CommandContext::Editor))
+            .unwrap_or_default()
     }
 
     /// Validates the keymap to ensure no ambiguous collisions.
     pub fn validate(&self) -> Result<(), KeymapError> {
+        if self.bindings.len() > 4096 {
+            return Err(KeymapError::InvalidBinding(
+                "more than 4096 bindings".into(),
+            ));
+        }
+        let registry = CommandRegistry::default();
         for (i, a) in self.bindings.iter().enumerate() {
+            if a.keys.len() > 32 {
+                return Err(KeymapError::InvalidBinding(
+                    "key sequence exceeds 32 keys".into(),
+                ));
+            }
+            if a.keys.is_empty() {
+                return Err(KeymapError::InvalidBinding("empty key sequence".into()));
+            }
+            registry.get(&a.command).map_err(KeymapError::Registry)?;
             for (j, b) in self.bindings.iter().enumerate() {
                 if i != j && a.mode == b.mode {
+                    if a.keys == b.keys {
+                        return Err(KeymapError::DuplicateBinding {
+                            mode: a.mode,
+                            keys: a.keys.clone(),
+                        });
+                    }
                     // Check if a is a strict prefix of b
                     if a.keys.len() < b.keys.len() && b.keys.starts_with(&a.keys) {
                         return Err(KeymapError::ShadowedPrefix {
@@ -299,5 +301,94 @@ impl KeymapConfig {
             }
         }
         Ok(())
+    }
+}
+
+/// Compiled prefixes are the single source for key lookup and contextual hints.
+#[derive(Debug, Clone)]
+pub struct CompiledKeymap {
+    prefixes: std::collections::BTreeMap<Mode, std::collections::BTreeMap<Vec<Key>, Vec<usize>>>,
+    bindings: Vec<KeyBinding>,
+    registry: CommandRegistry,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindingLookup {
+    Complete(CommandId),
+    Prefix,
+    Missing,
+}
+impl KeymapConfig {
+    pub fn from_toml(source: &str) -> Result<Self, KeymapError> {
+        let config: Self =
+            toml::from_str(source).map_err(|e| KeymapError::InvalidToml(e.to_string()))?;
+        config.validate()?;
+        Ok(config)
+    }
+    pub fn compile(&self) -> Result<CompiledKeymap, KeymapError> {
+        self.validate()?;
+        let mut prefixes = std::collections::BTreeMap::<
+            Mode,
+            std::collections::BTreeMap<Vec<Key>, Vec<usize>>,
+        >::new();
+        for (idx, binding) in self.bindings.iter().enumerate() {
+            for len in 0..=binding.keys.len() {
+                prefixes
+                    .entry(binding.mode)
+                    .or_default()
+                    .entry(binding.keys[..len].to_vec())
+                    .or_default()
+                    .push(idx);
+            }
+        }
+        Ok(CompiledKeymap {
+            prefixes,
+            bindings: self.bindings.clone(),
+            registry: CommandRegistry::default(),
+        })
+    }
+}
+impl CompiledKeymap {
+    pub fn lookup(&self, mode: Mode, keys: &[Key], context: CommandContext) -> BindingLookup {
+        let Some(bindings) = self
+            .prefixes
+            .get(&mode)
+            .and_then(|prefixes| prefixes.get(keys))
+        else {
+            return BindingLookup::Missing;
+        };
+        for &idx in bindings {
+            let binding = &self.bindings[idx];
+            if self.registry.require(&binding.command, context).is_ok() {
+                if binding.keys.len() == keys.len() {
+                    return BindingLookup::Complete(binding.command.clone());
+                }
+                return BindingLookup::Prefix;
+            }
+        }
+        BindingLookup::Missing
+    }
+    pub fn hints(&self, mode: Mode, prefix: &[Key], context: CommandContext) -> Vec<KeyHint> {
+        let Some(bindings) = self
+            .prefixes
+            .get(&mode)
+            .and_then(|prefixes| prefixes.get(prefix))
+        else {
+            return Vec::new();
+        };
+        let mut hints = std::collections::BTreeMap::new();
+        for &idx in bindings {
+            let binding = &self.bindings[idx];
+            if binding.keys.len() > prefix.len()
+                && self.registry.require(&binding.command, context).is_ok()
+            {
+                let key = binding.keys[prefix.len()];
+                hints.entry(key).or_insert_with(|| KeyHint {
+                    key,
+                    description: binding.description.clone(),
+                    is_prefix: binding.keys.len() > prefix.len() + 1,
+                });
+            }
+        }
+        hints.into_values().collect()
     }
 }

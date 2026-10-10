@@ -144,16 +144,57 @@ impl Change {
 }
 
 /// Collection of applied changes, used for rebasing cursors, syntax highlighting, and layout invalidation.
+///
+/// Transaction boundaries and change storage cannot be mutated independently.
+///
+/// ```compile_fail
+/// use truff_core::ChangeSet;
+/// let mut changes = ChangeSet::default();
+/// changes.changes.clear();
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChangeSet {
-    /// The applied changes.
-    pub changes: Vec<Change>,
+    /// Applied changes in execution order. Grouped operations contain successive
+    /// coordinate spaces; use `batches()` or `map_pos()` to consume them.
+    changes: Vec<Change>,
+    batch_ends: Vec<usize>,
 }
 
 impl ChangeSet {
     /// Creates a `ChangeSet` from a list of changes.
     pub fn new(changes: Vec<Change>) -> Self {
-        Self { changes }
+        Self {
+            changes,
+            batch_ends: Vec::new(),
+        }
+    }
+
+    /// Returns changes in execution order. For grouped operations, `batches()`
+    /// retains the boundaries between successive coordinate spaces.
+    pub fn changes(&self) -> &[Change] {
+        &self.changes
+    }
+
+    /// Visits transaction batches in execution order, each using the source
+    /// coordinates immediately before that transaction.
+    pub fn batches(&self) -> impl Iterator<Item = &[Change]> {
+        let mut start = 0;
+        self.batch_ends
+            .iter()
+            .copied()
+            .chain(std::iter::once(self.changes.len()))
+            .map(move |end| {
+                let batch = &self.changes[start..end];
+                start = end;
+                batch
+            })
+    }
+
+    pub(crate) fn append_batch(&mut self, batch: Self) {
+        if !self.changes.is_empty() {
+            self.batch_ends.push(self.changes.len());
+        }
+        self.changes.extend(batch.changes);
     }
 
     /// Returns `true` if no edits were applied.
@@ -168,17 +209,21 @@ impl ChangeSet {
 
     /// Re-maps a byte offset from the pre-edit coordinate space to the post-edit coordinate space.
     pub fn map_pos(&self, pos: usize) -> usize {
-        let mut current = pos;
-        for change in &self.changes {
-            if pos < change.old_range.start {
-                break;
-            } else if pos <= change.old_range.end {
-                current = change.old_range.start + change.new_len;
-            } else {
-                current = (current as isize + change.delta) as usize;
+        self.batches().fold(pos, |pos, batch| {
+            let mut shift = 0isize;
+            let mut mapped = None;
+            for change in batch {
+                if pos < change.old_range.start {
+                    break;
+                }
+                if pos <= change.old_range.end {
+                    mapped =
+                        Some(((change.old_range.start as isize + shift) as usize) + change.new_len);
+                }
+                shift += change.delta;
             }
-        }
-        current
+            mapped.unwrap_or((pos as isize + shift) as usize)
+        })
     }
 }
 

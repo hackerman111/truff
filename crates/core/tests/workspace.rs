@@ -5,6 +5,33 @@ use truff_core::workspace::buffers::{BufferState, VaultEpoch};
 use truff_core::workspace::{StoreEvent, Workspace};
 
 #[test]
+fn open_path_registers_the_buffer_before_load_reply() {
+    let mut ws = Workspace::new();
+    let path = PathBuf::from("note.md");
+    let effects = ws.dispatch(Action::OpenPath(path.clone())).unwrap();
+    let key = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::SubmitStoreJob(truff_core::workspace::StoreJob::LoadFile { key, .. }) => {
+                Some(*key)
+            }
+            _ => None,
+        })
+        .unwrap();
+    ws.accept(StoreEvent::FileLoaded {
+        key,
+        content: "loaded".into(),
+        fingerprint: "fp".into(),
+    })
+    .unwrap();
+    assert_eq!(ws.buffers().get_by_path(&path), Some(key.buffer_id));
+    assert_eq!(
+        ws.get_view(ws.active_view().unwrap()).unwrap().buffer_id(),
+        key.buffer_id
+    );
+}
+
+#[test]
 fn two_views_one_buffer() {
     let mut ws = Workspace::new();
     let path = PathBuf::from("notes/hello.md");
@@ -183,4 +210,157 @@ fn late_save_ack_keeps_dirty() {
     assert_eq!(ws.buffers().get_state(buf_id), Some(BufferState::Dirty));
     let buf = ws.buffers().get_buffer(buf_id).unwrap();
     assert!(buf.is_dirty());
+}
+
+#[test]
+fn reload_keeps_revision_monotonic_and_rejects_dirty_overwrite() {
+    let mut workspace = Workspace::new();
+    let id = workspace
+        .open_buffer_from_text(PathBuf::from("note.md"), "old")
+        .unwrap();
+    let view = workspace.create_view(id).unwrap();
+    let key = workspace.buffers().get_snapshot_key(id).unwrap();
+    workspace
+        .accept(StoreEvent::FileLoaded {
+            key,
+            content: "new".into(),
+            fingerprint: "new-fp".into(),
+        })
+        .unwrap();
+    assert!(workspace.buffers().get_buffer(id).unwrap().revision() > key.revision);
+    let key = workspace.buffers().get_snapshot_key(id).unwrap();
+    workspace
+        .dispatch(Action::ApplyEdit {
+            view_id: view,
+            transaction: truff_core::text::Transaction::insert(0, "dirty "),
+        })
+        .unwrap();
+    assert!(workspace.dispatch(Action::ReloadBuffer(id)).is_err());
+    assert!(
+        workspace
+            .accept(StoreEvent::FileLoaded {
+                key,
+                content: "disk".into(),
+                fingerprint: "disk-fp".into()
+            })
+            .is_err()
+    );
+    assert_eq!(
+        workspace.buffers().get_buffer(id).unwrap().as_str(),
+        "dirty new"
+    );
+}
+
+#[test]
+fn watcher_conflict_retains_base_and_rejects_old_epoch_and_path() {
+    let mut workspace = Workspace::new();
+    let path = PathBuf::from("note.md");
+    let id = workspace
+        .open_buffer_from_text(path.clone(), "base")
+        .unwrap();
+    workspace
+        .buffers_mut()
+        .get_mut(id)
+        .unwrap()
+        .set_fingerprint(Some("base-fp".into()));
+    let view = workspace.create_view(id).unwrap();
+    workspace
+        .dispatch(Action::ApplyEdit {
+            view_id: view,
+            transaction: Transaction::insert(4, " draft"),
+        })
+        .unwrap();
+    let key = workspace.buffers().get_snapshot_key(id).unwrap();
+    workspace
+        .accept(StoreEvent::ExternalChanged {
+            key,
+            path: path.clone(),
+            new_fingerprint: "external-fp".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        workspace.buffers().get(id).unwrap().fingerprint(),
+        Some("base-fp")
+    );
+    assert_eq!(
+        workspace.buffers().get_state(id),
+        Some(BufferState::Conflict)
+    );
+    workspace
+        .dispatch(Action::ApplyEdit {
+            view_id: view,
+            transaction: Transaction::insert(0, "more "),
+        })
+        .unwrap();
+    assert!(workspace.dispatch(Action::SaveBuffer(id)).is_err());
+    assert_eq!(
+        workspace.buffers().get_state(id),
+        Some(BufferState::Conflict)
+    );
+    workspace
+        .buffers_mut()
+        .assign_path(id, PathBuf::from("other.md"))
+        .unwrap();
+    assert!(
+        workspace
+            .accept(StoreEvent::ExternalChanged {
+                key,
+                path: path.clone(),
+                new_fingerprint: "late".into()
+            })
+            .unwrap()
+            .is_empty()
+    );
+    workspace.switch_vault(VaultEpoch::new(1));
+    assert!(
+        workspace
+            .accept(StoreEvent::ExternalChanged {
+                key,
+                path,
+                new_fingerprint: "old-vault".into()
+            })
+            .is_err()
+    );
+}
+
+#[test]
+fn approved_reload_discards_only_the_revision_user_approved() {
+    let mut workspace = Workspace::new();
+    let id = workspace
+        .open_buffer_from_text(PathBuf::from("note.md"), "base")
+        .unwrap();
+    let view = workspace.create_view(id).unwrap();
+    workspace
+        .dispatch(Action::ApplyEdit {
+            view_id: view,
+            transaction: Transaction::insert(4, " draft"),
+        })
+        .unwrap();
+    let key = workspace.buffers().get_snapshot_key(id).unwrap();
+    let effects = workspace.dispatch(Action::ReloadDiscard(id)).unwrap();
+    assert!(matches!(
+        effects[0],
+        Effect::SubmitStoreJob(truff_core::workspace::StoreJob::ReloadFile { .. })
+    ));
+    workspace
+        .accept(StoreEvent::FileReloaded {
+            key,
+            content: "external".into(),
+            fingerprint: "fp".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        workspace.buffers().get_buffer(id).unwrap().as_str(),
+        "external"
+    );
+    assert!(!workspace.buffers().get_buffer(id).unwrap().is_dirty());
+    assert!(
+        workspace
+            .accept(StoreEvent::FileReloaded {
+                key,
+                content: "old".into(),
+                fingerprint: "fp".into()
+            })
+            .is_err()
+    );
 }
