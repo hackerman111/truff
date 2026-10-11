@@ -209,11 +209,7 @@ impl EditorWidget {
             // A pathological logical line uses a bounded source window around its caret.
             // Other lines remain visible; the Rope and source offsets stay authoritative.
             let long = end - start > MAX_LINE_BYTES;
-            let width = if long {
-                f32::INFINITY
-            } else {
-                content_width
-            };
+            let width = if long { f32::INFINITY } else { content_width };
             if long {
                 let center = if line == cursor_line { cursor } else { start };
                 range.start = center.saturating_sub(MAX_LINE_BYTES / 2).max(start);

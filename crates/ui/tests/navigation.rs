@@ -339,7 +339,11 @@ fn test_sidebar_hierarchical_folders_and_auto_expansion() {
 
     let model = shell.sidebar_model();
     // Initially: root level has "docs" (collapsed) and "Welcome.md"
-    let visible_titles: Vec<&str> = model.visible_rows().iter().map(|r| r.title.as_str()).collect();
+    let visible_titles: Vec<&str> = model
+        .visible_rows()
+        .iter()
+        .map(|r| r.title.as_str())
+        .collect();
     assert_eq!(visible_titles, vec!["docs", "Welcome.md"]);
     assert!(model.visible_rows()[0].is_folder);
     assert!(!model.visible_rows()[1].is_folder);
@@ -347,6 +351,13 @@ fn test_sidebar_hierarchical_folders_and_auto_expansion() {
     // Auto-reveal: selecting a nested file expands parent folders
     shell.select_sidebar_file("docs/api/endpoints.md");
     let model = shell.sidebar_model();
-    let visible_titles: Vec<&str> = model.visible_rows().iter().map(|r| r.title.as_str()).collect();
-    assert_eq!(visible_titles, vec!["docs", "api", "endpoints.md", "guide.md", "Welcome.md"]);
+    let visible_titles: Vec<&str> = model
+        .visible_rows()
+        .iter()
+        .map(|r| r.title.as_str())
+        .collect();
+    assert_eq!(
+        visible_titles,
+        vec!["docs", "api", "endpoints.md", "guide.md", "Welcome.md"]
+    );
 }
