@@ -116,11 +116,15 @@ fn theme_no_parse() {
     let original_sexp = syntax_tree.snapshot().syntax_tree_sexp();
 
     let mut shell = Shell::new();
-    assert_eq!(shell.theme(), &Theme::obsidian_dark());
+    assert_eq!(shell.theme(), &Theme::nord());
 
     // Switch theme to light theme
     shell.set_theme(Theme::light());
     assert_eq!(shell.theme(), &Theme::light());
+
+    // Switch theme to obsidian_dark
+    shell.set_theme(Theme::obsidian_dark());
+    assert_eq!(shell.theme(), &Theme::obsidian_dark());
 
     // Theme switch must NOT reparse or invalidate the syntax tree!
     let snapshot_after = syntax_tree.snapshot();
@@ -129,4 +133,34 @@ fn theme_no_parse() {
         original_sexp,
         "Theme switch must not trigger Markdown syntax parsing or tree rebuild!"
     );
+}
+
+#[test]
+fn app_theme_command_and_persistence() {
+    let tmp = std::env::temp_dir().join(format!("truff-test-theme-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let config_dir = tmp.join("config");
+    std::fs::create_dir_all(&config_dir).unwrap();
+
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", &config_dir);
+    }
+
+    let mut app = truff_ui::app::Application::new();
+    assert_eq!(app.shell.theme(), &Theme::nord());
+
+    // Switch to dark via command
+    app.execute_command("theme dark").expect("switch theme to dark");
+    assert_eq!(app.shell.theme(), &Theme::obsidian_dark());
+
+    // Verify config was persisted
+    let config = truff_ui::app::global_config::GlobalConfig::load();
+    assert_eq!(config.theme, "dark");
+
+    // Switch to nord via command
+    app.execute_command("theme nord").expect("switch theme to nord");
+    assert_eq!(app.shell.theme(), &Theme::nord());
+
+    let _ = app.shutdown();
+    let _ = std::fs::remove_dir_all(&tmp);
 }

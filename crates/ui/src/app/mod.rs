@@ -3,6 +3,7 @@ mod commands;
 pub mod global_config;
 mod io;
 mod navigation;
+pub mod path_completion;
 mod registered;
 mod session;
 
@@ -57,8 +58,11 @@ impl Default for Application {
 
 impl Application {
     pub fn new() -> Self {
+        let mut shell = Shell::new();
+        let config = global_config::GlobalConfig::load();
+        shell.set_theme(config.resolve_theme());
         Self {
-            shell: Shell::new(),
+            shell,
             status: "Open a vault with :vault <path>".into(),
             backlinks: Vec::new(),
             backlink_selection: 0,
@@ -181,6 +185,33 @@ impl Application {
                 Ok(false)
             }
         }
+    }
+
+    pub fn create_and_open_vault(
+        &mut self,
+        path: &Path,
+        initial_note: Option<&str>,
+    ) -> AppResult<()> {
+        let expanded = path_completion::expand_path(&path.to_string_lossy());
+        std::fs::create_dir_all(&expanded)?;
+        let canonical = expanded.canonicalize()?;
+        if let Some(note_name) = initial_note {
+            let note_filename = if note_name.ends_with(".md") {
+                note_name.to_string()
+            } else {
+                format!("{note_name}.md")
+            };
+            let note_path = canonical.join(&note_filename);
+            if !note_path.exists() {
+                let note_title = note_filename.trim_end_matches(".md");
+                let starter = format!(
+                    "# {note_title}\n\nДобро пожаловать в ваше новое хранилище Truff!\n\n- Нажмите `i`, чтобы перейти в режим вставки (Insert) и редактировать текст.\n- Нажмите `Esc`, чтобы вернуться в нормальный режим (Normal).\n- Создавайте новые заметки командой `:new <имя.md>`.\n"
+                );
+                std::fs::write(&note_path, starter)?;
+            }
+        }
+        self.open_vault(&canonical)?;
+        Ok(())
     }
 
     pub fn open_note(&mut self, path: &str) -> AppResult<()> {
