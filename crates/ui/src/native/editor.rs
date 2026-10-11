@@ -44,6 +44,13 @@ pub fn color(value: Color) -> Color32 {
 }
 
 impl EditorWidget {
+    /// Calculates the constrained readable column width and centered horizontal margin.
+    pub fn calculate_column_metrics(available_width: f32) -> (f32, f32) {
+        let content_width = (available_width - 48.0).clamp(320.0, 780.0);
+        let margin_x = ((available_width - content_width) / 2.0).max(24.0);
+        (content_width, margin_x)
+    }
+
     pub fn visible_source_range(&self) -> Range<usize> {
         self.visible.clone()
     }
@@ -142,6 +149,7 @@ impl EditorWidget {
         let (Some(buffer), Some(view)) = (buffer, view) else {
             return None;
         };
+        let (content_width, margin_x) = Self::calculate_column_metrics(rect.width());
         let cursor = view.head().get().min(buffer.byte_len());
         let cursor_line = buffer.line_of_byte(cursor);
         let trailing_newline = buffer
@@ -204,7 +212,7 @@ impl EditorWidget {
             let width = if long {
                 f32::INFINITY
             } else {
-                (rect.width() - 36.0).max(24.0)
+                content_width
             };
             if long {
                 let center = if line == cursor_line { cursor } else { start };
@@ -346,7 +354,7 @@ impl EditorWidget {
             self.scroll = anchor.scroll_offset_y;
             let origin = rect.left_top()
                 + Vec2::new(
-                    18.0 - if long { self.horizontal } else { 0.0 },
+                    margin_x - if long { self.horizontal } else { 0.0 },
                     self.heights.y_for_block(line) - self.scroll,
                 );
             let caret_at = |source: usize| {

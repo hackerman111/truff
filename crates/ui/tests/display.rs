@@ -226,3 +226,17 @@ fn live_preview_projects_color_wrappers_and_keeps_code_literal() {
         pos
     );
 }
+
+#[test]
+fn test_editor_readable_column_and_margin() {
+    let available_width = 1200.0;
+    let (content_width, margin_x) = truff_ui::native::EditorWidget::calculate_column_metrics(available_width);
+    assert_eq!(content_width, 780.0);
+    assert_eq!(margin_x, (1200.0 - 780.0) / 2.0);
+
+    // Narrow window clamps to available_width - 48
+    let narrow_width = 600.0;
+    let (content_width_narrow, margin_x_narrow) = truff_ui::native::EditorWidget::calculate_column_metrics(narrow_width);
+    assert_eq!(content_width_narrow, 600.0 - 48.0);
+    assert_eq!(margin_x_narrow, 24.0);
+}
