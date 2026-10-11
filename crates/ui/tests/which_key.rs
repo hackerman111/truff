@@ -66,3 +66,25 @@ fn test_help_command_opens_which_key_help() {
     assert!(app.shell.which_key().is_visible());
     assert_eq!(app.shell.which_key().mode(), WhichKeyMode::Help);
 }
+
+#[test]
+fn test_gui_renders_which_key_overlay() {
+    let ctx = eframe::egui::Context::default();
+    let mut app = truff_ui::native::NativeApp::new(Application::new(), &ctx);
+    app.application.shell.feed_key(Key::Char('?'));
+    assert!(app.application.shell.which_key().is_visible());
+
+    ctx.run_ui(
+        eframe::egui::RawInput {
+            screen_rect: Some(eframe::egui::Rect::from_min_size(
+                eframe::egui::Pos2::ZERO,
+                eframe::egui::vec2(1100.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            app.show(ui);
+        },
+    )
+    .drop_without_applying_deltas();
+}

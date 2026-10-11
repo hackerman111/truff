@@ -78,7 +78,11 @@ impl NativeApp {
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Truff").strong().color(color(theme.accent)));
+                    ui.label(
+                        egui::RichText::new("Truff")
+                            .strong()
+                            .color(color(theme.accent)),
+                    );
                     ui.label(egui::RichText::new("·").color(color(theme.text_muted)));
                     if let Some(path) = self.application.active_relative_path() {
                         ui.label(egui::RichText::new(path).color(color(theme.text_primary)));
@@ -95,16 +99,6 @@ impl NativeApp {
                         .is_some_and(|buffer| buffer.is_dirty())
                     {
                         ui.label(egui::RichText::new("●").color(color(theme.accent)));
-                    }
-                    if self.application.shell.which_key().is_visible() {
-                        ui.add_space(8.0);
-                        for hint in self.application.shell.which_key().formatted_lines() {
-                            ui.label(
-                                egui::RichText::new(hint)
-                                    .color(color(theme.text_muted))
-                                    .size(12.0),
-                            );
-                        }
                     }
                 });
             });
@@ -188,7 +182,11 @@ impl NativeApp {
                             .color(color(theme.text_muted)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("➕").on_hover_text("Создать новое хранилище").clicked() {
+                        if ui
+                            .small_button("➕")
+                            .on_hover_text("Создать новое хранилище")
+                            .clicked()
+                        {
                             self.show_create_vault_dialog = true;
                         }
                     });
@@ -204,10 +202,7 @@ impl NativeApp {
                         ui.add_space(8.0);
                         ui.label("Недавние:");
                         for path in &config.recent_vaults {
-                            let name = path
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("vault");
+                            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("vault");
                             if ui
                                 .button(format!("📁 {name}"))
                                 .on_hover_text(path.display().to_string())
@@ -244,7 +239,9 @@ impl NativeApp {
                                 };
                                 ui.horizontal(|ui| {
                                     ui.add_space(indent);
-                                    let rich = egui::RichText::new(label_text).color(text_color).size(13.5);
+                                    let rich = egui::RichText::new(label_text)
+                                        .color(text_color)
+                                        .size(13.5);
                                     let resp = ui.selectable_label(is_selected, rich);
                                     if resp.clicked() {
                                         open = row.data.clone();
@@ -261,58 +258,59 @@ impl NativeApp {
                 }
             });
 
-        egui::Panel::right("references")
-            .frame(
-                egui::Frame::new()
-                    .fill(color(theme.bg_secondary))
-                    .stroke(egui::Stroke::new(1.0, color(theme.border)))
-                    .inner_margin(egui::Margin::symmetric(8, 8)),
-            )
-            .default_size(220.0)
-            .min_size(140.0)
-            .max_size(600.0)
-            .resizable(true)
-            .show_separator_line(true)
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.label(
-                    egui::RichText::new("BACKLINKS")
-                        .size(11.0)
-                        .strong()
-                        .color(color(theme.text_muted)),
-                );
-                ui.add_space(4.0);
-                let mut open = None;
-                egui::ScrollArea::vertical().show_rows(
-                    ui,
-                    24.0,
-                    self.application.backlinks.len(),
-                    |ui, rows| {
-                        for index in rows {
-                            let is_selected = index == self.application.backlink_selection;
-                            let rich = egui::RichText::new(
-                                &self.application.backlinks[index].source_path,
-                            )
-                            .size(13.5)
-                            .color(if is_selected {
-                                color(theme.text_primary)
-                            } else {
-                                color(theme.text_muted)
-                            });
-                            if ui.selectable_label(is_selected, rich).clicked() {
-                                open = Some(index);
+        if !self.application.backlinks.is_empty() {
+            egui::Panel::right("references")
+                .frame(
+                    egui::Frame::new()
+                        .fill(color(theme.bg_secondary))
+                        .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                        .inner_margin(egui::Margin::symmetric(8, 8)),
+                )
+                .default_size(220.0)
+                .min_size(140.0)
+                .max_size(600.0)
+                .resizable(true)
+                .show_separator_line(true)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.label(
+                        egui::RichText::new("BACKLINKS")
+                            .size(11.0)
+                            .strong()
+                            .color(color(theme.text_muted)),
+                    );
+                    ui.add_space(4.0);
+                    let mut open = None;
+                    egui::ScrollArea::vertical().show_rows(
+                        ui,
+                        24.0,
+                        self.application.backlinks.len(),
+                        |ui, rows| {
+                            for index in rows {
+                                let is_selected = index == self.application.backlink_selection;
+                                let rich =
+                                    egui::RichText::new(&self.application.backlinks[index].source_path)
+                                        .size(13.5)
+                                        .color(if is_selected {
+                                            color(theme.text_primary)
+                                        } else {
+                                            color(theme.text_muted)
+                                        });
+                                if ui.selectable_label(is_selected, rich).clicked() {
+                                    open = Some(index);
+                                }
                             }
+                        },
+                    );
+                    if let Some(index) = open {
+                        self.application.backlink_selection = index;
+                        self.application.shell.set_focus(Focus::RightPanel);
+                        if let Err(error) = self.application.open_backlink() {
+                            self.application.status = error.to_string();
                         }
-                    },
-                );
-                if let Some(index) = open {
-                    self.application.backlink_selection = index;
-                    self.application.shell.set_focus(Focus::RightPanel);
-                    if let Err(error) = self.application.open_backlink() {
-                        self.application.status = error.to_string();
                     }
-                }
-            });
+                });
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             let shell = &self.application.shell;
             let input = self.editor.show(
@@ -384,8 +382,7 @@ impl NativeApp {
                     ui.label("Укажите путь (поддерживаются ~, ./, ../ и абсолютные пути):");
 
                     let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.vault_path_input)
-                            .desired_width(420.0),
+                        egui::TextEdit::singleline(&mut self.vault_path_input).desired_width(420.0),
                     );
 
                     if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab)) {
@@ -455,8 +452,7 @@ impl NativeApp {
                 });
 
             if submit_creation {
-                let note = if self.create_starter_note
-                    && !self.initial_note_name.trim().is_empty()
+                let note = if self.create_starter_note && !self.initial_note_name.trim().is_empty()
                 {
                     Some(self.initial_note_name.as_str())
                 } else {
@@ -478,6 +474,7 @@ impl NativeApp {
                 self.show_create_vault_dialog = false;
             }
         }
+        self.show_which_key_overlay(&context);
         if let Some(id) = self.application.shell.workspace().active_view()
             && let Some(view) = self.application.shell.workspace_mut().get_view_mut(id)
         {
@@ -503,6 +500,126 @@ impl NativeApp {
                 }
             }
         }
+    }
+
+    fn show_which_key_overlay(&mut self, context: &egui::Context) {
+        if !self.application.shell.which_key().is_visible() {
+            return;
+        }
+
+        let theme = self.application.shell.theme().clone();
+        let overlay = self.application.shell.which_key().clone();
+
+        egui::Window::new("which_key_overlay")
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -28.0])
+            .frame(
+                egui::Frame::new()
+                    .fill(color(theme.bg_secondary))
+                    .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(14, 10)),
+            )
+            .show(context, |ui| {
+                ui.horizontal(|ui| {
+                    let title = if overlay.title().is_empty() {
+                        "Which-Key"
+                    } else {
+                        overlay.title()
+                    };
+                    ui.label(
+                        egui::RichText::new(format!("⌨  {title}"))
+                            .strong()
+                            .color(color(theme.accent)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new("[Esc] закрыть")
+                                .color(color(theme.text_muted))
+                                .size(11.0),
+                        );
+                    });
+                });
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                match overlay.mode() {
+                    crate::overlays::WhichKeyMode::Prefix => {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(12.0, 6.0);
+                            for hint in overlay.hints() {
+                                ui.horizontal(|ui| {
+                                    egui::Frame::new()
+                                        .fill(color(theme.bg_tertiary))
+                                        .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                                        .corner_radius(egui::CornerRadius::same(4))
+                                        .inner_margin(egui::Margin::symmetric(6, 2))
+                                        .show(ui, |ui| {
+                                            ui.label(
+                                                egui::RichText::new(hint.key.to_string())
+                                                    .monospace()
+                                                    .strong()
+                                                    .color(color(theme.accent)),
+                                            );
+                                        });
+                                    ui.label(
+                                        egui::RichText::new("→")
+                                            .color(color(theme.text_muted)),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(&hint.description)
+                                            .color(color(theme.text_primary)),
+                                    );
+                                });
+                            }
+                        });
+                    }
+                    crate::overlays::WhichKeyMode::Help => {
+                        egui::ScrollArea::vertical()
+                            .max_height(260.0)
+                            .show(ui, |ui| {
+                                ui.horizontal_top(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 20.0;
+                                    for category in overlay.categories() {
+                                        ui.vertical(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(&category.name)
+                                                    .strong()
+                                                    .color(color(theme.accent)),
+                                            );
+                                            ui.add_space(4.0);
+                                            for hint in &category.hints {
+                                                ui.horizontal(|ui| {
+                                                    egui::Frame::new()
+                                                        .fill(color(theme.bg_tertiary))
+                                                        .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                                                        .corner_radius(egui::CornerRadius::same(4))
+                                                        .inner_margin(egui::Margin::symmetric(5, 1))
+                                                        .show(ui, |ui| {
+                                                            ui.label(
+                                                                egui::RichText::new(hint.key.to_string())
+                                                                    .monospace()
+                                                                    .size(11.0)
+                                                                    .color(color(theme.accent)),
+                                                            );
+                                                        });
+                                                    ui.label(
+                                                        egui::RichText::new(&hint.description)
+                                                            .size(12.0)
+                                                            .color(color(theme.text_primary)),
+                                                    );
+                                                });
+                                            }
+                                        });
+                                    }
+                                });
+                            });
+                    }
+                }
+            });
     }
 }
 
