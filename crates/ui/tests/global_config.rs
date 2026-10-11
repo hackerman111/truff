@@ -6,7 +6,26 @@ fn test_default_config_is_empty() {
     let config = GlobalConfig::default();
     assert_eq!(config.last_vault, None);
     assert!(config.recent_vaults.is_empty());
+    assert_eq!(config.theme, "nord");
 }
+
+#[test]
+fn test_theme_config_defaults_to_nord_and_deserializes_custom() {
+    let toml_str = r##"
+        theme = "custom_nord"
+
+        [themes.custom_nord]
+        bg_primary = "#2e3440"
+        bg_secondary = "#242933"
+        accent = "#88c0d0"
+    "##;
+    let config: GlobalConfig = toml::from_str(toml_str).expect("parse config with themes");
+    assert_eq!(config.theme, "custom_nord");
+    assert!(config.themes.contains_key("custom_nord"));
+    let theme_cfg = &config.themes["custom_nord"];
+    assert_eq!(theme_cfg.bg_primary.as_deref(), Some("#2e3440"));
+}
+
 
 #[test]
 fn test_record_vault_deduplicates_and_orders() {

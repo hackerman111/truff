@@ -5,16 +5,54 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use crate::theme::{CustomThemeConfig, Theme};
+use std::collections::BTreeMap;
+
 pub const MAX_RECENT_VAULTS: usize = 20;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+fn default_theme() -> String {
+    "nord".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub last_vault: Option<PathBuf>,
     #[serde(default)]
     pub recent_vaults: Vec<PathBuf>,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default)]
+    pub themes: BTreeMap<String, CustomThemeConfig>,
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            last_vault: None,
+            recent_vaults: Vec::new(),
+            theme: default_theme(),
+            themes: BTreeMap::new(),
+        }
+    }
 }
 
 impl GlobalConfig {
+    /// Resolves the configured active Theme.
+    pub fn resolve_theme(&self) -> Theme {
+        match self.theme.as_str() {
+            "nord" => Theme::nord(),
+            "dark" | "obsidian-dark" => Theme::obsidian_dark(),
+            "light" => Theme::light(),
+            custom_name => {
+                if let Some(custom) = self.themes.get(custom_name) {
+                    Theme::nord().apply_custom(custom)
+                } else {
+                    Theme::nord()
+                }
+            }
+        }
+    }
+
     /// Returns the canonical path to `config.toml` in `$XDG_CONFIG_HOME/truff` or `~/.config/truff`.
     pub fn config_path() -> Option<PathBuf> {
         let base = std::env::var_os("XDG_CONFIG_HOME")

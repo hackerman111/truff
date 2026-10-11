@@ -88,26 +88,72 @@ pub struct Theme {
     pub spacing_xl: f32,
 }
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CustomThemeConfig {
+    pub bg_primary: Option<String>,
+    pub bg_secondary: Option<String>,
+    pub bg_tertiary: Option<String>,
+    pub bg_surface: Option<String>,
+    pub border: Option<String>,
+    pub text_primary: Option<String>,
+    pub text_muted: Option<String>,
+    pub accent: Option<String>,
+    pub selection: Option<String>,
+    pub cursor: Option<String>,
+}
+
 impl Default for Theme {
     fn default() -> Self {
-        Self::obsidian_dark()
+        Self::nord()
     }
 }
 
 impl Theme {
+    /// Standard Nord theme (default) inspired by Obsidian Nord.
+    pub fn nord() -> Self {
+        Self {
+            bg_primary: Color::from_hex("#2e3440").unwrap(),
+            bg_secondary: Color::from_hex("#242933").unwrap(),
+            bg_tertiary: Color::from_hex("#1f232a").unwrap(),
+            bg_surface: Color::from_hex("#3b4252").unwrap(),
+            border: Color::from_hex("#3b4252").unwrap(),
+            text_primary: Color::from_hex("#eceff4").unwrap(),
+            text_muted: Color::from_hex("#9aa5b5").unwrap(),
+            accent: Color::from_hex("#88c0d0").unwrap(),
+            selection: Color::from_hex("#434c5e73").unwrap(),
+            cursor: Color::from_hex("#88c0d0").unwrap(),
+
+            callout_note: Color::from_hex("#81a1c1").unwrap(),
+            callout_warning: Color::from_hex("#ebcb8b").unwrap(),
+            callout_tip: Color::from_hex("#a3be8c").unwrap(),
+            callout_important: Color::from_hex("#bf616a").unwrap(),
+
+            flash_bg: Color::from_hex("#ebcb8b").unwrap(),
+            flash_fg: Color::from_hex("#2e3440").unwrap(),
+
+            spacing_xs: 4.0,
+            spacing_sm: 8.0,
+            spacing_md: 12.0,
+            spacing_lg: 16.0,
+            spacing_xl: 24.0,
+        }
+    }
+
     /// Standard Obsidian-inspired dark theme.
     pub fn obsidian_dark() -> Self {
         Self {
-            bg_primary: Color::rgb(0.12, 0.12, 0.12),
-            bg_secondary: Color::rgb(0.09, 0.09, 0.09),
-            bg_tertiary: Color::rgb(0.07, 0.07, 0.07),
-            bg_surface: Color::rgb(0.16, 0.16, 0.16),
-            border: Color::rgb(0.18, 0.18, 0.18),
-            text_primary: Color::rgb(0.86, 0.87, 0.87),
-            text_muted: Color::rgb(0.45, 0.46, 0.49),
-            accent: Color::rgb(0.48, 0.23, 0.93),
-            selection: Color::rgba(0.48, 0.23, 0.93, 0.35),
-            cursor: Color::rgb(0.90, 0.90, 0.90),
+            bg_primary: Color::from_hex("#1e1e1e").unwrap(),
+            bg_secondary: Color::from_hex("#181818").unwrap(),
+            bg_tertiary: Color::from_hex("#141414").unwrap(),
+            bg_surface: Color::from_hex("#262626").unwrap(),
+            border: Color::from_hex("#2b2b2b").unwrap(),
+            text_primary: Color::from_hex("#dcddde").unwrap(),
+            text_muted: Color::from_hex("#8a8b91").unwrap(),
+            accent: Color::from_hex("#7c3aed").unwrap(),
+            selection: Color::from_hex("#7c3aed47").unwrap(),
+            cursor: Color::from_hex("#9353ff").unwrap(),
 
             callout_note: Color::rgb(0.20, 0.50, 0.95),
             callout_warning: Color::rgb(0.90, 0.60, 0.10),
@@ -123,6 +169,42 @@ impl Theme {
             spacing_lg: 16.0,
             spacing_xl: 24.0,
         }
+    }
+
+    /// Applies custom theme overrides on top of this theme.
+    pub fn apply_custom(&self, custom: &CustomThemeConfig) -> Self {
+        let mut theme = self.clone();
+        if let Some(ref c) = custom.bg_primary && let Some(parsed) = Color::from_hex(c) {
+            theme.bg_primary = parsed;
+        }
+        if let Some(ref c) = custom.bg_secondary && let Some(parsed) = Color::from_hex(c) {
+            theme.bg_secondary = parsed;
+        }
+        if let Some(ref c) = custom.bg_tertiary && let Some(parsed) = Color::from_hex(c) {
+            theme.bg_tertiary = parsed;
+        }
+        if let Some(ref c) = custom.bg_surface && let Some(parsed) = Color::from_hex(c) {
+            theme.bg_surface = parsed;
+        }
+        if let Some(ref c) = custom.border && let Some(parsed) = Color::from_hex(c) {
+            theme.border = parsed;
+        }
+        if let Some(ref c) = custom.text_primary && let Some(parsed) = Color::from_hex(c) {
+            theme.text_primary = parsed;
+        }
+        if let Some(ref c) = custom.text_muted && let Some(parsed) = Color::from_hex(c) {
+            theme.text_muted = parsed;
+        }
+        if let Some(ref c) = custom.accent && let Some(parsed) = Color::from_hex(c) {
+            theme.accent = parsed;
+        }
+        if let Some(ref c) = custom.selection && let Some(parsed) = Color::from_hex(c) {
+            theme.selection = parsed;
+        }
+        if let Some(ref c) = custom.cursor && let Some(parsed) = Color::from_hex(c) {
+            theme.cursor = parsed;
+        }
+        theme
     }
 
     /// Obsidian-inspired clean light theme.
