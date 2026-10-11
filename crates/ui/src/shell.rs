@@ -127,6 +127,15 @@ impl Shell {
 
     /// Sets the focused panel.
     pub fn set_focus(&mut self, focus: Focus) {
+        let focus = match focus {
+            Focus::Sidebar
+                if self.sidebar_files.is_empty() && self.sidebar_model.visible_count() == 0 =>
+            {
+                Focus::Editor
+            }
+            Focus::RightPanel if self.right_model.visible_count() == 0 => Focus::Editor,
+            other => other,
+        };
         if self.focus != focus {
             self.reset_editor_input();
         }
@@ -740,20 +749,34 @@ impl Shell {
                 Key::Char('h') | Key::Left => {
                     let next = match self.focus {
                         Focus::RightPanel => Focus::Editor,
-                        Focus::Editor => Focus::Sidebar,
+                        Focus::Editor => {
+                            if self.sidebar_files.is_empty()
+                                && self.sidebar_model.visible_count() == 0
+                            {
+                                Focus::Editor
+                            } else {
+                                Focus::Sidebar
+                            }
+                        }
                         Focus::Sidebar => Focus::Sidebar,
                     };
                     self.set_focus(next);
-                    return ShellAction::FocusChanged(next);
+                    return ShellAction::FocusChanged(self.focus);
                 }
                 Key::Char('l') | Key::Right => {
                     let next = match self.focus {
                         Focus::Sidebar => Focus::Editor,
-                        Focus::Editor => Focus::RightPanel,
+                        Focus::Editor => {
+                            if self.right_model.visible_count() == 0 {
+                                Focus::Editor
+                            } else {
+                                Focus::RightPanel
+                            }
+                        }
                         Focus::RightPanel => Focus::RightPanel,
                     };
                     self.set_focus(next);
-                    return ShellAction::FocusChanged(next);
+                    return ShellAction::FocusChanged(self.focus);
                 }
                 Key::Char('j' | 'k') | Key::Up | Key::Down => {
                     return ShellAction::FocusChanged(self.focus);
@@ -900,6 +923,14 @@ impl Shell {
                 }
             }
             Focus::Sidebar | Focus::RightPanel => {
+                if key == Key::Char('i') {
+                    self.set_focus(Focus::Editor);
+                    return self.feed_key(key);
+                }
+                if key == Key::Esc {
+                    self.set_focus(Focus::Editor);
+                    return ShellAction::FocusChanged(Focus::Editor);
+                }
                 let model = if self.focus == Focus::Sidebar {
                     &mut self.sidebar_model
                 } else {

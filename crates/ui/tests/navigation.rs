@@ -180,3 +180,68 @@ fn focus_routes_once() {
     assert_eq!(action3, ShellAction::SidebarDeleteFile("note1.md".into()));
     assert_eq!(shell.editor_text(), "second line\n"); // editor unchanged!
 }
+
+#[test]
+fn cannot_focus_nonexistent_right_panel_and_can_write() {
+    let mut shell = Shell::new();
+    shell.set_editor_text("initial text\n");
+    assert_eq!(shell.focus(), Focus::Editor);
+
+    // Try navigating right with <C-w>l when no right panel exists
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('l'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Editor));
+    assert_eq!(shell.focus(), Focus::Editor);
+
+    // Typing 'i' must work and allow editing because we remained in Editor
+    let i_action = shell.feed_key(Key::Char('i'));
+    assert_ne!(i_action, ShellAction::Error("Editor target unavailable".into()));
+    assert_eq!(shell.mode(), truff_core::vim::Mode::Insert);
+}
+
+#[test]
+fn cannot_focus_nonexistent_sidebar_and_can_write() {
+    let mut shell = Shell::new();
+    shell.set_editor_text("hello\n");
+    assert_eq!(shell.focus(), Focus::Editor);
+
+    // Try navigating left with <C-w>h when sidebar has no files and is not available
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('h'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Editor));
+    assert_eq!(shell.focus(), Focus::Editor);
+
+    // Directly trying to set focus to nonexistent Sidebar or RightPanel coerces to Editor
+    shell.set_focus(Focus::RightPanel);
+    assert_eq!(shell.focus(), Focus::Editor);
+    shell.set_focus(Focus::Sidebar);
+    assert_eq!(shell.focus(), Focus::Editor);
+}
+
+#[test]
+fn pressing_insert_or_esc_in_panel_restores_editor_focus() {
+    let mut shell = Shell::new();
+    shell.set_sidebar_files(vec!["note1.md".into()]);
+    shell.set_editor_text("existing text\n");
+
+    shell.set_focus(Focus::Sidebar);
+    assert_eq!(shell.focus(), Focus::Sidebar);
+
+    // Pressing 'i' in sidebar switches focus to Editor and enters insert mode
+    let action = shell.feed_key(Key::Char('i'));
+    assert_eq!(shell.focus(), Focus::Editor);
+    assert_eq!(shell.mode(), truff_core::vim::Mode::Insert);
+    assert_ne!(action, ShellAction::Error("Editor target unavailable".into()));
+
+    // Pressing Esc exits insert mode
+    shell.feed_key(Key::Esc);
+    assert_eq!(shell.mode(), truff_core::vim::Mode::Normal);
+
+    // Switch back to Sidebar, pressing Esc returns focus to Editor
+    shell.set_focus(Focus::Sidebar);
+    assert_eq!(shell.focus(), Focus::Sidebar);
+    let esc_action = shell.feed_key(Key::Esc);
+    assert_eq!(esc_action, ShellAction::FocusChanged(Focus::Editor));
+    assert_eq!(shell.focus(), Focus::Editor);
+}
+

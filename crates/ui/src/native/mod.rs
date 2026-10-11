@@ -15,6 +15,11 @@ pub struct NativeApp {
     pub application: Application,
     pub editor: EditorWidget,
     hints_tick: Instant,
+    pub show_create_vault_dialog: bool,
+    pub vault_path_input: String,
+    pub initial_note_name: String,
+    pub create_starter_note: bool,
+    pub create_vault_error: Option<String>,
 }
 
 impl NativeApp {
@@ -25,6 +30,11 @@ impl NativeApp {
             application,
             editor: EditorWidget::default(),
             hints_tick: Instant::now(),
+            show_create_vault_dialog: false,
+            vault_path_input: "~/TruffVault".to_string(),
+            initial_note_name: "Welcome.md".to_string(),
+            create_starter_note: true,
+            create_vault_error: None,
         }
     }
 
@@ -40,82 +50,238 @@ impl NativeApp {
         );
         self.hints_tick = now;
         let theme = self.application.shell.theme().clone();
-        ui.visuals_mut().override_text_color = Some(color(theme.text_primary));
-        ui.visuals_mut().panel_fill = color(theme.bg_primary);
-        ui.visuals_mut().widgets.inactive.bg_fill = color(theme.bg_secondary);
-        ui.visuals_mut().selection.bg_fill = color(theme.selection);
-        egui::Panel::top("title").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Truff");
-                ui.separator();
-                ui.label(
-                    self.application
-                        .active_relative_path()
-                        .unwrap_or_else(|| "Open a vault with :vault <path>".into()),
-                );
-                if self
-                    .application
-                    .shell
-                    .editor_buffer()
-                    .is_some_and(|buffer| buffer.is_dirty())
-                {
-                    ui.label("●");
-                }
-                if self.application.shell.which_key().is_visible() {
-                    for hint in self.application.shell.which_key().formatted_lines() {
-                        ui.label(hint);
-                    }
-                }
-            });
-        });
-        egui::Panel::bottom("status").show(ui, |ui| {
-            if let Some(command) = self.application.shell.command() {
-                ui.label(format!(":{command}"));
-            } else {
-                ui.horizontal(|ui| {
-                    ui.strong(self.application.shell.mode().to_string());
-                    ui.label(format!("{:?}", self.application.shell.focus()));
-                    ui.label(&self.application.status);
-                });
-            }
-        });
-        egui::Panel::left("vault")
-            .default_size(200.0)
-            .min_size(120.0)
-            .max_size(600.0)
-            .resizable(true)
-            .show_separator_line(true)
+        let mut visuals = ui.visuals().clone();
+        visuals.override_text_color = Some(color(theme.text_primary));
+        visuals.panel_fill = color(theme.bg_primary);
+        visuals.window_fill = color(theme.bg_surface);
+        visuals.widgets.noninteractive.bg_fill = color(theme.bg_primary);
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, color(theme.border));
+        visuals.widgets.inactive.bg_fill = color(theme.bg_secondary);
+        visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
+        visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+        visuals.widgets.hovered.bg_fill = color(theme.selection);
+        visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
+        visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
+        visuals.widgets.active.bg_fill = color(theme.selection);
+        visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
+        visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+        visuals.selection.bg_fill = color(theme.selection);
+        visuals.selection.stroke = egui::Stroke::new(1.0, color(theme.accent));
+        *ui.visuals_mut() = visuals;
+
+        egui::Panel::top("title")
+            .frame(
+                egui::Frame::new()
+                    .fill(color(theme.bg_secondary))
+                    .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                    .inner_margin(egui::Margin::symmetric(12, 6)),
+            )
             .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.heading("Vault");
-                let model = self.application.shell.sidebar_model();
-                let count = model.visible_count();
-                let selected = model.selected_index();
-                let mut open = None;
-                egui::ScrollArea::vertical().show_rows(ui, 24.0, count, |ui, rows| {
-                    for index in rows {
-                        if let Some(row) = model.get_visible_row(index)
-                            && ui.selectable_label(index == selected, &row.title).clicked()
-                        {
-                            open = row.data.clone();
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Truff").strong().color(color(theme.accent)));
+                    ui.label(egui::RichText::new("·").color(color(theme.text_muted)));
+                    if let Some(path) = self.application.active_relative_path() {
+                        ui.label(egui::RichText::new(path).color(color(theme.text_primary)));
+                    } else {
+                        ui.label(
+                            egui::RichText::new("Open a vault with :vault <path>")
+                                .color(color(theme.text_muted)),
+                        );
+                    }
+                    if self
+                        .application
+                        .shell
+                        .editor_buffer()
+                        .is_some_and(|buffer| buffer.is_dirty())
+                    {
+                        ui.label(egui::RichText::new("●").color(color(theme.accent)));
+                    }
+                    if self.application.shell.which_key().is_visible() {
+                        ui.add_space(8.0);
+                        for hint in self.application.shell.which_key().formatted_lines() {
+                            ui.label(
+                                egui::RichText::new(hint)
+                                    .color(color(theme.text_muted))
+                                    .size(12.0),
+                            );
                         }
                     }
                 });
-                if let Some(path) = open
-                    && let Err(error) = self.application.open_note(&path)
-                {
-                    self.application.status = error.to_string();
+            });
+
+        egui::Panel::bottom("status")
+            .frame(
+                egui::Frame::new()
+                    .fill(color(theme.bg_tertiary))
+                    .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                    .inner_margin(egui::Margin::symmetric(12, 4)),
+            )
+            .show(ui, |ui| {
+                if let Some(command) = self.application.shell.command() {
+                    ui.label(
+                        egui::RichText::new(format!(":{command}"))
+                            .monospace()
+                            .color(color(theme.accent))
+                            .strong(),
+                    );
+                } else {
+                    ui.horizontal(|ui| {
+                        let mode = self.application.shell.mode();
+                        let mode_str = mode.to_string();
+                        let (pill_bg, pill_fg) = match mode {
+                            truff_core::vim::Mode::Insert => {
+                                (color(theme.accent), color(theme.bg_primary))
+                            }
+                            truff_core::vim::Mode::VisualChar
+                            | truff_core::vim::Mode::VisualLine => {
+                                (color(theme.callout_warning), color(theme.bg_primary))
+                            }
+                            _ => (color(theme.bg_surface), color(theme.text_primary)),
+                        };
+                        egui::Frame::new()
+                            .fill(pill_bg)
+                            .corner_radius(egui::CornerRadius::same(3))
+                            .inner_margin(egui::Margin::symmetric(6, 2))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(mode_str)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(pill_fg),
+                                );
+                            });
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(format!("{:?}", self.application.shell.focus()))
+                                .size(12.0)
+                                .color(color(theme.text_muted)),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(&self.application.status)
+                                .size(12.0)
+                                .color(color(theme.text_muted)),
+                        );
+                    });
                 }
             });
-        egui::Panel::right("references")
+
+        egui::Panel::left("vault")
+            .frame(
+                egui::Frame::new()
+                    .fill(color(theme.bg_secondary))
+                    .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                    .inner_margin(egui::Margin::symmetric(8, 8)),
+            )
             .default_size(220.0)
-            .min_size(120.0)
+            .min_size(140.0)
             .max_size(600.0)
             .resizable(true)
             .show_separator_line(true)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.heading("Backlinks");
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("VAULT")
+                            .size(11.0)
+                            .strong()
+                            .color(color(theme.text_muted)),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("➕").on_hover_text("Создать новое хранилище").clicked() {
+                            self.show_create_vault_dialog = true;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                if self.application.vault_path().is_none() {
+                    ui.add_space(8.0);
+                    if ui.button("➕ Создать хранилище").clicked() {
+                        self.show_create_vault_dialog = true;
+                    }
+                    let config = crate::app::global_config::GlobalConfig::load();
+                    if !config.recent_vaults.is_empty() {
+                        ui.add_space(8.0);
+                        ui.label("Недавние:");
+                        for path in &config.recent_vaults {
+                            let name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("vault");
+                            if ui
+                                .button(format!("📁 {name}"))
+                                .on_hover_text(path.display().to_string())
+                                .clicked()
+                            {
+                                if let Err(e) = self.application.open_vault(path) {
+                                    self.application.status = e.to_string();
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    let model = self.application.shell.sidebar_model();
+                    let count = model.visible_count();
+                    let selected = model.selected_index();
+                    let mut open = None;
+                    egui::ScrollArea::vertical().show_rows(ui, 24.0, count, |ui, rows| {
+                        for index in rows {
+                            if let Some(row) = model.get_visible_row(index) {
+                                let indent = (row.depth as f32) * 12.0;
+                                let is_selected = index == selected;
+                                let glyph = if row.is_folder {
+                                    if row.is_collapsed { "▸ " } else { "▾ " }
+                                } else {
+                                    "  "
+                                };
+                                let label_text = format!("{glyph}{}", row.title);
+                                let text_color = if is_selected {
+                                    color(theme.text_primary)
+                                } else if row.is_folder {
+                                    color(theme.text_primary)
+                                } else {
+                                    color(theme.text_muted)
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.add_space(indent);
+                                    let rich = egui::RichText::new(label_text).color(text_color).size(13.5);
+                                    let resp = ui.selectable_label(is_selected, rich);
+                                    if resp.clicked() {
+                                        open = row.data.clone();
+                                    }
+                                });
+                            }
+                        }
+                    });
+                    if let Some(path) = open
+                        && let Err(error) = self.application.open_note(&path)
+                    {
+                        self.application.status = error.to_string();
+                    }
+                }
+            });
+
+        egui::Panel::right("references")
+            .frame(
+                egui::Frame::new()
+                    .fill(color(theme.bg_secondary))
+                    .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                    .inner_margin(egui::Margin::symmetric(8, 8)),
+            )
+            .default_size(220.0)
+            .min_size(140.0)
+            .max_size(600.0)
+            .resizable(true)
+            .show_separator_line(true)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.label(
+                    egui::RichText::new("BACKLINKS")
+                        .size(11.0)
+                        .strong()
+                        .color(color(theme.text_muted)),
+                );
+                ui.add_space(4.0);
                 let mut open = None;
                 egui::ScrollArea::vertical().show_rows(
                     ui,
@@ -123,13 +289,17 @@ impl NativeApp {
                     self.application.backlinks.len(),
                     |ui, rows| {
                         for index in rows {
-                            if ui
-                                .selectable_label(
-                                    index == self.application.backlink_selection,
-                                    &self.application.backlinks[index].source_path,
-                                )
-                                .clicked()
-                            {
+                            let is_selected = index == self.application.backlink_selection;
+                            let rich = egui::RichText::new(
+                                &self.application.backlinks[index].source_path,
+                            )
+                            .size(13.5)
+                            .color(if is_selected {
+                                color(theme.text_primary)
+                            } else {
+                                color(theme.text_muted)
+                            });
+                            if ui.selectable_label(is_selected, rich).clicked() {
                                 open = Some(index);
                             }
                         }
@@ -159,7 +329,155 @@ impl NativeApp {
                 self.application.shell.set_focus(Focus::Editor);
                 self.input(input);
             }
+
+            if self.application.vault_path().is_none()
+                && self.application.shell.editor_text().is_empty()
+                && self.application.shell.mode() == truff_core::vim::Mode::Normal
+            {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.heading("Добро пожаловать в Truff v2");
+                    ui.label("Персональная база знаний в формате Markdown с поддержкой Vim и вики-ссылок");
+                    ui.add_space(16.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
+                        if ui.button("➕  Создать новое хранилище").clicked() {
+                            self.show_create_vault_dialog = true;
+                        }
+                        if ui.button("📂  Ввести путь к хранилищу").clicked() {
+                            self.show_create_vault_dialog = true;
+                        }
+                    });
+                    let config = crate::app::global_config::GlobalConfig::load();
+                    if !config.recent_vaults.is_empty() {
+                        ui.add_space(20.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+                        ui.strong("Сохранённые хранилища:");
+                        ui.add_space(8.0);
+                        for path in &config.recent_vaults {
+                            let name = path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("vault");
+                            let line = format!("📁 {name}  —  {}", path.display());
+                            if ui.button(line).clicked() {
+                                if let Err(e) = self.application.open_vault(path) {
+                                    self.application.status = e.to_string();
+                                }
+                            }
+                        }
+                    }
+                });
+            }
         });
+        if self.show_create_vault_dialog {
+            let mut close_dialog = false;
+            let mut submit_creation = false;
+            egui::Window::new("Создать или открыть хранилище")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(450.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(&context, |ui| {
+                    ui.heading("Расположение хранилища");
+                    ui.label("Укажите путь (поддерживаются ~, ./, ../ и абсолютные пути):");
+
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.vault_path_input)
+                            .desired_width(420.0),
+                    );
+
+                    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                        if let Some(completed) =
+                            crate::app::path_completion::tab_complete(&self.vault_path_input)
+                        {
+                            self.vault_path_input = completed;
+                        }
+                    }
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        submit_creation = true;
+                    }
+
+                    let suggestions = crate::app::path_completion::complete_directory_path(
+                        &self.vault_path_input,
+                    );
+                    if !suggestions.is_empty() {
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Подсказки:");
+                            for suggestion in suggestions.iter().take(6) {
+                                if ui.small_button(suggestion).clicked() {
+                                    self.vault_path_input = suggestion.clone();
+                                }
+                            }
+                        });
+                    }
+
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label("Быстрый выбор:");
+                        if ui.small_button("~/TruffVault").clicked() {
+                            self.vault_path_input = "~/TruffVault".to_string();
+                        }
+                        if ui.small_button("./notes").clicked() {
+                            self.vault_path_input = "./notes".to_string();
+                        }
+                        if ui.small_button("~/Documents/Notes").clicked() {
+                            self.vault_path_input = "~/Documents/Notes".to_string();
+                        }
+                    });
+
+                    ui.add_space(10.0);
+                    ui.checkbox(&mut self.create_starter_note, "Создать стартовую заметку");
+                    if self.create_starter_note {
+                        ui.horizontal(|ui| {
+                            ui.label("Имя файла:");
+                            ui.text_edit_singleline(&mut self.initial_note_name);
+                        });
+                    }
+
+                    if let Some(err) = &self.create_vault_error {
+                        ui.add_space(6.0);
+                        ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
+                    }
+
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("✔ Создать и открыть").clicked() {
+                            submit_creation = true;
+                        }
+                        if ui.button("Отмена").clicked() {
+                            self.create_vault_error = None;
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if submit_creation {
+                let note = if self.create_starter_note
+                    && !self.initial_note_name.trim().is_empty()
+                {
+                    Some(self.initial_note_name.as_str())
+                } else {
+                    None
+                };
+                let path = std::path::Path::new(&self.vault_path_input);
+                match self.application.create_and_open_vault(path, note) {
+                    Ok(()) => {
+                        self.create_vault_error = None;
+                        close_dialog = true;
+                    }
+                    Err(err) => {
+                        self.create_vault_error = Some(err.to_string());
+                    }
+                }
+            }
+
+            if close_dialog {
+                self.show_create_vault_dialog = false;
+            }
+        }
         if let Some(id) = self.application.shell.workspace().active_view()
             && let Some(view) = self.application.shell.workspace_mut().get_view_mut(id)
         {

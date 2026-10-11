@@ -92,3 +92,20 @@ fn test_app_auto_opens_saved_vault() {
     let _ = app.shutdown();
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn test_create_and_open_vault() {
+    let tmp = std::env::temp_dir().join(format!("truff-test-create-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let target_vault = tmp.join("new_created_vault");
+
+    let mut app = truff_ui::app::Application::new();
+    assert_eq!(app.vault_path(), None);
+
+    app.create_and_open_vault(&target_vault, Some("Welcome.md")).unwrap();
+    assert_eq!(app.vault_path(), Some(target_vault.canonicalize().unwrap().as_path()));
+    assert!(target_vault.join("Welcome.md").exists());
+
+    let _ = app.shutdown();
+    let _ = std::fs::remove_dir_all(&tmp);
+}

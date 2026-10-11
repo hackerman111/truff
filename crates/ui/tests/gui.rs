@@ -321,3 +321,33 @@ fn closing_window_recovers_dirty_text_and_save_clears_recovery() {
     drop(root);
     std::fs::remove_dir_all(vault).unwrap();
 }
+
+#[test]
+fn test_gui_welcome_screen_and_vault_creation_modal() {
+    let (mut root, ()) = window(Application::new());
+    assert!(root.app.application.vault_path().is_none());
+    assert!(!root.app.show_create_vault_dialog);
+
+    root.app.show_create_vault_dialog = true;
+    let target = std::env::temp_dir().join(format!("truff-gui-create-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&target);
+    root.app.vault_path_input = target.to_string_lossy().into_owned();
+    root.app.create_starter_note = true;
+    root.app.initial_note_name = "Welcome.md".into();
+
+    root.redraw();
+
+    root.app
+        .application
+        .create_and_open_vault(
+            std::path::Path::new(&root.app.vault_path_input),
+            Some("Welcome.md"),
+        )
+        .unwrap();
+
+    assert!(root.app.application.vault_path().is_some());
+    assert!(target.join("Welcome.md").exists());
+
+    let _ = root.app.application.shutdown();
+    let _ = std::fs::remove_dir_all(target);
+}
