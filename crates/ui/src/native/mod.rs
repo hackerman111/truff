@@ -69,36 +69,117 @@ impl NativeApp {
         visuals.selection.stroke = egui::Stroke::new(1.0, color(theme.accent));
         *ui.visuals_mut() = visuals;
 
-        egui::Panel::top("title")
+        egui::Panel::top("tabs")
             .frame(
                 egui::Frame::new()
                     .fill(color(theme.bg_secondary))
                     .stroke(egui::Stroke::new(1.0, color(theme.border)))
-                    .inner_margin(egui::Margin::symmetric(12, 6)),
+                    .inner_margin(egui::Margin::symmetric(8, 2)),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Truff")
-                            .strong()
-                            .color(color(theme.accent)),
-                    );
-                    ui.label(egui::RichText::new("·").color(color(theme.text_muted)));
-                    if let Some(path) = self.application.active_relative_path() {
-                        ui.label(egui::RichText::new(path).color(color(theme.text_primary)));
-                    } else {
+                    let active_view_id = self.application.shell.workspace().active_view();
+                    let mut views: Vec<_> =
+                        self.application.shell.workspace().views().values().collect();
+                    views.sort_by_key(|v| v.id().get());
+
+                    let mut switch_view = None;
+                    let mut close_view = None;
+
+                    if views.is_empty() {
+                        ui.label(
+                            egui::RichText::new("Truff")
+                                .strong()
+                                .color(color(theme.accent)),
+                        );
+                        ui.label(egui::RichText::new("·").color(color(theme.text_muted)));
                         ui.label(
                             egui::RichText::new("Open a vault with :vault <path>")
                                 .color(color(theme.text_muted)),
                         );
+                    } else {
+                        for view in views {
+                            let view_id = view.id();
+                            let is_active = Some(view_id) == active_view_id;
+                            let buffer_id = view.buffer_id();
+                            let entry = self.application.shell.workspace().buffers().get(buffer_id);
+                            let title = entry
+                                .and_then(|e| e.path())
+                                .and_then(|p| p.file_name())
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("Scratch")
+                                .to_string();
+                            let is_dirty = self
+                                .application
+                                .shell
+                                .workspace()
+                                .buffers()
+                                .get_buffer(buffer_id)
+                                .is_some_and(|b| b.is_dirty());
+
+                            let tab_bg = if is_active {
+                                color(theme.bg_primary)
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            };
+                            let text_color = if is_active {
+                                color(theme.text_primary)
+                            } else {
+                                color(theme.text_muted)
+                            };
+
+                            let frame = egui::Frame::new()
+                                .fill(tab_bg)
+                                .stroke(if is_active {
+                                    egui::Stroke::new(1.0, color(theme.border))
+                                } else {
+                                    egui::Stroke::NONE
+                                })
+                                .corner_radius(egui::CornerRadius {
+                                    nw: 4,
+                                    ne: 4,
+                                    sw: 0,
+                                    se: 0,
+                                })
+                                .inner_margin(egui::Margin::symmetric(10, 4));
+
+                            frame.show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let glyph = if is_active { "📄 " } else { " " };
+                                    let rich = egui::RichText::new(format!("{glyph}{title}"))
+                                        .size(12.5)
+                                        .color(text_color);
+                                    let resp = ui.selectable_label(false, rich);
+                                    if resp.clicked() {
+                                        switch_view = Some(view_id);
+                                    }
+                                    if is_dirty {
+                                        ui.label(
+                                            egui::RichText::new("●")
+                                                .size(10.0)
+                                                .color(color(theme.accent)),
+                                        );
+                                    }
+                                    if ui
+                                        .small_button("×")
+                                        .on_hover_text("Close buffer")
+                                        .clicked()
+                                    {
+                                        close_view = Some(view_id);
+                                    }
+                                });
+                            });
+                        }
                     }
-                    if self
-                        .application
-                        .shell
-                        .editor_buffer()
-                        .is_some_and(|buffer| buffer.is_dirty())
-                    {
-                        ui.label(egui::RichText::new("●").color(color(theme.accent)));
+
+                    if let Some(id) = switch_view {
+                        self.application.shell.workspace_mut().set_active_view(Some(id));
+                        self.application.shell.reset_editor_input();
+                    }
+                    if let Some(id) = close_view {
+                        let _ = self
+                            .application
+                            .dispatch(truff_core::commands::Action::CloseView(id));
                     }
                 });
             });
@@ -130,7 +211,7 @@ impl NativeApp {
                             | truff_core::vim::Mode::VisualLine => {
                                 (color(theme.callout_warning), color(theme.bg_primary))
                             }
-                            _ => (color(theme.bg_surface), color(theme.text_primary)),
+                            _ => (color(theme.border), color(theme.text_primary)),
                         };
                         egui::Frame::new()
                             .fill(pill_bg)
@@ -147,15 +228,42 @@ impl NativeApp {
                         ui.add_space(4.0);
                         ui.label(
                             egui::RichText::new(format!("{:?}", self.application.shell.focus()))
-                                .size(12.0)
+                                .size(11.5)
                                 .color(color(theme.text_muted)),
                         );
                         ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new(&self.application.status)
-                                .size(12.0)
+                                .size(11.5)
                                 .color(color(theme.text_muted)),
                         );
+
+                        // Right-aligned cursor position and metadata
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new("Markdown · UTF-8")
+                                    .size(11.5)
+                                    .color(color(theme.text_muted)),
+                            );
+                            ui.add_space(8.0);
+                            let cursor_str = if let Some(view) = self.application.shell.editor_view()
+                                && let Some(buffer) = self.application.shell.editor_buffer()
+                            {
+                                let head = view.head().get().min(buffer.byte_len());
+                                let line = buffer.line_of_byte(head) + 1;
+                                let line_start = buffer.byte_of_line(buffer.line_of_byte(head));
+                                let col = head.saturating_sub(line_start) + 1;
+                                format!("Ln {line}, Col {col}")
+                            } else {
+                                "Ln 1, Col 1".to_string()
+                            };
+                            ui.label(
+                                egui::RichText::new(cursor_str)
+                                    .monospace()
+                                    .size(11.5)
+                                    .color(color(theme.text_muted)),
+                            );
+                        });
                     });
                 }
             });

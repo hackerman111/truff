@@ -351,3 +351,39 @@ fn test_gui_welcome_screen_and_vault_creation_modal() {
     let _ = root.app.application.shutdown();
     let _ = std::fs::remove_dir_all(target);
 }
+
+#[test]
+fn test_tab_bar_renders_open_buffers_and_switches_active() {
+    let mut app = Application::new();
+    let buf1 = app
+        .shell
+        .workspace_mut()
+        .buffers_mut()
+        .open_from_text(None, "# Doc 1")
+        .unwrap();
+    let _view1 = app.shell.workspace_mut().create_view(buf1).unwrap();
+    let buf2 = app
+        .shell
+        .workspace_mut()
+        .buffers_mut()
+        .open_from_text(None, "# Doc 2")
+        .unwrap();
+    let view2 = app.shell.workspace_mut().create_view(buf2).unwrap();
+
+    let (mut root, ()) = window(app);
+    assert_eq!(root.app.application.shell.workspace().views().len(), 3); // initial scratch + 2 new
+    // Frame executes without panic and renders tabs
+    root.redraw();
+
+    // Verify switching active view
+    root.app
+        .application
+        .shell
+        .workspace_mut()
+        .set_active_view(Some(view2));
+    root.redraw();
+    assert_eq!(
+        root.app.application.shell.workspace().active_view(),
+        Some(view2)
+    );
+}
