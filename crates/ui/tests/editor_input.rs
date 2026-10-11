@@ -166,3 +166,16 @@ fn app_theme_command_and_persistence() {
     let _ = app.shutdown();
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn test_four_tier_palette_tokens() {
+    let nord = Theme::nord();
+    assert_eq!(nord.bg_primary, truff_ui::theme::Color::from_hex("#2d333f").unwrap());
+    assert_eq!(nord.bg_secondary, truff_ui::theme::Color::from_hex("#252a34").unwrap());
+    assert_eq!(nord.bg_tertiary, truff_ui::theme::Color::from_hex("#1b1e24").unwrap());
+    assert_eq!(nord.selection, truff_ui::theme::Color::from_hex("#394351").unwrap());
+    assert_eq!(nord.accent, truff_ui::theme::Color::from_hex("#88a9c1").unwrap());
+    assert_eq!(nord.border, truff_ui::theme::Color::from_hex("#333945").unwrap());
+    assert_eq!(nord.text_primary, truff_ui::theme::Color::from_hex("#e2e6ed").unwrap());
+    assert_eq!(nord.text_muted, truff_ui::theme::Color::from_hex("#8b95a5").unwrap());
+}

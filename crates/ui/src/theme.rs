@@ -111,19 +111,19 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// Standard Nord theme (default) inspired by Obsidian Nord.
+    /// Standard Nord theme (default) inspired by Obsidian and Zed.
     pub fn nord() -> Self {
         Self {
-            bg_primary: Color::from_hex("#2e3440").unwrap(),
-            bg_secondary: Color::from_hex("#242933").unwrap(),
-            bg_tertiary: Color::from_hex("#1f232a").unwrap(),
-            bg_surface: Color::from_hex("#3b4252").unwrap(),
-            border: Color::from_hex("#3b4252").unwrap(),
-            text_primary: Color::from_hex("#eceff4").unwrap(),
-            text_muted: Color::from_hex("#9aa5b5").unwrap(),
-            accent: Color::from_hex("#88c0d0").unwrap(),
-            selection: Color::from_hex("#434c5e73").unwrap(),
-            cursor: Color::from_hex("#88c0d0").unwrap(),
+            bg_primary: Color::from_hex("#2d333f").unwrap(),
+            bg_secondary: Color::from_hex("#252a34").unwrap(),
+            bg_tertiary: Color::from_hex("#1b1e24").unwrap(),
+            bg_surface: Color::from_hex("#252a34").unwrap(),
+            border: Color::from_hex("#333945").unwrap(),
+            text_primary: Color::from_hex("#e2e6ed").unwrap(),
+            text_muted: Color::from_hex("#8b95a5").unwrap(),
+            accent: Color::from_hex("#88a9c1").unwrap(),
+            selection: Color::from_hex("#394351").unwrap(),
+            cursor: Color::from_hex("#88a9c1").unwrap(),
 
             callout_note: Color::from_hex("#81a1c1").unwrap(),
             callout_warning: Color::from_hex("#ebcb8b").unwrap(),
@@ -131,7 +131,7 @@ impl Theme {
             callout_important: Color::from_hex("#bf616a").unwrap(),
 
             flash_bg: Color::from_hex("#ebcb8b").unwrap(),
-            flash_fg: Color::from_hex("#2e3440").unwrap(),
+            flash_fg: Color::from_hex("#20242c").unwrap(),
 
             spacing_xs: 4.0,
             spacing_sm: 8.0,
