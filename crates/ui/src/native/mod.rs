@@ -397,13 +397,21 @@ impl NativeApp {
                     let model = self.application.shell.sidebar_model();
                     let count = model.visible_count();
                     let selected = model.selected_index();
+                    let active_file = self.application.active_relative_path();
                     let mut open = None;
                     let mut toggle_folder = None;
                     egui::ScrollArea::vertical().show_rows(ui, 28.0, count, |ui, rows| {
                         for index in rows {
                             if let Some(row) = model.get_visible_row(index) {
-                                let indent = (row.depth as f32) * 14.0;
+                                let indent = (row.depth as f32) * 16.0;
                                 let is_selected = index == selected;
+                                let is_active = !row.is_folder
+                                    && row.data.as_deref() == active_file.as_deref();
+                                let is_dirty = row
+                                    .data
+                                    .as_deref()
+                                    .is_some_and(|p| self.application.is_path_dirty(p));
+
                                 let glyph = if row.is_folder {
                                     if row.is_collapsed {
                                         "▸ 📁 "
@@ -411,28 +419,71 @@ impl NativeApp {
                                         "▾ 📁 "
                                     }
                                 } else {
-                                    "  📄 "
+                                    "📄 "
                                 };
                                 let label_text = format!("{glyph}{}", row.title);
-                                let text_color = if is_selected || row.is_folder {
+                                let text_color = if is_active || is_selected || row.is_folder {
                                     color(theme.text_primary)
                                 } else {
                                     color(theme.text_muted)
                                 };
-                                ui.horizontal(|ui| {
-                                    ui.add_space(indent);
-                                    let rich = egui::RichText::new(label_text)
-                                        .color(text_color)
-                                        .size(12.5);
-                                    let resp = ui.selectable_label(is_selected, rich);
-                                    if resp.clicked() {
-                                        if row.is_folder {
-                                            toggle_folder = Some(row.id);
-                                        } else {
-                                            open = row.data.clone();
+
+                                let frame = egui::Frame::new()
+                                    .fill(if is_selected {
+                                        color(theme.selection)
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    })
+                                    .corner_radius(egui::CornerRadius::same(4))
+                                    .inner_margin(egui::Margin {
+                                        left: 4,
+                                        right: 4,
+                                        top: 3,
+                                        bottom: 3,
+                                    });
+
+                                let frame_resp = frame.show(ui, |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(indent);
+                                        let rich = egui::RichText::new(label_text)
+                                            .color(text_color)
+                                            .size(12.5);
+                                        ui.label(rich);
+                                        if is_dirty {
+                                            ui.add_space(4.0);
+                                            ui.label(
+                                                egui::RichText::new("●")
+                                                    .size(9.0)
+                                                    .color(color(theme.accent)),
+                                            );
                                         }
-                                    }
+                                    });
                                 });
+
+                                let rect = frame_resp.response.rect;
+                                let interact_resp = ui.interact(
+                                    rect,
+                                    ui.auto_id_with(row.id),
+                                    egui::Sense::click(),
+                                );
+                                if interact_resp.clicked() {
+                                    if row.is_folder {
+                                        toggle_folder = Some(row.id);
+                                    } else {
+                                        open = row.data.clone();
+                                    }
+                                }
+
+                                if is_active {
+                                    ui.painter().line_segment(
+                                        [
+                                            egui::pos2(rect.left(), rect.top() + 3.0),
+                                            egui::pos2(rect.left(), rect.bottom() - 3.0),
+                                        ],
+                                        egui::Stroke::new(2.0, color(theme.accent)),
+                                    );
+                                }
                             }
                         }
                     });

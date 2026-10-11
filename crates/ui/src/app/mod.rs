@@ -303,6 +303,21 @@ impl Application {
             .map(|path| path.to_string_lossy().into_owned())
     }
 
+    pub fn is_path_dirty(&self, rel_path: &str) -> bool {
+        let Some(paths) = &self.paths else {
+            return false;
+        };
+        let Ok(abs) = paths.resolve_path(Path::new(rel_path)) else {
+            return false;
+        };
+        self.shell
+            .workspace()
+            .buffers()
+            .get_by_path(&abs)
+            .and_then(|id| self.shell.workspace().buffers().get_buffer(id))
+            .is_some_and(|buffer| buffer.is_dirty())
+    }
+
     pub fn handle_shell_action(&mut self, action: ShellAction) {
         let editor_edited = matches!(
             &action,

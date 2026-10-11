@@ -361,3 +361,45 @@ fn test_sidebar_hierarchical_folders_and_auto_expansion() {
         vec!["docs", "api", "endpoints.md", "guide.md", "Welcome.md"]
     );
 }
+
+#[test]
+fn test_active_vs_selected_file_state() {
+    let mut app = truff_ui::app::Application::new();
+    let target =
+        std::env::temp_dir().join(format!("truff_tree_state_test_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&target);
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("file1.md"), "# File 1").unwrap();
+    std::fs::write(target.join("file2.md"), "# File 2").unwrap();
+
+    app.open_vault(&target).unwrap();
+    for _ in 0..50 {
+        app.poll();
+        if app.shell.sidebar_model().visible_count() >= 2 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    app.open_note("file1.md").unwrap();
+
+    // file1.md is active in editor
+    assert_eq!(app.active_relative_path().as_deref(), Some("file1.md"));
+
+    // Navigate sidebar selection to file2.md without opening it
+    app.shell.select_sidebar_file("file2.md");
+    let model = app.shell.sidebar_model();
+    let selected_row = model.selected_row().unwrap();
+    assert_eq!(selected_row.title, "file2.md");
+
+    // Active file is distinct from selected row
+    assert_ne!(
+        app.active_relative_path().as_deref(),
+        selected_row.data.as_deref()
+    );
+
+    // Verify is_path_dirty
+    assert!(!app.is_path_dirty("file1.md"));
+
+    let _ = app.shutdown();
+    let _ = std::fs::remove_dir_all(target);
+}
