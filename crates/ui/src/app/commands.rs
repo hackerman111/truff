@@ -241,7 +241,10 @@ impl Application {
             "theme" => {
                 if argument.is_empty() {
                     let config = super::global_config::GlobalConfig::load();
-                    self.status = format!("Active theme: {}. Available: nord, dark, light, or [themes.*] from config", config.theme);
+                    self.status = format!(
+                        "Active theme: {}. Available: nord, dark, light, or [themes.*] from config",
+                        config.theme
+                    );
                     return Ok(());
                 }
                 let mut config = super::global_config::GlobalConfig::load();
@@ -272,7 +275,10 @@ impl Application {
                 Ok(())
             }
             "help" => {
-                self.status = "i edit · Esc normal · Ctrl-w h/l panes · s Flash · :w · :color #3388ff · :link note · :backlinks · :rename name.md".into();
+                self.shell
+                    .which_key_mut()
+                    .show_help(crate::overlays::WhichKeyOverlay::default_help_categories());
+                self.status = "Which-key справка открыта (Esc для закрытия)".into();
                 Ok(())
             }
             _ => Err(format!("Unknown command: {command}").into()),

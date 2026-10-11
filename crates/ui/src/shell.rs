@@ -770,12 +770,27 @@ impl Shell {
             }
             return ShellAction::EditorEdit;
         }
+        if self.which_key.is_visible() && key == Key::Esc {
+            self.which_key.hide();
+            self.pending_prefix = None;
+            self.binding_prefix.clear();
+            return ShellAction::Incomplete;
+        }
+        if key == Key::Char('?')
+            && self.mode() == Mode::Normal
+            && self.command.is_none()
+            && self.search_query().is_none()
+        {
+            self.which_key
+                .show_help(crate::overlays::WhichKeyOverlay::default_help_categories());
+            return ShellAction::Incomplete;
+        }
         if key == Key::Char(':') && (self.focus != Focus::Editor || self.mode() != Mode::Insert) {
             self.command = Some(String::new());
             self.which_key.hide();
             return ShellAction::Incomplete;
         }
-        // 1. Handle pane navigation prefixes (<C-w>h / <C-w>l)
+        // 1. Handle pane navigation prefixes (<C-w>h / <C-w>l / <C-w>w)
         if let Some(Key::Ctrl('w')) = self.pending_prefix {
             self.pending_prefix = None;
             self.which_key.hide();
@@ -784,12 +799,10 @@ impl Shell {
                     let next = match self.focus {
                         Focus::RightPanel => Focus::Editor,
                         Focus::Editor => {
-                            if self.sidebar_files.is_empty()
-                                && self.sidebar_model.visible_count() == 0
-                            {
-                                Focus::Editor
-                            } else {
+                            if self.has_sidebar() {
                                 Focus::Sidebar
+                            } else {
+                                Focus::Editor
                             }
                         }
                         Focus::Sidebar => Focus::Sidebar,
@@ -801,13 +814,36 @@ impl Shell {
                     let next = match self.focus {
                         Focus::Sidebar => Focus::Editor,
                         Focus::Editor => {
-                            if self.right_model.visible_count() == 0 {
-                                Focus::Editor
-                            } else {
+                            if self.has_right_panel() {
                                 Focus::RightPanel
+                            } else {
+                                Focus::Editor
                             }
                         }
                         Focus::RightPanel => Focus::RightPanel,
+                    };
+                    self.set_focus(next);
+                    return ShellAction::FocusChanged(self.focus);
+                }
+                Key::Char('w') => {
+                    let next = match self.focus {
+                        Focus::Sidebar => Focus::Editor,
+                        Focus::Editor => {
+                            if self.has_right_panel() {
+                                Focus::RightPanel
+                            } else if self.has_sidebar() {
+                                Focus::Sidebar
+                            } else {
+                                Focus::Editor
+                            }
+                        }
+                        Focus::RightPanel => {
+                            if self.has_sidebar() {
+                                Focus::Sidebar
+                            } else {
+                                Focus::Editor
+                            }
+                        }
                     };
                     self.set_focus(next);
                     return ShellAction::FocusChanged(self.focus);
@@ -821,28 +857,26 @@ impl Shell {
 
         if key == Key::Ctrl('w') {
             self.pending_prefix = Some(key);
-            self.which_key.set_prefix_hints(vec![
-                truff_core::config::KeyHint {
-                    key: Key::Char('h'),
-                    description: "Focus left pane".into(),
-                    is_prefix: false,
-                },
-                truff_core::config::KeyHint {
-                    key: Key::Char('l'),
-                    description: "Focus right pane".into(),
-                    is_prefix: false,
-                },
-                truff_core::config::KeyHint {
-                    key: Key::Char('j'),
-                    description: "Focus lower pane".into(),
-                    is_prefix: false,
-                },
-                truff_core::config::KeyHint {
-                    key: Key::Char('k'),
-                    description: "Focus upper pane".into(),
-                    is_prefix: false,
-                },
-            ]);
+            self.which_key.set_prefix_hints_with_title(
+                "<C-w> Окна и панели",
+                vec![
+                    truff_core::config::KeyHint {
+                        key: Key::Char('h'),
+                        description: "Focus left pane".into(),
+                        is_prefix: false,
+                    },
+                    truff_core::config::KeyHint {
+                        key: Key::Char('l'),
+                        description: "Focus right pane".into(),
+                        is_prefix: false,
+                    },
+                    truff_core::config::KeyHint {
+                        key: Key::Char('w'),
+                        description: "Cycle pane".into(),
+                        is_prefix: false,
+                    },
+                ],
+            );
             return ShellAction::Incomplete;
         }
 
@@ -957,13 +991,15 @@ impl Shell {
                 }
             }
             Focus::Sidebar | Focus::RightPanel => {
-                if key == Key::Char('i') {
-                    self.set_focus(Focus::Editor);
-                    return self.feed_key(key);
-                }
-                if key == Key::Esc {
+                if key == Key::Esc && self.row_vim.search_query().is_none() {
                     self.set_focus(Focus::Editor);
                     return ShellAction::FocusChanged(Focus::Editor);
+                }
+                if matches!(key, Key::Char('i' | 'a' | 'o' | 'I' | 'A' | 'O'))
+                    && self.row_vim.search_query().is_none()
+                {
+                    self.set_focus(Focus::Editor);
+                    return self.feed_key(key);
                 }
                 let model = if self.focus == Focus::Sidebar {
                     &mut self.sidebar_model
