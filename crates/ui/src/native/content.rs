@@ -28,6 +28,7 @@ pub(super) fn show(
                 shell.mode(),
                 application.projection(),
                 theme,
+                shell.typography(),
                 shell.ime_preedit(),
                 shell.flash().targets(),
             );

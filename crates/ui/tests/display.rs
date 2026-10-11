@@ -274,26 +274,48 @@ fn test_editor_readable_column_and_margin() {
 
 #[test]
 fn test_typography_hierarchy_scale() {
-    use eframe::egui::FontId;
+    use eframe::egui::{FontFamily, FontId};
+    use truff_ui::app::global_config::TypographyConfig;
     use truff_ui::native::resolve_font_and_line_height;
 
-    let (f_h1, lh_h1) = resolve_font_and_line_height("# Heading 1");
-    assert_eq!(f_h1, FontId::proportional(28.0));
-    assert_eq!(lh_h1, 36.0);
+    let default_typo = TypographyConfig::default();
 
-    let (f_h2, lh_h2) = resolve_font_and_line_height("## Heading 2");
-    assert_eq!(f_h2, FontId::proportional(22.0));
+    let (f_h1, lh_h1) = resolve_font_and_line_height("# Heading 1", &default_typo);
+    assert_eq!(f_h1, FontId::new(27.0, FontFamily::Monospace));
+    assert_eq!(lh_h1, 35.0);
+
+    let (f_h2, lh_h2) = resolve_font_and_line_height("## Heading 2", &default_typo);
+    assert_eq!(f_h2, FontId::new(22.0, FontFamily::Monospace));
     assert_eq!(lh_h2, 30.0);
 
-    let (f_h3, lh_h3) = resolve_font_and_line_height("### Heading 3");
-    assert_eq!(f_h3, FontId::proportional(18.0));
-    assert_eq!(lh_h3, 26.0);
+    let (f_h3, lh_h3) = resolve_font_and_line_height("### Heading 3", &default_typo);
+    assert_eq!(f_h3, FontId::new(19.0, FontFamily::Monospace));
+    assert_eq!(lh_h3, 27.0);
 
-    let (f_code, lh_code) = resolve_font_and_line_height("```rust");
-    assert_eq!(f_code, FontId::monospace(13.5));
-    assert_eq!(lh_code, 20.0);
+    let (f_code, lh_code) = resolve_font_and_line_height("```rust", &default_typo);
+    assert_eq!(f_code, FontId::new(14.0, FontFamily::Monospace));
+    assert_eq!(lh_code, 21.0);
 
-    let (f_body, lh_body) = resolve_font_and_line_height("Regular markdown text");
-    assert_eq!(f_body, FontId::proportional(15.5));
-    assert_eq!(lh_body, 24.0);
+    let (f_body, lh_body) = resolve_font_and_line_height("Regular markdown text", &default_typo);
+    assert_eq!(f_body, FontId::new(15.0, FontFamily::Monospace));
+    assert_eq!(lh_body, 23.0);
+
+    // Test with scaled base_font_size: 20.0
+    let scaled_typo = TypographyConfig {
+        base_font_size: 20.0,
+        ..TypographyConfig::default()
+    };
+
+    let (f_h1_scaled, lh_h1_scaled) = resolve_font_and_line_height("# Heading 1", &scaled_typo);
+    assert_eq!(f_h1_scaled, FontId::new(36.0, FontFamily::Monospace));
+    assert_eq!(lh_h1_scaled, 47.0);
+
+    let (f_body_scaled, lh_body_scaled) =
+        resolve_font_and_line_height("Regular markdown text", &scaled_typo);
+    assert_eq!(f_body_scaled, FontId::new(20.0, FontFamily::Monospace));
+    assert_eq!(lh_body_scaled, 30.0);
+
+    let (f_code_scaled, lh_code_scaled) = resolve_font_and_line_height("```rust", &scaled_typo);
+    assert_eq!(f_code_scaled, FontId::new(18.0, FontFamily::Monospace));
+    assert_eq!(lh_code_scaled, 27.0);
 }

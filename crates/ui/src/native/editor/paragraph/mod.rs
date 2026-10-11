@@ -1,4 +1,5 @@
 mod paint;
+use crate::app::global_config::TypographyConfig;
 use crate::editor::{DisplayMap, ProjectionMode};
 use eframe::egui::{Color32, Galley, Painter};
 pub(super) use paint::ParagraphView;
@@ -14,14 +15,16 @@ pub(super) struct Paragraph {
     color: Color32,
     pixels_per_point: f32,
     width: f32,
+    typography: TypographyConfig,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct ParagraphStyle {
     pub(super) foreground: Color32,
     pub(super) pixels_per_point: f32,
     pub(super) width: f32,
     pub(super) projection: ProjectionMode,
+    pub(super) typography: TypographyConfig,
 }
 impl Paragraph {
     pub(super) fn new(
@@ -31,7 +34,13 @@ impl Paragraph {
         style: ParagraphStyle,
     ) -> Self {
         let display = DisplayMap::new(source, style.projection);
-        let galley = super::super::paint::shape(painter, &display, style.foreground, style.width);
+        let galley = super::super::paint::shape(
+            painter,
+            &display,
+            style.foreground,
+            style.width,
+            &style.typography,
+        );
         Self {
             range,
             display,
@@ -40,6 +49,7 @@ impl Paragraph {
             color: style.foreground,
             pixels_per_point: style.pixels_per_point,
             width: style.width,
+            typography: style.typography,
         }
     }
     /// Synchronizes view-dependent markers and reshapes only if the rendered paragraph changes.
@@ -62,14 +72,21 @@ impl Paragraph {
             && self.color == style.foreground
             && self.pixels_per_point == style.pixels_per_point
             && self.width == style.width
+            && self.typography == style.typography
         {
             return false;
         }
-        self.galley =
-            super::super::paint::shape(painter, &self.display, style.foreground, style.width);
+        self.galley = super::super::paint::shape(
+            painter,
+            &self.display,
+            style.foreground,
+            style.width,
+            &style.typography,
+        );
         self.color = style.foreground;
         self.pixels_per_point = style.pixels_per_point;
         self.width = style.width;
+        self.typography = style.typography;
         true
     }
 }

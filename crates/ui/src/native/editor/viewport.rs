@@ -1,6 +1,7 @@
 use super::color;
 use super::paragraph::{Paragraph, ParagraphStyle, ParagraphView};
 use super::{EditorWidget, LINE_HEIGHT};
+use crate::app::global_config::TypographyConfig;
 use crate::editor::{Affinity, EditorInput, ProjectionMode, ScrollAnchor, VisualPos};
 use crate::overlays::FlashTarget;
 use crate::theme::Theme;
@@ -18,6 +19,7 @@ impl EditorWidget {
         mode: Mode,
         projection: ProjectionMode,
         theme: &Theme,
+        typography: &TypographyConfig,
         preedit: Option<&str>,
         flash: &[FlashTarget],
     ) -> Option<EditorInput> {
@@ -145,11 +147,12 @@ impl EditorWidget {
                 } else {
                     projection
                 },
+                typography: typography.clone(),
             };
             if changed {
                 self.cache.insert(
                     line,
-                    Paragraph::new(range.clone(), &slice.to_string(), &painter, style),
+                    Paragraph::new(range.clone(), &slice.to_string(), &painter, style.clone()),
                 );
                 self.builds += 1;
             }

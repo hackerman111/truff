@@ -1,28 +1,48 @@
 use super::editor::color;
+use crate::app::global_config::TypographyConfig;
 use crate::editor::{Affinity, DisplayMap};
 use eframe::egui::{self, Color32, FontId, Galley, Painter};
 use std::sync::Arc;
 use truff_core::text::BytePos;
 
 /// Resolves font family, size and line height according to Truff design specification.
-pub fn resolve_font_and_line_height(source: &str) -> (FontId, f32) {
+pub fn resolve_font_and_line_height(source: &str, typography: &TypographyConfig) -> (FontId, f32) {
+    let family = match typography.font_family.as_str() {
+        "proportional" => egui::FontFamily::Proportional,
+        _ => egui::FontFamily::Monospace,
+    };
+    let base = typography.base_font_size;
     let source_trim = source.trim_start();
     if source_trim.starts_with("# ") {
-        (FontId::proportional(28.0), 36.0)
+        let size = (base * 1.8).round();
+        (FontId::new(size, family), (size * 1.3).round())
     } else if source_trim.starts_with("## ") {
-        (FontId::proportional(22.0), 30.0)
+        let size = (base * 1.45).round();
+        (FontId::new(size, family), (size * 1.35).round())
     } else if source_trim.starts_with("### ") {
-        (FontId::proportional(18.0), 26.0)
+        let size = (base * 1.25).round();
+        (FontId::new(size, family), (size * 1.4).round())
     } else if source_trim.starts_with("#### ") {
-        (FontId::proportional(16.0), 24.0)
+        let size = (base * 1.1).round();
+        (FontId::new(size, family), (size * 1.45).round())
     } else if source_trim.starts_with("##### ") {
-        (FontId::proportional(15.0), 22.0)
+        let size = (base * 1.0).round();
+        (FontId::new(size, family), (size * 1.5).round())
     } else if source_trim.starts_with("###### ") {
-        (FontId::proportional(14.0), 20.0)
+        let size = (base * 0.95).round();
+        (FontId::new(size, family), (size * 1.5).round())
     } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
-        (FontId::monospace(13.5), 20.0)
+        let size = (base * 0.9).round();
+        (
+            FontId::new(size, egui::FontFamily::Monospace),
+            (size * 1.5).round(),
+        )
     } else {
-        (FontId::proportional(15.5), 24.0)
+        let size = base;
+        (
+            FontId::new(size, family),
+            (size * typography.line_height_multiplier).round(),
+        )
     }
 }
 
@@ -31,8 +51,9 @@ pub(super) fn shape(
     display: &DisplayMap,
     foreground: Color32,
     width: f32,
+    typography: &TypographyConfig,
 ) -> Arc<Galley> {
-    let (font, line_height) = resolve_font_and_line_height(display.source_text());
+    let (font, line_height) = resolve_font_and_line_height(display.source_text(), typography);
 
     let mut job =
         egui::text::LayoutJob::simple(display.visual_text().to_owned(), font, foreground, width);
