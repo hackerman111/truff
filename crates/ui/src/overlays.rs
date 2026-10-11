@@ -1,9 +1,28 @@
 use truff_core::config::KeyHint;
+use truff_core::vim::Key;
 
-/// Contextual overlay displaying available keybindings after a prefix.
+/// Display mode of WhichKey overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WhichKeyMode {
+    #[default]
+    Prefix,
+    Help,
+}
+
+/// A categorized group of keybindings for the help screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhichKeyCategory {
+    pub name: String,
+    pub hints: Vec<KeyHint>,
+}
+
+/// Contextual overlay displaying available keybindings after a prefix or a full help cheatsheet.
 #[derive(Debug, Clone)]
 pub struct WhichKeyOverlay {
     hints: Vec<KeyHint>,
+    categories: Vec<WhichKeyCategory>,
+    mode: WhichKeyMode,
+    title: String,
     visible: bool,
     elapsed_ms: u64,
     delay_ms: u64,
@@ -23,29 +42,70 @@ impl WhichKeyOverlay {
     pub fn new() -> Self {
         Self {
             hints: Vec::new(),
+            categories: Vec::new(),
+            mode: WhichKeyMode::Prefix,
+            title: String::new(),
             visible: false,
             elapsed_ms: 0,
             delay_ms: Self::DEFAULT_DELAY_MS,
         }
     }
 
+    /// Returns the current overlay mode.
+    pub fn mode(&self) -> WhichKeyMode {
+        self.mode
+    }
+
+    /// Returns the overlay title.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Returns the displayed categories when in help mode.
+    pub fn categories(&self) -> &[WhichKeyCategory] {
+        &self.categories
+    }
+
     /// Sets candidate hints when an incomplete key prefix is entered.
     pub fn set_prefix_hints(&mut self, hints: Vec<KeyHint>) {
+        self.set_prefix_hints_with_title("", hints);
+    }
+
+    /// Sets candidate hints with a specific title when a key prefix is entered.
+    pub fn set_prefix_hints_with_title(&mut self, title: impl Into<String>, hints: Vec<KeyHint>) {
+        self.mode = WhichKeyMode::Prefix;
+        self.title = title.into();
         self.hints = hints;
+        self.categories.clear();
         self.elapsed_ms = 0;
         self.visible = false;
     }
 
     /// Shows which-key immediately (e.g. via explicit command).
     pub fn show_immediately(&mut self, hints: Vec<KeyHint>) {
+        self.mode = WhichKeyMode::Prefix;
+        self.title.clear();
         self.hints = hints;
+        self.categories.clear();
         self.visible = true;
     }
 
-    /// Hides the overlay and clears pending hints.
+    /// Shows the full help cheatsheet immediately.
+    pub fn show_help(&mut self, categories: Vec<WhichKeyCategory>) {
+        self.mode = WhichKeyMode::Help;
+        self.title = "Справка по горячим клавишам".to_string();
+        self.hints.clear();
+        self.categories = categories;
+        self.visible = true;
+    }
+
+    /// Hides the overlay and clears pending hints and categories.
     pub fn hide(&mut self) {
         self.visible = false;
         self.hints.clear();
+        self.categories.clear();
+        self.title.clear();
+        self.mode = WhichKeyMode::Prefix;
         self.elapsed_ms = 0;
     }
 
@@ -75,6 +135,67 @@ impl WhichKeyOverlay {
             .iter()
             .map(|h| format!("{:<8} -> {}", h.key, h.description))
             .collect()
+    }
+
+    /// Default structured categories for the help cheatsheet.
+    pub fn default_help_categories() -> Vec<WhichKeyCategory> {
+        vec![
+            WhichKeyCategory {
+                name: "Навигация (Motions)".to_string(),
+                hints: vec![
+                    KeyHint { key: Key::Char('h'), description: "Влево".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('j'), description: "Вниз".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('k'), description: "Вверх".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('l'), description: "Вправо".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('w'), description: "Слово вперёд".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('b'), description: "Слово назад".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('e'), description: "Конец слова".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('0'), description: "Начало строки".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('$'), description: "Конец строки".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('g'), description: "gg: Первая строка".into(), is_prefix: true },
+                    KeyHint { key: Key::Char('G'), description: "Последняя строка".into(), is_prefix: false },
+                ],
+            },
+            WhichKeyCategory {
+                name: "Редактирование (Edits)".to_string(),
+                hints: vec![
+                    KeyHint { key: Key::Char('i'), description: "Режим вставки".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('a'), description: "Вставка после курсора".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('x'), description: "Удалить символ".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('d'), description: "dd: Удалить строку".into(), is_prefix: true },
+                    KeyHint { key: Key::Char('c'), description: "cc: Изменить строку".into(), is_prefix: true },
+                    KeyHint { key: Key::Char('y'), description: "yy: Скопировать строку".into(), is_prefix: true },
+                    KeyHint { key: Key::Char('p'), description: "Вставить после".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('P'), description: "Вставить до".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('u'), description: "Отмена (Undo)".into(), is_prefix: false },
+                    KeyHint { key: Key::Ctrl('r'), description: "Повтор (Redo)".into(), is_prefix: false },
+                ],
+            },
+            WhichKeyCategory {
+                name: "Окна и режимы (Panels)".to_string(),
+                hints: vec![
+                    KeyHint { key: Key::Ctrl('w'), description: "<C-w> h/l: Переход между панелями".into(), is_prefix: true },
+                    KeyHint { key: Key::Char('s'), description: "Flash-прыжок по словам".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('v'), description: "Визуальное выделение".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('V'), description: "Выделение строк".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('?'), description: "Эта справка".into(), is_prefix: false },
+                    KeyHint { key: Key::Esc, description: "Normal mode / Закрыть".into(), is_prefix: false },
+                ],
+            },
+            WhichKeyCategory {
+                name: "Команды (:commands)".to_string(),
+                hints: vec![
+                    KeyHint { key: Key::Char('w'), description: ":w — Сохранить заметку".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('q'), description: ":wq — Сохранить и закрыть".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('v'), description: ":vault <путь> — Открыть хранилище".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('n'), description: ":new <file.md> — Создать заметку".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('l'), description: ":link <note> — Создать ссылку".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('b'), description: ":backlinks — Обратные ссылки".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('t'), description: ":theme <nord/dark/light>".into(), is_prefix: false },
+                    KeyHint { key: Key::Char('h'), description: ":help — Открыть справку".into(), is_prefix: false },
+                ],
+            },
+        ]
     }
 }
 
