@@ -586,3 +586,26 @@ fn rope_graphemes_handle_large_clusters_and_invalid_byte_positions() {
     assert_eq!(buffer.grapheme_next(BytePos::new(2)), None);
     assert_eq!(buffer.grapheme_prev(BytePos::new(2)), None);
 }
+
+#[test]
+fn buffer_floor_char_boundary_and_line_of_byte_multibyte() {
+    let buffer = Buffer::from_str("АБВ\nГДЕёжз");
+    // "А" is bytes 0..2, "Б" is 2..4, "В" is 4..6, "\n" is 6..7
+    // "Г" is 7..9, "Д" is 9..11, "Е" is 11..13, "ё" is 13..15, "ж" is 15..17, "з" is 17..19
+    assert_eq!(buffer.floor_char_boundary(0), 0);
+    assert_eq!(buffer.floor_char_boundary(1), 0);
+    assert_eq!(buffer.floor_char_boundary(2), 2);
+    assert_eq!(buffer.floor_char_boundary(3), 2);
+    assert_eq!(buffer.floor_char_boundary(18), 17);
+    assert_eq!(buffer.floor_char_boundary(100), 19);
+
+    assert_eq!(buffer.line_of_byte(0), 0);
+    assert_eq!(buffer.line_of_byte(1), 0);
+    assert_eq!(buffer.line_of_byte(5), 0);
+    assert_eq!(buffer.line_of_byte(6), 0);
+    assert_eq!(buffer.line_of_byte(7), 1);
+    assert_eq!(buffer.line_of_byte(8), 1);
+    assert_eq!(buffer.line_of_byte(18), 1);
+    assert_eq!(buffer.line_of_byte(19), 1);
+    assert_eq!(buffer.line_of_byte(100), 1);
+}

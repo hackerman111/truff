@@ -75,7 +75,12 @@ impl VimState {
             Operator::Yank => None,
             Operator::Indent | Operator::Dedent => {
                 let first = buffer.line_of_byte(range.start);
-                let last = buffer.line_of_byte(range.end.saturating_sub(1).max(range.start));
+                let end_pos = if range.end > range.start {
+                    buffer.floor_char_boundary(range.end.saturating_sub(1))
+                } else {
+                    range.start
+                };
+                let last = buffer.line_of_byte(end_pos);
                 let mut tx = Transaction::new();
                 for line in first..=last {
                     let start = buffer.byte_of_line(line);

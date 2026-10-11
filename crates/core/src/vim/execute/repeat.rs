@@ -76,9 +76,12 @@ impl VimState {
                         }
                     }
                     let lines = linewise.then(|| {
-                        buffer.line_of_byte(range.end.saturating_sub(1).max(range.start))
-                            - buffer.line_of_byte(range.start)
-                            + 1
+                        let end_pos = if range.end > range.start {
+                            buffer.floor_char_boundary(range.end.saturating_sub(1))
+                        } else {
+                            range.start
+                        };
+                        buffer.line_of_byte(end_pos) - buffer.line_of_byte(range.start) + 1
                     });
                     Command::OperatorExtent {
                         op,

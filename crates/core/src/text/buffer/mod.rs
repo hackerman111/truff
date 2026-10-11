@@ -167,14 +167,25 @@ impl Buffer {
         self.rope.is_char_boundary(pos)
     }
 
+    /// Returns the largest byte offset less than or equal to `pos` that is a character boundary.
+    pub fn floor_char_boundary(&self, mut pos: usize) -> usize {
+        pos = pos.min(self.rope.byte_len());
+        while !self.rope.is_char_boundary(pos) {
+            pos -= 1;
+        }
+        pos
+    }
+
     /// Number of lines in the buffer.
     pub fn line_len(&self) -> usize {
         self.rope.line_len()
     }
 
     /// Line index containing the given byte offset.
+    /// Snaps to the nearest preceding character boundary if `pos` is not on a boundary.
     pub fn line_of_byte(&self, pos: usize) -> usize {
-        self.rope.line_of_byte(pos)
+        let snapped = self.floor_char_boundary(pos);
+        self.rope.line_of_byte(snapped)
     }
 
     /// Start byte offset of the given line.

@@ -3,7 +3,10 @@ use super::Paragraph;
 use crate::editor::Affinity;
 use crate::overlays::FlashTarget;
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, FontId, Painter, Pos2, Rect};
+use eframe::egui::{
+    self, Color32, FontId, Painter, Pos2, Rect,
+    epaint::text::{Glyph, PlacedRow},
+};
 use std::ops::Range;
 use truff_core::{text::BytePos, vim::Mode};
 
@@ -16,6 +19,68 @@ pub(in super::super) struct ParagraphView<'a> {
     pub(in super::super) flash: &'a [FlashTarget],
     pub(in super::super) content_width: f32,
 }
+const HIGHLIGHT_PAD_Y: f32 = 2.0;
+const HIGHLIGHT_PAD_X: f32 = 1.0;
+
+fn glyph_vertical_bounds(origin_y: f32, row: &PlacedRow, glyph: &Glyph) -> (f32, f32) {
+    let baseline_y = origin_y + row.pos.y + glyph.pos.y;
+    let cap_height = (glyph.font_face_ascent * 0.75).max(10.0);
+    let (top, bottom) = if !glyph.uv_rect.is_nothing() {
+        let ink_top = baseline_y + glyph.uv_rect.offset.y;
+        let ink_bottom = ink_top + glyph.uv_rect.size.y;
+        (
+            ink_top.min(baseline_y - cap_height),
+            ink_bottom.max(baseline_y),
+        )
+    } else {
+        (baseline_y - cap_height, baseline_y)
+    };
+    (top - HIGHLIGHT_PAD_Y, bottom + HIGHLIGHT_PAD_Y)
+}
+
+fn row_fallback_vertical_bounds(origin_y: f32, row: &PlacedRow) -> (f32, f32) {
+    if let Some(glyph) = row.glyphs.first() {
+        glyph_vertical_bounds(origin_y, row, glyph)
+    } else {
+        let baseline_y = origin_y + row.pos.y + row.size.y * 0.6;
+        let cap_height = 12.0;
+        (
+            baseline_y - cap_height - HIGHLIGHT_PAD_Y,
+            baseline_y + HIGHLIGHT_PAD_Y,
+        )
+    }
+}
+
+fn paragraph_vertical_bounds(origin_y: f32, rows: &[PlacedRow]) -> (f32, f32) {
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    for row in rows {
+        if !row.glyphs.is_empty() {
+            for glyph in &row.glyphs {
+                let (g_top, g_bottom) = glyph_vertical_bounds(origin_y, row, glyph);
+                min_y = min_y.min(g_top);
+                max_y = max_y.max(g_bottom);
+            }
+        } else {
+            let (r_top, r_bottom) = row_fallback_vertical_bounds(origin_y, row);
+            min_y = min_y.min(r_top);
+            max_y = max_y.max(r_bottom);
+        }
+    }
+    if min_y <= max_y {
+        (min_y, max_y)
+    } else if let Some(first_row) = rows.first() {
+        row_fallback_vertical_bounds(origin_y, first_row)
+    } else {
+        let baseline_y = origin_y + super::super::LINE_HEIGHT * 0.6;
+        let cap_height = 12.0;
+        (
+            baseline_y - cap_height - HIGHLIGHT_PAD_Y,
+            baseline_y + HIGHLIGHT_PAD_Y,
+        )
+    }
+}
+
 impl Paragraph {
     fn char_rect_at(&self, origin: Pos2, source: usize) -> Rect {
         let visual = self
@@ -32,14 +97,26 @@ impl Paragraph {
         let layout_cursor = self.galley.layout_from_cursor(ccursor);
         if let Some(row) = self.galley.rows.get(layout_cursor.row) {
             let x = row.x_offset(layout_cursor.column) + row.pos.x + origin.x;
-            let width = if let Some(glyph) = row.glyphs.get(layout_cursor.column.0) {
-                glyph.advance_width
-            } else {
-                (row.size.y * 0.5).max(8.5)
-            };
+            let (width, (min_y, max_y)) =
+                if let Some(glyph) = row.glyphs.get(layout_cursor.column.0) {
+                    (
+                        glyph.advance_width,
+                        glyph_vertical_bounds(origin.y, row, glyph),
+                    )
+                } else if let Some(glyph) = row.glyphs.last() {
+                    (
+                        (row.size.y * 0.5).max(8.5),
+                        glyph_vertical_bounds(origin.y, row, glyph),
+                    )
+                } else {
+                    (
+                        (row.size.y * 0.5).max(8.5),
+                        row_fallback_vertical_bounds(origin.y, row),
+                    )
+                };
             Rect::from_min_max(
-                Pos2::new(x, origin.y + row.min_y()),
-                Pos2::new(x + width.max(2.0), origin.y + row.max_y()),
+                Pos2::new(x - HIGHLIGHT_PAD_X, min_y),
+                Pos2::new(x + width.max(2.0) + HIGHLIGHT_PAD_X, max_y),
             )
         } else {
             let caret = self
@@ -98,9 +175,23 @@ impl Paragraph {
                 let col_end = sel_end - row_char_start;
                 let x_start = row.x_offset(egui::text::CharIndex(col_start)) + row.pos.x + origin.x;
                 let x_end = row.x_offset(egui::text::CharIndex(col_end)) + row.pos.x + origin.x;
+                let glyph_slice =
+                    &row.glyphs[col_start.min(row.glyphs.len())..col_end.min(row.glyphs.len())];
+                let (min_y, max_y) = if !glyph_slice.is_empty() {
+                    let mut min_y = f32::INFINITY;
+                    let mut max_y = f32::NEG_INFINITY;
+                    for glyph in glyph_slice {
+                        let (g_top, g_bottom) = glyph_vertical_bounds(origin.y, row, glyph);
+                        min_y = min_y.min(g_top);
+                        max_y = max_y.max(g_bottom);
+                    }
+                    (min_y, max_y)
+                } else {
+                    row_fallback_vertical_bounds(origin.y, row)
+                };
                 let rect = Rect::from_min_max(
-                    Pos2::new(x_start.min(x_end), origin.y + row.min_y()),
-                    Pos2::new(x_start.max(x_end), origin.y + row.max_y()),
+                    Pos2::new(x_start.min(x_end), min_y),
+                    Pos2::new(x_start.max(x_end), max_y),
                 );
                 painter.rect_filled(rect, 2.0, color);
             }
@@ -139,9 +230,12 @@ impl Paragraph {
                     || self.range.contains(&selection.start);
                 if is_selected {
                     let width = self.galley.size().x.max(view.content_width);
-                    let line_height = self.galley.size().y.max(super::super::LINE_HEIGHT);
+                    let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
                     painter.rect_filled(
-                        Rect::from_min_size(origin, egui::vec2(width, line_height)),
+                        Rect::from_min_max(
+                            Pos2::new(origin.x, min_y),
+                            Pos2::new(origin.x + width, max_y),
+                        ),
                         2.0,
                         color(view.theme.selection),
                     );
@@ -161,11 +255,12 @@ impl Paragraph {
         {
             let mut caret = self.char_rect_at(origin, cursor);
             if view.mode == Mode::Insert {
+                caret.min.x += HIGHLIGHT_PAD_X;
                 caret.max.x = caret.min.x + 1.5;
             }
             painter.rect_filled(
                 caret,
-                1.5,
+                2.0,
                 color(view.theme.cursor).gamma_multiply(if view.mode == Mode::Insert {
                     1.0
                 } else {

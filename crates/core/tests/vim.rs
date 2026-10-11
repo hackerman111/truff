@@ -326,3 +326,42 @@ fn visual_mode_delete_selection_with_lowercase_x() {
     assert_eq!(buffer.as_str(), " world\n");
     assert_eq!(vim.mode, Mode::Normal);
 }
+
+#[test]
+fn test_visual_line_yank_multibyte_without_trailing_newline() {
+    let text = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя";
+    let (mut buffer, mut view) = setup_editor(text);
+    let mut vim = VimState::new();
+
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[
+            Key::Char('V'), // enter VisualLine
+            Key::Char('y'), // yank line
+            Key::Char('p'), // paste below
+        ],
+    );
+    assert_eq!(vim.mode, Mode::Normal);
+    assert_eq!(buffer.as_str(), format!("{text}\n{text}"));
+}
+
+#[test]
+fn test_visual_line_indent_multibyte_without_trailing_newline() {
+    let text = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
+    let (mut buffer, mut view) = setup_editor(text);
+    let mut vim = VimState::new();
+
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[
+            Key::Char('V'), // enter VisualLine
+            Key::Char('>'), // indent line
+        ],
+    );
+    assert_eq!(vim.mode, Mode::Normal);
+    assert_eq!(buffer.as_str(), format!("    {text}"));
+}
