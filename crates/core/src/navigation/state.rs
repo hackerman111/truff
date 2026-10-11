@@ -102,6 +102,25 @@ impl RowModel {
             .collect()
     }
 
+    /// Returns references to all underlying items (both visible and collapsed).
+    pub fn all_items(&self) -> &[RowItem] {
+        &self.items
+    }
+
+    /// Selects a row by RowId among currently visible rows.
+    pub fn select_id(&mut self, id: RowId) -> bool {
+        if let Some(pos) = self
+            .visible_indices
+            .iter()
+            .position(|&idx| self.items.get(idx).is_some_and(|r| r.id == id))
+        {
+            self.selected_visible_idx = pos;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Returns a reference to a visible row at index `visible_idx`.
     pub fn get_visible_row(&self, visible_idx: usize) -> Option<&RowItem> {
         self.visible_indices

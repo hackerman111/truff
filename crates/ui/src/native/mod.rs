@@ -218,15 +218,16 @@ impl NativeApp {
                     let count = model.visible_count();
                     let selected = model.selected_index();
                     let mut open = None;
-                    egui::ScrollArea::vertical().show_rows(ui, 24.0, count, |ui, rows| {
+                    let mut toggle_folder = None;
+                    egui::ScrollArea::vertical().show_rows(ui, 28.0, count, |ui, rows| {
                         for index in rows {
                             if let Some(row) = model.get_visible_row(index) {
-                                let indent = (row.depth as f32) * 12.0;
+                                let indent = (row.depth as f32) * 14.0;
                                 let is_selected = index == selected;
                                 let glyph = if row.is_folder {
-                                    if row.is_collapsed { "▸ " } else { "▾ " }
+                                    if row.is_collapsed { "▸ 📁 " } else { "▾ 📁 " }
                                 } else {
-                                    "  "
+                                    "  📄 "
                                 };
                                 let label_text = format!("{glyph}{}", row.title);
                                 let text_color = if is_selected || row.is_folder {
@@ -238,15 +239,22 @@ impl NativeApp {
                                     ui.add_space(indent);
                                     let rich = egui::RichText::new(label_text)
                                         .color(text_color)
-                                        .size(13.5);
+                                        .size(12.5);
                                     let resp = ui.selectable_label(is_selected, rich);
                                     if resp.clicked() {
-                                        open = row.data.clone();
+                                        if row.is_folder {
+                                            toggle_folder = Some(row.id);
+                                        } else {
+                                            open = row.data.clone();
+                                        }
                                     }
                                 });
                             }
                         }
                     });
+                    if let Some(id) = toggle_folder {
+                        self.application.shell.sidebar_model_mut().toggle_collapse(id);
+                    }
                     if let Some(path) = open
                         && let Err(error) = self.application.open_note(&path)
                     {

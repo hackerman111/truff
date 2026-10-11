@@ -326,3 +326,27 @@ fn empty_backlinks_reports_message_and_restores_editor() {
     let _ = app.shutdown();
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn test_sidebar_hierarchical_folders_and_auto_expansion() {
+    let mut shell = Shell::new();
+    shell.set_sidebar_available(true);
+    shell.set_sidebar_files(vec![
+        "docs/guide.md".into(),
+        "docs/api/endpoints.md".into(),
+        "Welcome.md".into(),
+    ]);
+
+    let model = shell.sidebar_model();
+    // Initially: root level has "docs" (collapsed) and "Welcome.md"
+    let visible_titles: Vec<&str> = model.visible_rows().iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(visible_titles, vec!["docs", "Welcome.md"]);
+    assert!(model.visible_rows()[0].is_folder);
+    assert!(!model.visible_rows()[1].is_folder);
+
+    // Auto-reveal: selecting a nested file expands parent folders
+    shell.select_sidebar_file("docs/api/endpoints.md");
+    let model = shell.sidebar_model();
+    let visible_titles: Vec<&str> = model.visible_rows().iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(visible_titles, vec!["docs", "api", "endpoints.md", "guide.md", "Welcome.md"]);
+}
