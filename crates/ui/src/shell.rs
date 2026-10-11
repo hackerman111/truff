@@ -62,6 +62,8 @@ pub struct Shell {
     sidebar_files: Vec<String>,
     sidebar_model: RowModel,
     right_model: RowModel,
+    right_available: bool,
+    sidebar_available: bool,
     row_vim: VimState,
     workspace: Workspace,
     input: InputAdapter,
@@ -101,6 +103,8 @@ impl Shell {
             sidebar_files: Vec::new(),
             sidebar_model: RowModel::new(),
             right_model: RowModel::new(),
+            right_available: false,
+            sidebar_available: false,
             row_vim: VimState::new(),
             workspace,
             input: InputAdapter::new(),
@@ -120,6 +124,36 @@ impl Shell {
         }
     }
 
+    /// Returns whether the right panel (e.g. backlinks/references) is available.
+    pub fn has_right_panel(&self) -> bool {
+        self.right_available || self.right_model.visible_count() > 0
+    }
+
+    /// Sets whether the right panel is available.
+    /// If made unavailable while currently focused, focus is moved to the editor.
+    pub fn set_right_panel_available(&mut self, available: bool) {
+        self.right_available = available;
+        if !available && self.focus == Focus::RightPanel {
+            self.set_focus(Focus::Editor);
+        }
+    }
+
+    /// Returns whether the sidebar is available.
+    pub fn has_sidebar(&self) -> bool {
+        self.sidebar_available
+            || !self.sidebar_files.is_empty()
+            || self.sidebar_model.visible_count() > 0
+    }
+
+    /// Sets whether the sidebar is available.
+    /// If made unavailable while currently focused, focus is moved to the editor.
+    pub fn set_sidebar_available(&mut self, available: bool) {
+        self.sidebar_available = available;
+        if !available && self.focus == Focus::Sidebar {
+            self.set_focus(Focus::Editor);
+        }
+    }
+
     /// Current focus.
     pub fn focus(&self) -> Focus {
         self.focus
@@ -127,19 +161,15 @@ impl Shell {
 
     /// Sets the focused panel.
     pub fn set_focus(&mut self, focus: Focus) {
-        let focus = match focus {
-            Focus::Sidebar
-                if self.sidebar_files.is_empty() && self.sidebar_model.visible_count() == 0 =>
-            {
-                Focus::Editor
-            }
-            Focus::RightPanel if self.right_model.visible_count() == 0 => Focus::Editor,
+        let resolved = match focus {
+            Focus::Sidebar if !self.has_sidebar() => Focus::Editor,
+            Focus::RightPanel if !self.has_right_panel() => Focus::Editor,
             other => other,
         };
-        if self.focus != focus {
+        if self.focus != resolved {
             self.reset_editor_input();
         }
-        self.focus = focus;
+        self.focus = resolved;
         self.pending_prefix = None;
         self.key_prefix.clear();
         self.binding_prefix.clear();
@@ -150,6 +180,7 @@ impl Shell {
 
     /// Populates sidebar files and initializes its row model.
     pub fn set_sidebar_files(&mut self, files: Vec<String>) {
+        let is_empty = files.is_empty();
         self.sidebar_files = files.clone();
         let items: Vec<RowItem> = files
             .into_iter()
@@ -164,6 +195,9 @@ impl Shell {
             })
             .collect();
         self.sidebar_model.set_items(items);
+        if is_empty && !self.sidebar_available && self.focus == Focus::Sidebar {
+            self.set_focus(Focus::Editor);
+        }
     }
 
     /// Returns list of files currently in the sidebar.
