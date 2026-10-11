@@ -21,6 +21,13 @@ pub struct NativeApp {
     pub initial_note_name: String,
     pub create_starter_note: bool,
     pub create_vault_error: Option<String>,
+    pub show_create_file_dialog: bool,
+    pub create_file_input: String,
+    pub create_file_error: Option<String>,
+    pub show_create_folder_dialog: bool,
+    pub create_folder_input: String,
+    pub create_folder_initial_note: bool,
+    pub create_folder_error: Option<String>,
 }
 
 impl NativeApp {
@@ -36,6 +43,13 @@ impl NativeApp {
             initial_note_name: "Welcome.md".to_string(),
             create_starter_note: true,
             create_vault_error: None,
+            show_create_file_dialog: false,
+            create_file_input: String::new(),
+            create_file_error: None,
+            show_create_folder_dialog: false,
+            create_folder_input: String::new(),
+            create_folder_initial_note: true,
+            create_folder_error: None,
         }
     }
 
@@ -322,11 +336,38 @@ impl NativeApp {
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .small_button("➕")
-                            .on_hover_text("Создать новое хранилище")
+                            .small_button("◫")
+                            .on_hover_text("Свернуть все папки")
+                            .clicked()
+                        {
+                            self.application.shell.sidebar_model_mut().collapse_all();
+                        }
+                        if ui
+                            .small_button("📂")
+                            .on_hover_text("Выбрать / сменить хранилище")
                             .clicked()
                         {
                             self.show_create_vault_dialog = true;
+                        }
+                        if self.application.vault_path().is_some() {
+                            if ui
+                                .small_button("+📁")
+                                .on_hover_text("Создать новую папку")
+                                .clicked()
+                            {
+                                self.show_create_folder_dialog = true;
+                                self.create_folder_input.clear();
+                                self.create_folder_error = None;
+                            }
+                            if ui
+                                .small_button("+📄")
+                                .on_hover_text("Создать новую заметку")
+                                .clicked()
+                            {
+                                self.show_create_file_dialog = true;
+                                self.create_file_input.clear();
+                                self.create_file_error = None;
+                            }
                         }
                     });
                 });
@@ -626,6 +667,123 @@ impl NativeApp {
                 self.show_create_vault_dialog = false;
             }
         }
+
+        if self.show_create_file_dialog {
+            let mut close_dialog = false;
+            let mut submit_creation = false;
+            egui::Window::new("Новая заметка")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(380.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(&context, |ui| {
+                    ui.heading("Создание заметки");
+                    ui.label("Имя файла или путь (например, folder/note.md):");
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.create_file_input)
+                            .desired_width(360.0),
+                    );
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        submit_creation = true;
+                    }
+                    if let Some(err) = &self.create_file_error {
+                        ui.add_space(6.0);
+                        ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
+                    }
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("✔ Создать").clicked() {
+                            submit_creation = true;
+                        }
+                        if ui.button("Отмена").clicked() {
+                            self.create_file_error = None;
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if submit_creation {
+                match self.application.create_note(&self.create_file_input) {
+                    Ok(()) => {
+                        self.create_file_error = None;
+                        self.create_file_input.clear();
+                        close_dialog = true;
+                    }
+                    Err(err) => {
+                        self.create_file_error = Some(err.to_string());
+                    }
+                }
+            }
+
+            if close_dialog {
+                self.show_create_file_dialog = false;
+            }
+        }
+
+        if self.show_create_folder_dialog {
+            let mut close_dialog = false;
+            let mut submit_creation = false;
+            egui::Window::new("Новая папка")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(380.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(&context, |ui| {
+                    ui.heading("Создание папки");
+                    ui.label("Имя папки (например, archive или docs/api):");
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.create_folder_input)
+                            .desired_width(360.0),
+                    );
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        submit_creation = true;
+                    }
+                    ui.add_space(6.0);
+                    ui.checkbox(
+                        &mut self.create_folder_initial_note,
+                        "Создать index.md в папке",
+                    );
+                    if let Some(err) = &self.create_folder_error {
+                        ui.add_space(6.0);
+                        ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
+                    }
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("✔ Создать").clicked() {
+                            submit_creation = true;
+                        }
+                        if ui.button("Отмена").clicked() {
+                            self.create_folder_error = None;
+                            close_dialog = true;
+                        }
+                    });
+                });
+
+            if submit_creation {
+                let folder = self.create_folder_input.trim();
+                let res = if self.create_folder_initial_note {
+                    let note_path = format!("{folder}/index.md");
+                    self.application.create_note(&note_path)
+                } else {
+                    self.application.create_folder(folder)
+                };
+                match res {
+                    Ok(()) => {
+                        self.create_folder_error = None;
+                        self.create_folder_input.clear();
+                        close_dialog = true;
+                    }
+                    Err(err) => {
+                        self.create_folder_error = Some(err.to_string());
+                    }
+                }
+            }
+
+            if close_dialog {
+                self.show_create_folder_dialog = false;
+            }
+        }
+
         self.show_which_key_overlay(&context);
         if let Some(id) = self.application.shell.workspace().active_view()
             && let Some(view) = self.application.shell.workspace_mut().get_view_mut(id)

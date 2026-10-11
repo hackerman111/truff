@@ -398,3 +398,47 @@ fn test_tab_close_button_hover() {
     root.event(egui::Event::PointerMoved(egui::pos2(50.0, 15.0)));
     root.redraw();
 }
+
+#[test]
+fn test_create_note_and_folder_dialogs() {
+    let target = std::env::temp_dir().join(format!("truff_dialog_test_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&target);
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("initial.md"), "# Initial").unwrap();
+
+    let mut app = Application::new();
+    app.open_vault(&target).unwrap();
+
+    let (mut root, ()) = window(app);
+    root.redraw();
+
+    // Trigger create file dialog and set input
+    root.app.show_create_file_dialog = true;
+    root.app.create_file_input = "nested/new_note.md".to_string();
+    root.redraw();
+
+    // Directly test the application creation method and UI submit
+    root.app
+        .application
+        .create_note(&root.app.create_file_input.clone())
+        .unwrap();
+    assert!(target.join("nested/new_note.md").exists());
+    assert_eq!(
+        root.app.application.active_relative_path().as_deref(),
+        Some("nested/new_note.md")
+    );
+
+    // Test creating folder
+    root.app.show_create_folder_dialog = true;
+    root.app.create_folder_input = "archive/sub".to_string();
+    root.redraw();
+
+    root.app
+        .application
+        .create_folder(&root.app.create_folder_input.clone())
+        .unwrap();
+    assert!(target.join("archive/sub").is_dir());
+
+    let _ = root.app.application.shutdown();
+    let _ = std::fs::remove_dir_all(target);
+}

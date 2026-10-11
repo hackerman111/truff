@@ -441,6 +441,9 @@ impl FileOpPlan {
         match &self.kind {
             FileOpKind::CreateFile { path, content } => {
                 let abs = vault.resolve_path(path)?;
+                if let Some(parent) = abs.parent() {
+                    fs::create_dir_all(parent)?;
+                }
                 files::atomic_write_file(&abs, content)?;
             }
             FileOpKind::CreateFolder { path } => {

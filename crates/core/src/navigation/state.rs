@@ -265,6 +265,17 @@ impl RowModel {
         }
     }
 
+    /// Collapses all folder rows.
+    pub fn collapse_all(&mut self) {
+        for item in &mut self.items {
+            if item.is_folder {
+                item.is_collapsed = true;
+            }
+        }
+        self.selected_visible_idx = 0;
+        self.recompute_visibility();
+    }
+
     fn recompute_visibility(&mut self) {
         self.visible_indices.clear();
         let mut collapsed_depth_cutoff = None;

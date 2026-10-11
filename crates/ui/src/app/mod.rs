@@ -240,6 +240,56 @@ impl Application {
         Ok(())
     }
 
+    pub fn create_note(&mut self, path: &str) -> AppResult<()> {
+        let paths = self.paths.as_ref().ok_or("Open a vault first")?;
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return Err("File path cannot be empty".into());
+        }
+        let rel = if trimmed.ends_with(".md") {
+            trimmed.to_string()
+        } else {
+            format!("{trimmed}.md")
+        };
+        let absolute = paths.resolve_path(Path::new(&rel))?;
+        if let Some(parent) = absolute.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if !absolute.exists() {
+            let title = absolute
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Note");
+            let initial = format!("# {title}\n\n");
+            std::fs::write(&absolute, initial)?;
+        }
+        let mut files = self
+            .shell
+            .sidebar_model()
+            .all_items()
+            .iter()
+            .filter_map(|r| r.data.clone())
+            .collect::<Vec<_>>();
+        if !files.contains(&rel) {
+            files.push(rel.clone());
+            files.sort();
+            self.shell.set_sidebar_files(files);
+        }
+        self.open_note(&rel)?;
+        Ok(())
+    }
+
+    pub fn create_folder(&mut self, path: &str) -> AppResult<()> {
+        let paths = self.paths.as_ref().ok_or("Open a vault first")?;
+        let trimmed = path.trim().trim_matches(['/', '\\']);
+        if trimmed.is_empty() {
+            return Err("Folder path cannot be empty".into());
+        }
+        let absolute = paths.resolve_path(Path::new(trimmed))?;
+        std::fs::create_dir_all(&absolute)?;
+        Ok(())
+    }
+
     pub fn active_path(&self) -> Option<&Path> {
         let id = self.shell.editor_view()?.buffer_id();
         self.shell.workspace().buffers().get(id)?.path()
