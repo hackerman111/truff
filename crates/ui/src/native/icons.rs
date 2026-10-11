@@ -11,6 +11,7 @@ pub enum Icon {
     Close,
     Vault,
     MoreHorizontal,
+    Gear,
 }
 
 /// Renders a crisp 5.5 px diameter dirty indicator circle without font dependencies.
@@ -156,6 +157,16 @@ pub fn render_icon(painter: &Painter, icon: Icon, rect: Rect, color: Color32, st
             painter.circle_filled(Pos2::new(center.x - 4.5, center.y), r, color);
             painter.circle_filled(Pos2::new(center.x, center.y), r, color);
             painter.circle_filled(Pos2::new(center.x + 4.5, center.y), r, color);
+        }
+        Icon::Gear => {
+            painter.circle_stroke(center, 2.8, stroke);
+            for i in 0..8 {
+                let angle = (i as f32) * std::f32::consts::PI / 4.0;
+                let dir = vec2(angle.cos(), angle.sin());
+                let p1 = center + dir * 3.5;
+                let p2 = center + dir * 5.8;
+                painter.line_segment([p1, p2], stroke);
+            }
         }
     }
 }

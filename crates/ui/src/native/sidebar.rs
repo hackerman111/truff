@@ -33,6 +33,13 @@ pub(super) fn show(
                         .color(color(theme.text_muted)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if widgets::icon_button(ui, icons::Icon::Gear, "Настройки").clicked() {
+                        dialogs.settings.open = true;
+                        let config = crate::app::global_config::GlobalConfig::load();
+                        dialogs
+                            .settings
+                            .init_from_app(application.shell.typography(), &config.theme);
+                    }
                     if widgets::icon_button(ui, icons::Icon::MoreHorizontal, "Свернуть все")
                         .clicked()
                     {

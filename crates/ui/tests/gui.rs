@@ -533,4 +533,19 @@ fn test_styled_vault_and_note_dialogs() {
     });
     root.redraw();
     assert!(!root.app.dialogs.folder.open);
+
+    // 4. Settings dialog
+    root.app.dialogs.settings.open = true;
+    root.redraw();
+    assert!(root.app.dialogs.settings.open);
+
+    root.event(egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    root.redraw();
+    assert!(!root.app.dialogs.settings.open);
 }

@@ -150,6 +150,7 @@ fn test_procedural_vector_icons_and_dirty_dot() {
             egui::Color32::WHITE,
             1.5,
         );
+        render_icon(ui.painter(), Icon::Gear, rect, egui::Color32::WHITE, 1.5);
         draw_dirty_dot(ui.painter(), rect.center(), egui::Color32::LIGHT_BLUE, 2.75);
     });
     output.textures_delta.clear();
@@ -290,4 +291,62 @@ fn test_native_app_typography_change_handled_in_show() {
     new_typo.base_font_size = 22.0;
     app.application.shell.set_typography(new_typo);
     frame(&mut app, &context, vec![]);
+}
+
+#[test]
+fn test_gear_icon() {
+    use truff_ui::native::icons::{Icon, render_icon};
+    let ctx = egui::Context::default();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+        render_icon(ui.painter(), Icon::Gear, rect, egui::Color32::WHITE, 1.5);
+    });
+    output.textures_delta.clear();
+}
+
+#[test]
+fn test_settings_dialog_default_and_init() {
+    use truff_ui::app::global_config::TypographyConfig;
+    use truff_ui::native::creation::SettingsDialog;
+
+    let default_dialog = SettingsDialog::default();
+    assert!(!default_dialog.open);
+    assert_eq!(default_dialog.font_family, "monospace");
+    assert_eq!(default_dialog.base_font_size, 15.0);
+    assert_eq!(default_dialog.line_height_multiplier, 1.5);
+    assert_eq!(default_dialog.custom_font_path, "");
+    assert_eq!(default_dialog.active_theme, "nord");
+    assert!(default_dialog.error.is_none());
+
+    let mut dialog = SettingsDialog::default();
+    let typo = TypographyConfig {
+        font_family: "proportional".into(),
+        base_font_size: 18.0,
+        line_height_multiplier: 1.6,
+        custom_font_path: Some(std::path::PathBuf::from("/fonts/custom.ttf")),
+    };
+    dialog.init_from_app(&typo, "dark");
+    assert_eq!(dialog.base_font_size, 18.0);
+    assert_eq!(dialog.line_height_multiplier, 1.6);
+    assert_eq!(dialog.custom_font_path, "/fonts/custom.ttf");
+    assert_eq!(dialog.active_theme, "dark");
+    assert_eq!(dialog.font_family, "custom");
+    assert!(dialog.error.is_none());
+}
+
+#[test]
+fn test_settings_dialog_ui_render_and_open_state() {
+    let (mut app, context) = scratch("");
+    assert!(!app.dialogs.is_any_open());
+    app.dialogs.settings.open = true;
+    assert!(app.dialogs.is_any_open());
+
+    // Frame with settings dialog open
+    frame(&mut app, &context, vec![]);
+    assert!(app.dialogs.settings.open);
+
+    // Escape closes settings dialog
+    frame(&mut app, &context, vec![key(egui::Key::Escape)]);
+    assert!(!app.dialogs.settings.open);
+    assert!(!app.dialogs.is_any_open());
 }
