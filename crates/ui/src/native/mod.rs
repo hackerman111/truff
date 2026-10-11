@@ -3,6 +3,7 @@ mod editor;
 mod events;
 pub mod icons;
 mod paint;
+pub mod widgets;
 
 use crate::app::Application;
 use crate::shell::Focus;

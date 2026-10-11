@@ -154,3 +154,19 @@ fn test_procedural_vector_icons_and_dirty_dot() {
     });
     output.textures_delta.clear();
 }
+
+#[test]
+fn test_zed_component_widgets() {
+    use truff_ui::native::icons::Icon;
+    use truff_ui::native::widgets::{icon_button, primary_button, secondary_button};
+    let ctx = egui::Context::default();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let resp1 = icon_button(ui, Icon::Plus, "Add");
+        assert_eq!(resp1.rect.size(), egui::vec2(28.0, 28.0));
+        let resp2 = primary_button(ui, "Save");
+        assert_eq!(resp2.rect.height(), 32.0);
+        let resp3 = secondary_button(ui, "Cancel");
+        assert_eq!(resp3.rect.height(), 32.0);
+    });
+    output.textures_delta.clear();
+}
