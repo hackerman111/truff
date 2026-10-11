@@ -146,12 +146,25 @@ fn shape(
     size: f32,
     width: Option<f32>,
 ) -> std::sync::Arc<eframe::egui::Galley> {
+    let trimmed = text.trim_start();
+    let (font, line_height) = if trimmed.starts_with("# ") {
+        (eframe::egui::FontId::proportional(size * 1.375), 32.0)
+    } else if trimmed.starts_with("## ") {
+        (eframe::egui::FontId::proportional(size * 1.156), 28.0)
+    } else if trimmed.starts_with("### ") {
+        (eframe::egui::FontId::proportional(size * 1.031), 25.0)
+    } else if trimmed.starts_with("```") || trimmed.starts_with("    ") {
+        (eframe::egui::FontId::monospace(size * 0.875), 22.0)
+    } else {
+        (eframe::egui::FontId::proportional(size), 24.0)
+    };
     let mut job = eframe::egui::text::LayoutJob::simple(
         text.to_owned(),
-        eframe::egui::FontId::monospace(size),
+        font,
         eframe::egui::Color32::WHITE,
         width.filter(|width| *width > 0.0).unwrap_or(f32::INFINITY),
     );
+    job.sections[0].format.line_height = Some(line_height);
     job.break_on_newline = true;
     context.fonts_mut(|fonts| fonts.layout_job(job))
 }

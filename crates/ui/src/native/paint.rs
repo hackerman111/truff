@@ -9,13 +9,26 @@ pub(super) fn shape(
     foreground: Color32,
     width: f32,
 ) -> Arc<Galley> {
+    let source_trim = display.source_text().trim_start();
+    let (font, line_height) = if source_trim.starts_with("# ") {
+        (FontId::proportional(22.0), 32.0)
+    } else if source_trim.starts_with("## ") {
+        (FontId::proportional(18.5), 28.0)
+    } else if source_trim.starts_with("### ") {
+        (FontId::proportional(16.5), 25.0)
+    } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
+        (FontId::monospace(14.0), 22.0)
+    } else {
+        (FontId::proportional(15.0), 24.0)
+    };
+
     let mut job = egui::text::LayoutJob::simple(
         display.visual_text().to_owned(),
-        FontId::monospace(16.0),
+        font,
         foreground,
         width,
     );
-    job.sections[0].format.line_height = Some(24.0);
+    job.sections[0].format.line_height = Some(line_height);
     let base = job.sections[0].format.clone();
     let mut ranges = display
         .color_spans()

@@ -204,7 +204,7 @@ impl EditorWidget {
             let width = if long {
                 f32::INFINITY
             } else {
-                (rect.width() - 24.0).max(24.0)
+                (rect.width() - 36.0).max(24.0)
             };
             if long {
                 let center = if line == cursor_line { cursor } else { start };
@@ -346,7 +346,7 @@ impl EditorWidget {
             self.scroll = anchor.scroll_offset_y;
             let origin = rect.left_top()
                 + Vec2::new(
-                    12.0 - if long { self.horizontal } else { 0.0 },
+                    18.0 - if long { self.horizontal } else { 0.0 },
                     self.heights.y_for_block(line) - self.scroll,
                 );
             let caret_at = |source: usize| {
@@ -372,7 +372,7 @@ impl EditorWidget {
                 if a < b {
                     painter.rect_filled(
                         Rect::from_min_max(caret_at(a).left_top(), caret_at(b).right_bottom()),
-                        0.0,
+                        2.0,
                         color(theme.selection),
                     );
                 }
@@ -380,10 +380,10 @@ impl EditorWidget {
             painter.galley(origin, entry.galley.clone(), foreground);
             if line == cursor_line && (range.contains(&cursor) || cursor == range.end) {
                 let mut caret = caret_at(cursor);
-                caret.max.x = caret.min.x + if mode == Mode::Insert { 1.5 } else { 9.6 };
+                caret.max.x = caret.min.x + if mode == Mode::Insert { 1.5 } else { 8.5 };
                 painter.rect_filled(
                     caret,
-                    0.0,
+                    1.5,
                     color(theme.cursor).gamma_multiply(if mode == Mode::Insert {
                         1.0
                     } else {
@@ -407,7 +407,7 @@ impl EditorWidget {
                 if let Some(text) = preedit {
                     let galley = painter.layout_no_wrap(
                         text.to_owned(),
-                        FontId::monospace(16.0),
+                        FontId::proportional(15.0),
                         foreground,
                     );
                     painter.galley(caret.left_top(), galley, foreground);
@@ -420,12 +420,12 @@ impl EditorWidget {
                 let position = caret_at(target.source_range.start).left_top();
                 let badge = painter.layout_no_wrap(
                     target.label.clone(),
-                    FontId::monospace(16.0),
+                    FontId::monospace(14.0),
                     color(theme.flash_fg),
                 );
                 painter.rect_filled(
                     Rect::from_min_size(position, badge.size()),
-                    2.0,
+                    3.0,
                     color(theme.flash_bg),
                 );
                 painter.galley(position, badge, color(theme.flash_fg));
