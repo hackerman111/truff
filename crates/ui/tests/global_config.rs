@@ -26,7 +26,6 @@ fn test_theme_config_defaults_to_nord_and_deserializes_custom() {
     assert_eq!(theme_cfg.bg_primary.as_deref(), Some("#2e3440"));
 }
 
-
 #[test]
 fn test_record_vault_deduplicates_and_orders() {
     let mut config = GlobalConfig::default();
@@ -102,8 +101,12 @@ fn test_create_and_open_vault() {
     let mut app = truff_ui::app::Application::new();
     assert_eq!(app.vault_path(), None);
 
-    app.create_and_open_vault(&target_vault, Some("Welcome.md")).unwrap();
-    assert_eq!(app.vault_path(), Some(target_vault.canonicalize().unwrap().as_path()));
+    app.create_and_open_vault(&target_vault, Some("Welcome.md"))
+        .unwrap();
+    assert_eq!(
+        app.vault_path(),
+        Some(target_vault.canonicalize().unwrap().as_path())
+    );
     assert!(target_vault.join("Welcome.md").exists());
 
     let _ = app.shutdown();

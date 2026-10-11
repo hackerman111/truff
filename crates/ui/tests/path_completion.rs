@@ -4,7 +4,9 @@ use truff_ui::app::path_completion::{complete_directory_path, expand_path, tab_c
 #[test]
 fn test_expand_path_tilde() {
     let expanded = expand_path("~/some/path");
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap();
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap();
     assert_eq!(expanded, home.join("some/path"));
 }
 

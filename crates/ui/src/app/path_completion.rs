@@ -64,7 +64,11 @@ pub fn complete_directory_path(input: &str) -> Vec<String> {
         ("", trimmed)
     };
 
-    let search_dir = expand_path(if prefix_base.is_empty() { "." } else { prefix_base });
+    let search_dir = expand_path(if prefix_base.is_empty() {
+        "."
+    } else {
+        prefix_base
+    });
 
     let Ok(entries) = fs::read_dir(&search_dir) else {
         return Vec::new();
@@ -76,8 +80,7 @@ pub fn complete_directory_path(input: &str) -> Vec<String> {
             continue;
         };
         let is_dir = file_type.is_dir()
-            || (file_type.is_symlink()
-                && entry.path().canonicalize().is_ok_and(|p| p.is_dir()));
+            || (file_type.is_symlink() && entry.path().canonicalize().is_ok_and(|p| p.is_dir()));
         if !is_dir {
             continue;
         }

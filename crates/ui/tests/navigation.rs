@@ -195,7 +195,10 @@ fn cannot_focus_nonexistent_right_panel_and_can_write() {
 
     // Typing 'i' must work and allow editing because we remained in Editor
     let i_action = shell.feed_key(Key::Char('i'));
-    assert_ne!(i_action, ShellAction::Error("Editor target unavailable".into()));
+    assert_ne!(
+        i_action,
+        ShellAction::Error("Editor target unavailable".into())
+    );
     assert_eq!(shell.mode(), truff_core::vim::Mode::Insert);
 }
 
@@ -231,7 +234,10 @@ fn pressing_insert_or_esc_in_panel_restores_editor_focus() {
     let action = shell.feed_key(Key::Char('i'));
     assert_eq!(shell.focus(), Focus::Editor);
     assert_eq!(shell.mode(), truff_core::vim::Mode::Insert);
-    assert_ne!(action, ShellAction::Error("Editor target unavailable".into()));
+    assert_ne!(
+        action,
+        ShellAction::Error("Editor target unavailable".into())
+    );
 
     // Pressing Esc exits insert mode
     shell.feed_key(Key::Esc);
@@ -245,3 +251,78 @@ fn pressing_insert_or_esc_in_panel_restores_editor_focus() {
     assert_eq!(shell.focus(), Focus::Editor);
 }
 
+#[test]
+fn ctrl_w_w_cycles_between_available_panes() {
+    let mut shell = Shell::new();
+    assert_eq!(shell.focus(), Focus::Editor);
+
+    // 1. With only Editor available:
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('w'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Editor));
+    assert_eq!(shell.focus(), Focus::Editor);
+
+    // 2. With Sidebar available:
+    shell.set_sidebar_files(vec!["note.md".into()]);
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('w'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Sidebar));
+    assert_eq!(shell.focus(), Focus::Sidebar);
+
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('w'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Editor));
+    assert_eq!(shell.focus(), Focus::Editor);
+
+    // 3. With both Sidebar and RightPanel available:
+    shell.set_right_panel_available(true);
+
+    // From Editor -> RightPanel
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('w'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::RightPanel));
+    assert_eq!(shell.focus(), Focus::RightPanel);
+
+    // From RightPanel -> Sidebar
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('w'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Sidebar));
+    assert_eq!(shell.focus(), Focus::Sidebar);
+
+    // From Sidebar -> Editor
+    shell.feed_key(Key::Ctrl('w'));
+    let action = shell.feed_key(Key::Char('w'));
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Editor));
+    assert_eq!(shell.focus(), Focus::Editor);
+}
+
+#[test]
+fn empty_backlinks_reports_message_and_restores_editor() {
+    use truff_ui::app::Application;
+
+    let tmp = std::env::temp_dir().join(format!("truff-test-backlinks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let mut app = Application::new();
+    app.create_and_open_vault(&tmp, Some("note.md")).unwrap();
+
+    // Open the note
+    app.open_note("note.md").unwrap();
+    assert_eq!(app.shell.focus(), Focus::Editor);
+
+    // Run :backlinks command for note without backlinks
+    app.execute_command("backlinks").unwrap();
+    for _ in 0..50 {
+        app.poll();
+        if app.status == "No backlinks found" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert_eq!(app.status, "No backlinks found");
+    assert_eq!(app.shell.focus(), Focus::Editor);
+    assert!(!app.shell.has_right_panel());
+
+    let _ = app.shutdown();
+    let _ = std::fs::remove_dir_all(&tmp);
+}

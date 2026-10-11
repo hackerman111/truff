@@ -150,7 +150,8 @@ fn app_theme_command_and_persistence() {
     assert_eq!(app.shell.theme(), &Theme::nord());
 
     // Switch to dark via command
-    app.execute_command("theme dark").expect("switch theme to dark");
+    app.execute_command("theme dark")
+        .expect("switch theme to dark");
     assert_eq!(app.shell.theme(), &Theme::obsidian_dark());
 
     // Verify config was persisted
@@ -158,7 +159,8 @@ fn app_theme_command_and_persistence() {
     assert_eq!(config.theme, "dark");
 
     // Switch to nord via command
-    app.execute_command("theme nord").expect("switch theme to nord");
+    app.execute_command("theme nord")
+        .expect("switch theme to nord");
     assert_eq!(app.shell.theme(), &Theme::nord());
 
     let _ = app.shutdown();

@@ -146,6 +146,7 @@ impl Application {
             catalog.set_event_waker(callback.clone());
         }
         self.shell = Shell::new();
+        self.shell.set_sidebar_available(true);
         self.shell.set_focus(Focus::Sidebar);
         self.store = Some(store);
         self.catalog = Some(catalog);
@@ -230,6 +231,7 @@ impl Application {
         self.shell.set_focus(Focus::Editor);
         self.backlinks.clear();
         self.backlink_selection = 0;
+        self.shell.set_right_panel_available(false);
         self.pending_location = None;
         self.apply_effects(effects)?;
         if let Some(path) = self.active_relative_path() {

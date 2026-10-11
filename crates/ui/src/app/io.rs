@@ -314,9 +314,18 @@ impl Application {
             CatalogEvent::Backlinks { path, occurrences }
                 if Some(path.as_str()) == self.active_relative_path().as_deref() =>
             {
-                self.backlinks = occurrences;
-                self.backlink_selection = 0;
-                self.shell.set_focus(Focus::RightPanel);
+                if occurrences.is_empty() {
+                    self.backlinks = Vec::new();
+                    self.backlink_selection = 0;
+                    self.status = "No backlinks found".into();
+                    self.shell.set_right_panel_available(false);
+                    self.shell.set_focus(Focus::Editor);
+                } else {
+                    self.backlinks = occurrences;
+                    self.backlink_selection = 0;
+                    self.shell.set_right_panel_available(true);
+                    self.shell.set_focus(Focus::RightPanel);
+                }
             }
             CatalogEvent::Backlinks { .. } => {}
             CatalogEvent::Follow { path, anchor } => {

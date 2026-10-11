@@ -207,10 +207,9 @@ impl NativeApp {
                                 .button(format!("📁 {name}"))
                                 .on_hover_text(path.display().to_string())
                                 .clicked()
+                                && let Err(e) = self.application.open_vault(path)
                             {
-                                if let Err(e) = self.application.open_vault(path) {
-                                    self.application.status = e.to_string();
-                                }
+                                self.application.status = e.to_string();
                             }
                         }
                     }
@@ -230,9 +229,7 @@ impl NativeApp {
                                     "  "
                                 };
                                 let label_text = format!("{glyph}{}", row.title);
-                                let text_color = if is_selected {
-                                    color(theme.text_primary)
-                                } else if row.is_folder {
+                                let text_color = if is_selected || row.is_folder {
                                     color(theme.text_primary)
                                 } else {
                                     color(theme.text_muted)
@@ -288,14 +285,15 @@ impl NativeApp {
                         |ui, rows| {
                             for index in rows {
                                 let is_selected = index == self.application.backlink_selection;
-                                let rich =
-                                    egui::RichText::new(&self.application.backlinks[index].source_path)
-                                        .size(13.5)
-                                        .color(if is_selected {
-                                            color(theme.text_primary)
-                                        } else {
-                                            color(theme.text_muted)
-                                        });
+                                let rich = egui::RichText::new(
+                                    &self.application.backlinks[index].source_path,
+                                )
+                                .size(13.5)
+                                .color(if is_selected {
+                                    color(theme.text_primary)
+                                } else {
+                                    color(theme.text_muted)
+                                });
                                 if ui.selectable_label(is_selected, rich).clicked() {
                                     open = Some(index);
                                 }
@@ -359,10 +357,10 @@ impl NativeApp {
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("vault");
                             let line = format!("📁 {name}  —  {}", path.display());
-                            if ui.button(line).clicked() {
-                                if let Err(e) = self.application.open_vault(path) {
-                                    self.application.status = e.to_string();
-                                }
+                            if ui.button(line).clicked()
+                                && let Err(e) = self.application.open_vault(path)
+                            {
+                                self.application.status = e.to_string();
                             }
                         }
                     }
@@ -385,12 +383,12 @@ impl NativeApp {
                         egui::TextEdit::singleline(&mut self.vault_path_input).desired_width(420.0),
                     );
 
-                    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Tab)) {
-                        if let Some(completed) =
+                    if response.has_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Tab))
+                        && let Some(completed) =
                             crate::app::path_completion::tab_complete(&self.vault_path_input)
-                        {
-                            self.vault_path_input = completed;
-                        }
+                    {
+                        self.vault_path_input = completed;
                     }
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         submit_creation = true;
@@ -566,8 +564,7 @@ impl NativeApp {
                                             );
                                         });
                                     ui.label(
-                                        egui::RichText::new("→")
-                                            .color(color(theme.text_muted)),
+                                        egui::RichText::new("→").color(color(theme.text_muted)),
                                     );
                                     ui.label(
                                         egui::RichText::new(&hint.description)
@@ -595,15 +592,20 @@ impl NativeApp {
                                                 ui.horizontal(|ui| {
                                                     egui::Frame::new()
                                                         .fill(color(theme.bg_tertiary))
-                                                        .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                                                        .stroke(egui::Stroke::new(
+                                                            1.0,
+                                                            color(theme.border),
+                                                        ))
                                                         .corner_radius(egui::CornerRadius::same(4))
                                                         .inner_margin(egui::Margin::symmetric(5, 1))
                                                         .show(ui, |ui| {
                                                             ui.label(
-                                                                egui::RichText::new(hint.key.to_string())
-                                                                    .monospace()
-                                                                    .size(11.0)
-                                                                    .color(color(theme.accent)),
+                                                                egui::RichText::new(
+                                                                    hint.key.to_string(),
+                                                                )
+                                                                .monospace()
+                                                                .size(11.0)
+                                                                .color(color(theme.accent)),
                                                             );
                                                         });
                                                     ui.label(

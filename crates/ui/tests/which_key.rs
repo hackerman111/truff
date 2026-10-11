@@ -43,7 +43,10 @@ fn test_question_mark_in_normal_mode_opens_help() {
     // Esc closes it
     let esc_action = shell.feed_key(Key::Esc);
     assert!(!shell.which_key().is_visible());
-    assert_ne!(esc_action, ShellAction::Error("Editor target unavailable".into()));
+    assert_ne!(
+        esc_action,
+        ShellAction::Error("Editor target unavailable".into())
+    );
 }
 
 #[test]

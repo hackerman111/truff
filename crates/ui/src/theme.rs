@@ -174,34 +174,54 @@ impl Theme {
     /// Applies custom theme overrides on top of this theme.
     pub fn apply_custom(&self, custom: &CustomThemeConfig) -> Self {
         let mut theme = self.clone();
-        if let Some(ref c) = custom.bg_primary && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.bg_primary
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.bg_primary = parsed;
         }
-        if let Some(ref c) = custom.bg_secondary && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.bg_secondary
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.bg_secondary = parsed;
         }
-        if let Some(ref c) = custom.bg_tertiary && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.bg_tertiary
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.bg_tertiary = parsed;
         }
-        if let Some(ref c) = custom.bg_surface && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.bg_surface
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.bg_surface = parsed;
         }
-        if let Some(ref c) = custom.border && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.border
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.border = parsed;
         }
-        if let Some(ref c) = custom.text_primary && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.text_primary
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.text_primary = parsed;
         }
-        if let Some(ref c) = custom.text_muted && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.text_muted
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.text_muted = parsed;
         }
-        if let Some(ref c) = custom.accent && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.accent
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.accent = parsed;
         }
-        if let Some(ref c) = custom.selection && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.selection
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.selection = parsed;
         }
-        if let Some(ref c) = custom.cursor && let Some(parsed) = Color::from_hex(c) {
+        if let Some(ref c) = custom.cursor
+            && let Some(parsed) = Color::from_hex(c)
+        {
             theme.cursor = parsed;
         }
         theme

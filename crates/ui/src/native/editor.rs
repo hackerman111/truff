@@ -458,6 +458,17 @@ impl EditorWidget {
                 });
             }
         }
+        if clicked.is_none() && (response.clicked() || response.dragged()) {
+            let end = buffer.byte_len();
+            clicked = Some(EditorInput::SetSelection {
+                anchor: if response.dragged() {
+                    view.anchor().get()
+                } else {
+                    end
+                },
+                head: end,
+            });
+        }
         if mode == Mode::Insert
             && let Some(cursor_rect) = self.cursor_rect
         {

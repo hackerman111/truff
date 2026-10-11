@@ -187,6 +187,7 @@ fn remapped_binding_retains_count_and_registry_context() {
     shell.set_keymap(config).unwrap();
     keys(&mut shell, "2zj");
     assert_eq!(shell.editor_view().unwrap().head().get(), 4);
+    shell.set_sidebar_files(vec!["sidebar_note.md".into()]);
     shell.set_focus(Focus::Sidebar);
     assert!(matches!(
         shell.execute_registered(CommandId::new("edit.insert"), String::new()),

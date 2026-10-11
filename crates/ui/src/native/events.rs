@@ -6,6 +6,11 @@ use truff_core::vim::{Key, Mode};
 
 impl NativeApp {
     pub(super) fn input(&mut self, input: EditorInput) {
+        if self.application.shell.mode() == Mode::Insert
+            && self.application.shell.focus() != Focus::Editor
+        {
+            self.application.shell.set_focus(Focus::Editor);
+        }
         if self.application.shell.focus() != Focus::Editor
             || self.application.file_operation_pending()
         {
@@ -115,6 +120,9 @@ impl NativeApp {
                     if self.application.shell.mode() == Mode::Insert
                         && self.application.shell.command().is_none()
                     {
+                        if self.application.shell.focus() != Focus::Editor {
+                            self.application.shell.set_focus(Focus::Editor);
+                        }
                         self.input(EditorInput::InsertText(text));
                     } else {
                         for character in text.chars() {
