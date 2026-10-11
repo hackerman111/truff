@@ -117,3 +117,40 @@ fn viewport_cache_is_bounded_reuses_shapes_and_handles_multi_megabyte_line() {
     assert!(app.editor.cached_paragraph_count() <= 1);
     assert!(app.editor.cursor_rect().is_some());
 }
+
+#[test]
+fn test_procedural_vector_icons_and_dirty_dot() {
+    use truff_ui::native::icons::{Icon, draw_dirty_dot, render_icon};
+    let ctx = egui::Context::default();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
+        render_icon(ui.painter(), Icon::File, rect, egui::Color32::WHITE, 1.5);
+        render_icon(ui.painter(), Icon::Folder, rect, egui::Color32::WHITE, 1.5);
+        render_icon(ui.painter(), Icon::Plus, rect, egui::Color32::WHITE, 1.5);
+        render_icon(ui.painter(), Icon::Close, rect, egui::Color32::WHITE, 1.5);
+        render_icon(
+            ui.painter(),
+            Icon::ChevronRight,
+            rect,
+            egui::Color32::WHITE,
+            1.5,
+        );
+        render_icon(
+            ui.painter(),
+            Icon::ChevronDown,
+            rect,
+            egui::Color32::WHITE,
+            1.5,
+        );
+        render_icon(ui.painter(), Icon::Vault, rect, egui::Color32::WHITE, 1.5);
+        render_icon(
+            ui.painter(),
+            Icon::MoreHorizontal,
+            rect,
+            egui::Color32::WHITE,
+            1.5,
+        );
+        draw_dirty_dot(ui.painter(), rect.center(), egui::Color32::LIGHT_BLUE, 2.75);
+    });
+    output.textures_delta.clear();
+}

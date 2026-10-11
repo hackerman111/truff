@@ -1,6 +1,7 @@
 //! Native egui/glow adapter. Application owns domain state; this module owns events and paint.
 mod editor;
 mod events;
+pub mod icons;
 mod paint;
 
 use crate::app::Application;
