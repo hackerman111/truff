@@ -94,11 +94,12 @@ impl NativeApp {
                     .inner_margin(egui::Margin {
                         left: 8,
                         right: 8,
-                        top: 2,
+                        top: 0,
                         bottom: 0,
                     }),
             )
             .show(ui, |ui| {
+                ui.set_height(34.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     let active_view_id = self.application.shell.workspace().active_view();
@@ -158,11 +159,7 @@ impl NativeApp {
 
                             let frame = egui::Frame::new()
                                 .fill(tab_bg)
-                                .stroke(if is_active {
-                                    egui::Stroke::new(1.0, color(theme.border))
-                                } else {
-                                    egui::Stroke::NONE
-                                })
+                                .stroke(egui::Stroke::NONE)
                                 .corner_radius(egui::CornerRadius {
                                     nw: 4,
                                     ne: 4,
@@ -172,36 +169,70 @@ impl NativeApp {
                                 .inner_margin(egui::Margin::symmetric(10, 5));
 
                             let frame_resp = frame.show(ui, |ui| {
+                                ui.set_height(24.0);
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 6.0;
-                                    let glyph = if is_active { "📄 " } else { " " };
-                                    let rich = egui::RichText::new(format!("{glyph}{title}"))
-                                        .size(12.5)
-                                        .color(text_color);
-                                    let resp = ui.selectable_label(false, rich);
-                                    if resp.clicked() {
-                                        switch_view = Some(view_id);
-                                    }
 
-                                    let is_hovered =
-                                        ui.rect_contains_pointer(resp.rect) || resp.hovered();
+                                    let (icon_rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(13.0, 13.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    icons::render_icon(
+                                        ui.painter(),
+                                        icons::Icon::File,
+                                        icon_rect,
+                                        text_color,
+                                        1.4,
+                                    );
+
+                                    let rich =
+                                        egui::RichText::new(&title).size(12.5).color(text_color);
+                                    let resp = ui.selectable_label(false, rich);
+
+                                    let (action_rect, action_resp) = ui.allocate_exact_size(
+                                        egui::vec2(16.0, 16.0),
+                                        egui::Sense::click(),
+                                    );
+
+                                    let is_hovered = resp.hovered()
+                                        || action_resp.hovered()
+                                        || ui.rect_contains_pointer(resp.rect)
+                                        || ui.rect_contains_pointer(action_rect);
 
                                     if is_hovered {
-                                        if ui
-                                            .small_button("×")
-                                            .on_hover_text("Close buffer")
-                                            .clicked()
-                                        {
+                                        let close_hovered = action_resp.hovered();
+                                        if close_hovered {
+                                            ui.painter().rect_filled(
+                                                action_rect,
+                                                egui::CornerRadius::same(3),
+                                                egui::Color32::from_hex("#394351").unwrap(),
+                                            );
+                                        }
+                                        icons::render_icon(
+                                            ui.painter(),
+                                            icons::Icon::Close,
+                                            action_rect,
+                                            if close_hovered {
+                                                color(theme.text_primary)
+                                            } else {
+                                                color(theme.text_muted)
+                                            },
+                                            1.5,
+                                        );
+                                        if action_resp.clicked() {
                                             close_view = Some(view_id);
                                         }
                                     } else if is_dirty {
-                                        ui.label(
-                                            egui::RichText::new("●")
-                                                .size(10.0)
-                                                .color(color(theme.accent)),
+                                        icons::draw_dirty_dot(
+                                            ui.painter(),
+                                            action_rect.center(),
+                                            color(theme.accent),
+                                            2.75,
                                         );
-                                    } else {
-                                        ui.add_space(8.0);
+                                    }
+
+                                    if resp.clicked() {
+                                        switch_view = Some(view_id);
                                     }
                                 });
                             });
@@ -215,6 +246,10 @@ impl NativeApp {
                                     ],
                                     egui::Stroke::new(2.0, color(theme.accent)),
                                 );
+                            } else if frame_resp.response.interact(egui::Sense::click()).clicked()
+                                && close_view.is_none()
+                            {
+                                switch_view = Some(view_id);
                             }
                         }
                     }
@@ -347,8 +382,12 @@ impl NativeApp {
                         {
                             self.application.shell.sidebar_model_mut().collapse_all();
                         }
-                        if widgets::icon_button(ui, icons::Icon::Vault, "Выбрать / сменить хранилище")
-                            .clicked()
+                        if widgets::icon_button(
+                            ui,
+                            icons::Icon::Vault,
+                            "Выбрать / сменить хранилище",
+                        )
+                        .clicked()
                         {
                             self.show_create_vault_dialog = true;
                         }
@@ -692,7 +731,8 @@ impl NativeApp {
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked() {
+                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked()
+                            {
                                 close_dialog = true;
                             }
                         });
@@ -726,9 +766,11 @@ impl NativeApp {
 
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new("Поддерживаются абсолютные и относительные пути (~, ./, ../)")
-                            .size(11.0)
-                            .color(color(theme.text_muted)),
+                        egui::RichText::new(
+                            "Поддерживаются абсолютные и относительные пути (~, ./, ../)",
+                        )
+                        .size(11.0)
+                        .color(color(theme.text_muted)),
                     );
 
                     let suggestions = crate::app::path_completion::complete_directory_path(
@@ -772,7 +814,8 @@ impl NativeApp {
                     ui.add_space(16.0);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
-                        if widgets::primary_button(ui, "Создать и открыть").clicked() {
+                        if widgets::primary_button(ui, "Создать и открыть").clicked()
+                        {
                             submit_creation = true;
                         }
                         if widgets::secondary_button(ui, "Отмена").clicked() {
@@ -851,7 +894,8 @@ impl NativeApp {
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked() {
+                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked()
+                            {
                                 close_dialog = true;
                             }
                         });
@@ -963,7 +1007,8 @@ impl NativeApp {
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked() {
+                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked()
+                            {
                                 close_dialog = true;
                             }
                         });

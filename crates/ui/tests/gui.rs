@@ -400,6 +400,30 @@ fn test_tab_close_button_hover() {
 }
 
 #[test]
+fn test_tab_vector_close_and_dirty_dot() {
+    let mut app = Application::new();
+    let buf = app
+        .shell
+        .workspace_mut()
+        .buffers_mut()
+        .open_from_text(None, "# Doc")
+        .unwrap();
+    let _view = app.shell.workspace_mut().create_view(buf).unwrap();
+
+    let (mut root, ()) = window(app);
+    // Draw without pointer hover - clean tab renders
+    root.redraw();
+
+    // Send text to make buffer dirty
+    root.event(egui::Event::Text("x".into()));
+    root.redraw();
+
+    // Hover over tab area to trigger close button rendering path
+    root.event(egui::Event::PointerMoved(egui::pos2(50.0, 15.0)));
+    root.redraw();
+}
+
+#[test]
 fn test_create_note_and_folder_dialogs() {
     let target = std::env::temp_dir().join(format!("truff_dialog_test_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&target);

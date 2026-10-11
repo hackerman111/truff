@@ -19,13 +19,7 @@ pub fn draw_dirty_dot(painter: &Painter, center: Pos2, color: Color32, radius: f
 }
 
 /// Renders a procedural icon centered inside `rect` with clean strokes.
-pub fn render_icon(
-    painter: &Painter,
-    icon: Icon,
-    rect: Rect,
-    color: Color32,
-    stroke_width: f32,
-) {
+pub fn render_icon(painter: &Painter, icon: Icon, rect: Rect, color: Color32, stroke_width: f32) {
     let stroke = Stroke::new(stroke_width, color);
     let center = rect.center();
     let s = 14.0;
@@ -44,17 +38,11 @@ pub fn render_icon(
             painter.line_segment([Pos2::new(x0, y1), Pos2::new(x1, y1)], stroke);
             painter.line_segment([Pos2::new(x1, y1), Pos2::new(x1, y0 + fold)], stroke);
             painter.line_segment(
-                [
-                    Pos2::new(x1 - fold, y0),
-                    Pos2::new(x1 - fold, y0 + fold),
-                ],
+                [Pos2::new(x1 - fold, y0), Pos2::new(x1 - fold, y0 + fold)],
                 stroke,
             );
             painter.line_segment(
-                [
-                    Pos2::new(x1 - fold, y0 + fold),
-                    Pos2::new(x1, y0 + fold),
-                ],
+                [Pos2::new(x1 - fold, y0 + fold), Pos2::new(x1, y0 + fold)],
                 stroke,
             );
         }
@@ -89,11 +77,17 @@ pub fn render_icon(
             let x_left = center.x - 2.5;
             let x_right = center.x + 2.5;
             painter.line_segment(
-                [Pos2::new(x_left, center.y - 4.5), Pos2::new(x_right, center.y)],
+                [
+                    Pos2::new(x_left, center.y - 4.5),
+                    Pos2::new(x_right, center.y),
+                ],
                 stroke,
             );
             painter.line_segment(
-                [Pos2::new(x_right, center.y), Pos2::new(x_left, center.y + 4.5)],
+                [
+                    Pos2::new(x_right, center.y),
+                    Pos2::new(x_left, center.y + 4.5),
+                ],
                 stroke,
             );
         }
@@ -112,11 +106,17 @@ pub fn render_icon(
         Icon::Plus => {
             let arm = 5.0;
             painter.line_segment(
-                [Pos2::new(center.x - arm, center.y), Pos2::new(center.x + arm, center.y)],
+                [
+                    Pos2::new(center.x - arm, center.y),
+                    Pos2::new(center.x + arm, center.y),
+                ],
                 stroke,
             );
             painter.line_segment(
-                [Pos2::new(center.x, center.y - arm), Pos2::new(center.x, center.y + arm)],
+                [
+                    Pos2::new(center.x, center.y - arm),
+                    Pos2::new(center.x, center.y + arm),
+                ],
                 stroke,
             );
         }
