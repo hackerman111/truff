@@ -442,3 +442,20 @@ fn test_create_note_and_folder_dialogs() {
     let _ = root.app.application.shutdown();
     let _ = std::fs::remove_dir_all(target);
 }
+
+#[test]
+fn test_sidebar_header_ghost_actions() {
+    let target = std::env::temp_dir().join(format!("truff_ghost_test_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&target);
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("file1.md"), "# File 1").unwrap();
+
+    let mut app = Application::new();
+    app.open_vault(&target).unwrap();
+
+    let (mut root, ()) = window(app);
+    root.redraw();
+
+    let _ = root.app.application.shutdown();
+    let _ = std::fs::remove_dir_all(target);
+}

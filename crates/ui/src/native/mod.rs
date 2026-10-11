@@ -334,6 +334,7 @@ impl NativeApp {
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
                     ui.label(
                         egui::RichText::new("VAULT")
                             .size(11.0)
@@ -341,33 +342,25 @@ impl NativeApp {
                             .color(color(theme.text_muted)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("◫")
-                            .on_hover_text("Свернуть все папки")
+                        if widgets::icon_button(ui, icons::Icon::MoreHorizontal, "Свернуть все")
                             .clicked()
                         {
                             self.application.shell.sidebar_model_mut().collapse_all();
                         }
-                        if ui
-                            .small_button("📂")
-                            .on_hover_text("Выбрать / сменить хранилище")
+                        if widgets::icon_button(ui, icons::Icon::Vault, "Выбрать / сменить хранилище")
                             .clicked()
                         {
                             self.show_create_vault_dialog = true;
                         }
                         if self.application.vault_path().is_some() {
-                            if ui
-                                .small_button("+📁")
-                                .on_hover_text("Создать новую папку")
+                            if widgets::icon_button(ui, icons::Icon::Folder, "Создать новую папку")
                                 .clicked()
                             {
                                 self.show_create_folder_dialog = true;
                                 self.create_folder_input.clear();
                                 self.create_folder_error = None;
                             }
-                            if ui
-                                .small_button("+📄")
-                                .on_hover_text("Создать новую заметку")
+                            if widgets::icon_button(ui, icons::Icon::Plus, "Создать новую заметку")
                                 .clicked()
                             {
                                 self.show_create_file_dialog = true;
@@ -418,16 +411,6 @@ impl NativeApp {
                                     .as_deref()
                                     .is_some_and(|p| self.application.is_path_dirty(p));
 
-                                let glyph = if row.is_folder {
-                                    if row.is_collapsed {
-                                        "▸ 📁 "
-                                    } else {
-                                        "▾ 📁 "
-                                    }
-                                } else {
-                                    "📄 "
-                                };
-                                let label_text = format!("{glyph}{}", row.title);
                                 let text_color = if is_active || is_selected || row.is_folder {
                                     color(theme.text_primary)
                                 } else {
@@ -451,17 +434,67 @@ impl NativeApp {
                                 let frame_resp = frame.show(ui, |ui| {
                                     ui.set_min_width(ui.available_width());
                                     ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
                                         ui.add_space(indent);
-                                        let rich = egui::RichText::new(label_text)
+                                        if row.is_folder {
+                                            let chevron = if row.is_collapsed {
+                                                icons::Icon::ChevronRight
+                                            } else {
+                                                icons::Icon::ChevronDown
+                                            };
+                                            let (chev_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(12.0, 16.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            icons::render_icon(
+                                                ui.painter(),
+                                                chevron,
+                                                chev_rect,
+                                                color(theme.text_muted),
+                                                1.5,
+                                            );
+
+                                            let (folder_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(14.0, 16.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            icons::render_icon(
+                                                ui.painter(),
+                                                icons::Icon::Folder,
+                                                folder_rect,
+                                                color(theme.text_muted),
+                                                1.5,
+                                            );
+                                        } else {
+                                            let (file_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(14.0, 16.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            icons::render_icon(
+                                                ui.painter(),
+                                                icons::Icon::File,
+                                                file_rect,
+                                                color(theme.text_muted),
+                                                1.5,
+                                            );
+                                        }
+
+                                        let rich = egui::RichText::new(&row.title)
                                             .color(text_color)
                                             .size(12.5);
                                         ui.label(rich);
+
                                         if is_dirty {
-                                            ui.add_space(4.0);
-                                            ui.label(
-                                                egui::RichText::new("●")
-                                                    .size(9.0)
-                                                    .color(color(theme.accent)),
+                                            ui.add_space(2.0);
+                                            let (dot_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(8.0, 16.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            icons::draw_dirty_dot(
+                                                ui.painter(),
+                                                dot_rect.center(),
+                                                color(theme.accent),
+                                                2.75,
                                             );
                                         }
                                     });
