@@ -5,16 +5,17 @@ use std::path::Path;
 use rusqlite::Connection;
 use truff_core::markdown::facts::DocFacts;
 
+pub mod backlinks;
 pub mod resolve;
 pub mod search;
 pub mod update;
 
+pub use backlinks::{BacklinkOccurrence, BacklinkPage};
 pub use resolve::{FileId, Resolution, Resolver, Target, slugify};
 pub use search::{
     DEFAULT_MAX_SEARCH_PAGE_SIZE, SearchPage, SearchQuery, SearchResult, SearchSession,
     escape_fts5_query,
 };
-pub use update::{BacklinkOccurrence, BacklinkPage};
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
 

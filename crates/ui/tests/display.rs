@@ -73,6 +73,34 @@ fn hidden_marker_edit() {
 }
 
 #[test]
+fn cursor_and_selection_update_reveals_and_hides_both_spans() {
+    let source = "начало **жирный🦀** хвост *курсив*.";
+    let projected = "начало жирный🦀 хвост курсив.";
+    let mut map = DisplayMap::new(source, ProjectionMode::LivePreview);
+    assert_eq!(map.visual_text(), projected);
+
+    let bold = BytePos::new(source.find("жирный").unwrap());
+    let italic = source.find("курсив").unwrap();
+    map.update(
+        None,
+        bold,
+        Some((BytePos::new(italic), BytePos::new(italic + "курсив".len()))),
+    );
+    assert_eq!(map.visual_text(), source);
+    let crab = BytePos::new(source.find('🦀').unwrap());
+    assert_eq!(
+        map.source_to_visual(crab, Affinity::Right).get(),
+        crab.get()
+    );
+
+    map.update(None, BytePos::ZERO, None);
+    assert_eq!(map.visual_text(), projected);
+    let visual = map.source_to_visual(crab, Affinity::Right);
+    assert_eq!(visual.get(), projected.find('🦀').unwrap());
+    assert_eq!(map.visual_to_source(visual).pos, crab);
+}
+
+#[test]
 fn stable_scroll_anchor() {
     let mut lines = Vec::new();
     for i in 0..30 {

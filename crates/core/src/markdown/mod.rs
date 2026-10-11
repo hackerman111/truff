@@ -11,3 +11,6 @@ pub use style::{
     CalloutKind, StyleError, apply_highlight, apply_text_color, remove_style, wrap_callout,
 };
 pub use syntax::{IncrementalSyntaxTree, SyntaxSnapshot};
+
+mod link_selection;
+pub use link_selection::LinkSelection;

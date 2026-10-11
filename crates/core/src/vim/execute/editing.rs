@@ -1,5 +1,11 @@
-use super::*;
+use super::{InputContext, InputResult, VimState};
+use crate::config::LimitsConfig;
+use crate::text::{Buffer, BytePos, Register, RegisterKind, Transaction};
 use crate::text::{LineEnding, SingleEdit};
+use crate::vim::motion::{Motion, eval_motion, line_content_end, literal_search};
+use crate::vim::parser::InsertEntry;
+use crate::vim::{Command, Key, Mode, Operator};
+use crate::workspace::View;
 
 impl VimState {
     pub(super) fn search(

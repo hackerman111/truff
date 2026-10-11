@@ -1,3 +1,4 @@
+use super::editor::color;
 use crate::editor::{Affinity, DisplayMap};
 use eframe::egui::{self, Color32, FontId, Galley, Painter};
 use std::sync::Arc;
@@ -77,4 +78,25 @@ pub(super) fn shape(
         });
     }
     painter.layout_job(job)
+}
+
+pub(super) fn apply_theme(ui: &mut egui::Ui, theme: &crate::theme::Theme) {
+    let mut visuals = ui.visuals().clone();
+    visuals.override_text_color = Some(color(theme.text_primary));
+    visuals.panel_fill = color(theme.bg_primary);
+    visuals.window_fill = color(theme.bg_surface);
+    visuals.widgets.noninteractive.bg_fill = color(theme.bg_primary);
+    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, color(theme.border));
+    visuals.widgets.inactive.bg_fill = color(theme.bg_secondary);
+    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
+    visuals.widgets.hovered.bg_fill = color(theme.selection);
+    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
+    visuals.widgets.active.bg_fill = color(theme.selection);
+    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
+    visuals.selection.bg_fill = color(theme.selection);
+    visuals.selection.stroke = egui::Stroke::new(1.0, color(theme.accent));
+    *ui.visuals_mut() = visuals;
 }

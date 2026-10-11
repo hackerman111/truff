@@ -326,21 +326,21 @@ fn closing_window_recovers_dirty_text_and_save_clears_recovery() {
 fn test_gui_welcome_screen_and_vault_creation_modal() {
     let (mut root, ()) = window(Application::new());
     assert!(root.app.application.vault_path().is_none());
-    assert!(!root.app.show_create_vault_dialog);
+    assert!(!root.app.dialogs.vault.open);
 
-    root.app.show_create_vault_dialog = true;
+    root.app.dialogs.vault.open = true;
     let target = std::env::temp_dir().join(format!("truff-gui-create-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&target);
-    root.app.vault_path_input = target.to_string_lossy().into_owned();
-    root.app.create_starter_note = true;
-    root.app.initial_note_name = "Welcome.md".into();
+    root.app.dialogs.vault.path = target.to_string_lossy().into_owned();
+    root.app.dialogs.vault.create_starter_note = true;
+    root.app.dialogs.vault.initial_note_name = "Welcome.md".into();
 
     root.redraw();
 
     root.app
         .application
         .create_and_open_vault(
-            std::path::Path::new(&root.app.vault_path_input),
+            std::path::Path::new(&root.app.dialogs.vault.path),
             Some("Welcome.md"),
         )
         .unwrap();
@@ -437,14 +437,14 @@ fn test_create_note_and_folder_dialogs() {
     root.redraw();
 
     // Trigger create file dialog and set input
-    root.app.show_create_file_dialog = true;
-    root.app.create_file_input = "nested/new_note.md".to_string();
+    root.app.dialogs.file.open = true;
+    root.app.dialogs.file.path = "nested/new_note.md".to_string();
     root.redraw();
 
     // Directly test the application creation method and UI submit
     root.app
         .application
-        .create_note(&root.app.create_file_input.clone())
+        .create_note(&root.app.dialogs.file.path.clone())
         .unwrap();
     assert!(target.join("nested/new_note.md").exists());
     assert_eq!(
@@ -453,13 +453,13 @@ fn test_create_note_and_folder_dialogs() {
     );
 
     // Test creating folder
-    root.app.show_create_folder_dialog = true;
-    root.app.create_folder_input = "archive/sub".to_string();
+    root.app.dialogs.folder.open = true;
+    root.app.dialogs.folder.path = "archive/sub".to_string();
     root.redraw();
 
     root.app
         .application
-        .create_folder(&root.app.create_folder_input.clone())
+        .create_folder(&root.app.dialogs.folder.path.clone())
         .unwrap();
     assert!(target.join("archive/sub").is_dir());
 
@@ -490,9 +490,9 @@ fn test_styled_vault_and_note_dialogs() {
     let (mut root, ()) = window(app);
 
     // 1. Vault dialog
-    root.app.show_create_vault_dialog = true;
+    root.app.dialogs.vault.open = true;
     root.redraw();
-    assert!(root.app.show_create_vault_dialog);
+    assert!(root.app.dialogs.vault.open);
 
     root.event(egui::Event::Key {
         key: egui::Key::Escape,
@@ -502,12 +502,12 @@ fn test_styled_vault_and_note_dialogs() {
         modifiers: egui::Modifiers::NONE,
     });
     root.redraw();
-    assert!(!root.app.show_create_vault_dialog);
+    assert!(!root.app.dialogs.vault.open);
 
     // 2. Note dialog
-    root.app.show_create_file_dialog = true;
+    root.app.dialogs.file.open = true;
     root.redraw();
-    assert!(root.app.show_create_file_dialog);
+    assert!(root.app.dialogs.file.open);
 
     root.event(egui::Event::Key {
         key: egui::Key::Escape,
@@ -517,12 +517,12 @@ fn test_styled_vault_and_note_dialogs() {
         modifiers: egui::Modifiers::NONE,
     });
     root.redraw();
-    assert!(!root.app.show_create_file_dialog);
+    assert!(!root.app.dialogs.file.open);
 
     // 3. Folder dialog
-    root.app.show_create_folder_dialog = true;
+    root.app.dialogs.folder.open = true;
     root.redraw();
-    assert!(root.app.show_create_folder_dialog);
+    assert!(root.app.dialogs.folder.open);
 
     root.event(egui::Event::Key {
         key: egui::Key::Escape,
@@ -532,5 +532,5 @@ fn test_styled_vault_and_note_dialogs() {
         modifiers: egui::Modifiers::NONE,
     });
     root.redraw();
-    assert!(!root.app.show_create_folder_dialog);
+    assert!(!root.app.dialogs.folder.open);
 }

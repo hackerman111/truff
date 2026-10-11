@@ -5,24 +5,6 @@ use eframe::egui::{self, Event};
 use truff_core::vim::{Key, Mode};
 
 impl NativeApp {
-    pub(super) fn input(&mut self, input: EditorInput) {
-        if self.application.shell.mode() == Mode::Insert
-            && self.application.shell.focus() != Focus::Editor
-        {
-            self.application.shell.set_focus(Focus::Editor);
-        }
-        if self.application.shell.focus() != Focus::Editor
-            || self.application.file_operation_pending()
-        {
-            return;
-        }
-        if let Err(error) = self.application.shell.apply_input(input) {
-            self.application.status = error.to_string();
-        }
-        self.application
-            .handle_shell_action(ShellAction::EditorEdit);
-    }
-
     fn key(&mut self, key: Key) {
         if self.application.file_operation_pending() {
             return;
@@ -123,7 +105,7 @@ impl NativeApp {
                         if self.application.shell.focus() != Focus::Editor {
                             self.application.shell.set_focus(Focus::Editor);
                         }
-                        self.input(EditorInput::InsertText(text));
+                        input(&mut self.application, EditorInput::InsertText(text));
                     } else {
                         for character in text.chars() {
                             self.key(Key::Char(character));
@@ -136,7 +118,7 @@ impl NativeApp {
                             self.key(Key::Char(character));
                         }
                     } else {
-                        self.input(EditorInput::Paste(text));
+                        input(&mut self.application, EditorInput::Paste(text));
                     }
                 }
                 Event::Ime(egui::ImeEvent::Preedit {
@@ -151,21 +133,27 @@ impl NativeApp {
                         };
                         (byte(range.start), byte(range.end))
                     });
-                    self.input(EditorInput::ImePreedit { text, cursor });
+                    input(
+                        &mut self.application,
+                        EditorInput::ImePreedit { text, cursor },
+                    );
                 }
                 Event::Ime(egui::ImeEvent::Commit(text))
                     if self.application.shell.mode() == Mode::Insert =>
                 {
-                    self.input(EditorInput::ImeCommit(text))
+                    input(&mut self.application, EditorInput::ImeCommit(text))
                 }
                 Event::Ime(egui::ImeEvent::DeleteSurrounding {
                     before_chars,
                     after_chars,
                 }) if self.application.shell.mode() == Mode::Insert => {
-                    self.input(EditorInput::ImeDeleteSurrounding {
-                        before_chars,
-                        after_chars,
-                    });
+                    input(
+                        &mut self.application,
+                        EditorInput::ImeDeleteSurrounding {
+                            before_chars,
+                            after_chars,
+                        },
+                    );
                 }
                 Event::Copy | Event::Cut => {
                     if let Ok(range) = self.application.selection_range()
@@ -228,4 +216,17 @@ impl NativeApp {
             }
         }
     }
+}
+
+pub(super) fn input(application: &mut crate::app::Application, input: EditorInput) {
+    if application.shell.mode() == Mode::Insert && application.shell.focus() != Focus::Editor {
+        application.shell.set_focus(Focus::Editor);
+    }
+    if application.shell.focus() != Focus::Editor || application.file_operation_pending() {
+        return;
+    }
+    if let Err(error) = application.shell.apply_input(input) {
+        application.status = error.to_string();
+    }
+    application.handle_shell_action(ShellAction::EditorEdit);
 }
