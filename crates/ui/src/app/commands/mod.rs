@@ -147,6 +147,7 @@ impl Application {
                 })
             }
             "theme" => self.apply_theme_command(argument),
+            "settings" | "config" => self.apply_settings_command(argument),
             "source" => {
                 self.projection = ProjectionMode::Source;
                 Ok(())

@@ -350,3 +350,15 @@ fn test_settings_dialog_ui_render_and_open_state() {
     assert!(!app.dialogs.settings.open);
     assert!(!app.dialogs.is_any_open());
 }
+
+#[test]
+fn test_settings_command_opens_dialog_in_native_app() {
+    let (mut app, context) = scratch("");
+    assert!(!app.dialogs.settings.open);
+    app.application.execute_command("settings").unwrap();
+    assert!(app.application.settings_requested);
+
+    frame(&mut app, &context, vec![]);
+    assert!(!app.application.settings_requested);
+    assert!(app.dialogs.settings.open);
+}

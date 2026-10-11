@@ -176,3 +176,28 @@ fn typography_config_defaults_and_parsing() {
     assert_eq!(default_config.typography.line_height_multiplier, 1.5);
     assert_eq!(default_config.typography.custom_font_path, None);
 }
+
+#[test]
+fn test_settings_and_config_commands() {
+    let mut app = truff_ui::app::Application::new();
+    assert!(app.execute_command("settings").is_ok());
+    assert!(app.settings_requested);
+    app.settings_requested = false;
+
+    assert!(app.execute_command("config").is_ok());
+    assert!(app.settings_requested);
+    app.settings_requested = false;
+
+    assert!(app.execute_command("settings size 19").is_ok());
+    assert_eq!(app.shell.typography().base_font_size, 19.0);
+
+    assert!(app.execute_command("settings reset").is_ok());
+    assert_eq!(app.shell.typography().base_font_size, 15.0);
+}
+
+#[test]
+fn execute_settings_command() {
+    let mut app = truff_ui::app::Application::new();
+    assert!(app.execute_command("settings").is_ok());
+    assert!(app.execute_command("config").is_ok());
+}

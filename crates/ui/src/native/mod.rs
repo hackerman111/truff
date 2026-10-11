@@ -93,6 +93,14 @@ impl NativeApp {
         if open_vault {
             self.dialogs.vault.open = true;
         }
+        if self.application.settings_requested {
+            self.application.settings_requested = false;
+            self.dialogs.settings.open = true;
+            let config = crate::app::global_config::GlobalConfig::load();
+            self.dialogs
+                .settings
+                .init_from_app(self.application.shell.typography(), &config.theme);
+        }
         self.dialogs.show(&mut self.application, &context, &theme);
         hints::show(&self.application.shell, &context);
         if let Some(id) = self.application.shell.workspace().active_view()
