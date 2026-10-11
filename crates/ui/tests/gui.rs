@@ -459,3 +459,54 @@ fn test_sidebar_header_ghost_actions() {
     let _ = root.app.application.shutdown();
     let _ = std::fs::remove_dir_all(target);
 }
+
+#[test]
+fn test_styled_vault_and_note_dialogs() {
+    let app = Application::new();
+    let (mut root, ()) = window(app);
+
+    // 1. Vault dialog
+    root.app.show_create_vault_dialog = true;
+    root.redraw();
+    assert!(root.app.show_create_vault_dialog);
+
+    root.event(egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    root.redraw();
+    assert!(!root.app.show_create_vault_dialog);
+
+    // 2. Note dialog
+    root.app.show_create_file_dialog = true;
+    root.redraw();
+    assert!(root.app.show_create_file_dialog);
+
+    root.event(egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    root.redraw();
+    assert!(!root.app.show_create_file_dialog);
+
+    // 3. Folder dialog
+    root.app.show_create_folder_dialog = true;
+    root.redraw();
+    assert!(root.app.show_create_folder_dialog);
+
+    root.event(egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    root.redraw();
+    assert!(!root.app.show_create_folder_dialog);
+}

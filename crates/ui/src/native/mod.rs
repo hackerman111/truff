@@ -655,17 +655,62 @@ impl NativeApp {
         if self.show_create_vault_dialog {
             let mut close_dialog = false;
             let mut submit_creation = false;
-            egui::Window::new("Создать или открыть хранилище")
+            let modal_frame = egui::Frame::new()
+                .fill(color(theme.bg_secondary))
+                .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::same(20));
+
+            egui::Window::new("create_vault_window")
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
-                .default_width(450.0)
+                .default_width(460.0)
+                .max_width(460.0)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(modal_frame)
                 .show(&context, |ui| {
-                    ui.heading("Расположение хранилища");
-                    ui.label("Укажите путь (поддерживаются ~, ./, ../ и абсолютные пути):");
+                    ui.visuals_mut().extreme_bg_color =
+                        color(crate::theme::Color::from_hex("#20242c").unwrap());
+                    ui.visuals_mut().widgets.inactive.bg_stroke =
+                        egui::Stroke::new(1.0, color(theme.border));
+                    ui.visuals_mut().widgets.hovered.bg_stroke =
+                        egui::Stroke::new(1.0, color(theme.accent));
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Создать или открыть хранилище")
+                                    .size(16.0)
+                                    .strong()
+                                    .color(color(theme.text_primary)),
+                            );
+                            ui.label(
+                                egui::RichText::new("Выберите директорию для заметок")
+                                    .size(12.0)
+                                    .color(color(theme.text_muted)),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked() {
+                                close_dialog = true;
+                            }
+                        });
+                    });
+
+                    ui.add_space(14.0);
+                    ui.label(
+                        egui::RichText::new("Расположение")
+                            .size(12.0)
+                            .strong()
+                            .color(color(theme.text_primary)),
+                    );
+                    ui.add_space(4.0);
 
                     let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.vault_path_input).desired_width(420.0),
+                        egui::TextEdit::singleline(&mut self.vault_path_input)
+                            .desired_width(420.0)
+                            .margin(egui::Margin::symmetric(10, 8)),
                     );
 
                     if response.has_focus()
@@ -679,13 +724,24 @@ impl NativeApp {
                         submit_creation = true;
                     }
 
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Поддерживаются абсолютные и относительные пути (~, ./, ../)")
+                            .size(11.0)
+                            .color(color(theme.text_muted)),
+                    );
+
                     let suggestions = crate::app::path_completion::complete_directory_path(
                         &self.vault_path_input,
                     );
                     if !suggestions.is_empty() {
-                        ui.add_space(4.0);
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new("Подсказки:")
+                                .size(11.5)
+                                .color(color(theme.text_muted)),
+                        );
                         ui.horizontal_wrapped(|ui| {
-                            ui.label("Подсказки:");
                             for suggestion in suggestions.iter().take(6) {
                                 if ui.small_button(suggestion).clicked() {
                                     self.vault_path_input = suggestion.clone();
@@ -694,26 +750,17 @@ impl NativeApp {
                         });
                     }
 
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.label("Быстрый выбор:");
-                        if ui.small_button("~/TruffVault").clicked() {
-                            self.vault_path_input = "~/TruffVault".to_string();
-                        }
-                        if ui.small_button("./notes").clicked() {
-                            self.vault_path_input = "./notes".to_string();
-                        }
-                        if ui.small_button("~/Documents/Notes").clicked() {
-                            self.vault_path_input = "~/Documents/Notes".to_string();
-                        }
-                    });
-
                     ui.add_space(10.0);
                     ui.checkbox(&mut self.create_starter_note, "Создать стартовую заметку");
                     if self.create_starter_note {
+                        ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.label("Имя файла:");
-                            ui.text_edit_singleline(&mut self.initial_note_name);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.initial_note_name)
+                                    .desired_width(280.0)
+                                    .margin(egui::Margin::symmetric(8, 6)),
+                            );
                         });
                     }
 
@@ -722,16 +769,22 @@ impl NativeApp {
                         ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
                     }
 
-                    ui.add_space(12.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("✔ Создать и открыть").clicked() {
+                    ui.add_space(16.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if widgets::primary_button(ui, "Создать и открыть").clicked() {
                             submit_creation = true;
                         }
-                        if ui.button("Отмена").clicked() {
+                        if widgets::secondary_button(ui, "Отмена").clicked() {
                             self.create_vault_error = None;
                             close_dialog = true;
                         }
                     });
+
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.create_vault_error = None;
+                        close_dialog = true;
+                    }
                 });
 
             if submit_creation {
@@ -761,35 +814,95 @@ impl NativeApp {
         if self.show_create_file_dialog {
             let mut close_dialog = false;
             let mut submit_creation = false;
-            egui::Window::new("Новая заметка")
+            let modal_frame = egui::Frame::new()
+                .fill(color(theme.bg_secondary))
+                .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::same(20));
+
+            egui::Window::new("create_file_window")
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
-                .default_width(380.0)
+                .default_width(440.0)
+                .max_width(440.0)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(modal_frame)
                 .show(&context, |ui| {
-                    ui.heading("Создание заметки");
-                    ui.label("Имя файла или путь (например, folder/note.md):");
+                    ui.visuals_mut().extreme_bg_color =
+                        color(crate::theme::Color::from_hex("#20242c").unwrap());
+                    ui.visuals_mut().widgets.inactive.bg_stroke =
+                        egui::Stroke::new(1.0, color(theme.border));
+                    ui.visuals_mut().widgets.hovered.bg_stroke =
+                        egui::Stroke::new(1.0, color(theme.accent));
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Новая заметка")
+                                    .size(16.0)
+                                    .strong()
+                                    .color(color(theme.text_primary)),
+                            );
+                            ui.label(
+                                egui::RichText::new("Укажите имя файла или путь в хранилище")
+                                    .size(12.0)
+                                    .color(color(theme.text_muted)),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked() {
+                                close_dialog = true;
+                            }
+                        });
+                    });
+
+                    ui.add_space(14.0);
+                    ui.label(
+                        egui::RichText::new("Имя файла")
+                            .size(12.0)
+                            .strong()
+                            .color(color(theme.text_primary)),
+                    );
+                    ui.add_space(4.0);
+
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.create_file_input)
-                            .desired_width(360.0),
+                            .desired_width(400.0)
+                            .margin(egui::Margin::symmetric(10, 8)),
                     );
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         submit_creation = true;
                     }
+
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Например: note.md или subfolder/my_note.md")
+                            .size(11.0)
+                            .color(color(theme.text_muted)),
+                    );
+
                     if let Some(err) = &self.create_file_error {
                         ui.add_space(6.0);
                         ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
                     }
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("✔ Создать").clicked() {
+
+                    ui.add_space(16.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if widgets::primary_button(ui, "Создать").clicked() {
                             submit_creation = true;
                         }
-                        if ui.button("Отмена").clicked() {
+                        if widgets::secondary_button(ui, "Отмена").clicked() {
                             self.create_file_error = None;
                             close_dialog = true;
                         }
                     });
+
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.create_file_error = None;
+                        close_dialog = true;
+                    }
                 });
 
             if submit_creation {
@@ -813,40 +926,94 @@ impl NativeApp {
         if self.show_create_folder_dialog {
             let mut close_dialog = false;
             let mut submit_creation = false;
-            egui::Window::new("Новая папка")
+            let modal_frame = egui::Frame::new()
+                .fill(color(theme.bg_secondary))
+                .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::same(20));
+
+            egui::Window::new("create_folder_window")
+                .title_bar(false)
                 .collapsible(false)
                 .resizable(false)
-                .default_width(380.0)
+                .default_width(440.0)
+                .max_width(440.0)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .frame(modal_frame)
                 .show(&context, |ui| {
-                    ui.heading("Создание папки");
-                    ui.label("Имя папки (например, archive или docs/api):");
+                    ui.visuals_mut().extreme_bg_color =
+                        color(crate::theme::Color::from_hex("#20242c").unwrap());
+                    ui.visuals_mut().widgets.inactive.bg_stroke =
+                        egui::Stroke::new(1.0, color(theme.border));
+                    ui.visuals_mut().widgets.hovered.bg_stroke =
+                        egui::Stroke::new(1.0, color(theme.accent));
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new("Новая папка")
+                                    .size(16.0)
+                                    .strong()
+                                    .color(color(theme.text_primary)),
+                            );
+                            ui.label(
+                                egui::RichText::new("Создание новой директории в хранилище")
+                                    .size(12.0)
+                                    .color(color(theme.text_muted)),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                            if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked() {
+                                close_dialog = true;
+                            }
+                        });
+                    });
+
+                    ui.add_space(14.0);
+                    ui.label(
+                        egui::RichText::new("Имя папки")
+                            .size(12.0)
+                            .strong()
+                            .color(color(theme.text_primary)),
+                    );
+                    ui.add_space(4.0);
+
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.create_folder_input)
-                            .desired_width(360.0),
+                            .desired_width(400.0)
+                            .margin(egui::Margin::symmetric(10, 8)),
                     );
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         submit_creation = true;
                     }
-                    ui.add_space(6.0);
+
+                    ui.add_space(10.0);
                     ui.checkbox(
                         &mut self.create_folder_initial_note,
                         "Создать index.md в папке",
                     );
+
                     if let Some(err) = &self.create_folder_error {
                         ui.add_space(6.0);
                         ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
                     }
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("✔ Создать").clicked() {
+
+                    ui.add_space(16.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        if widgets::primary_button(ui, "Создать").clicked() {
                             submit_creation = true;
                         }
-                        if ui.button("Отмена").clicked() {
+                        if widgets::secondary_button(ui, "Отмена").clicked() {
                             self.create_folder_error = None;
                             close_dialog = true;
                         }
                     });
+
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.create_folder_error = None;
+                        close_dialog = true;
+                    }
                 });
 
             if submit_creation {
