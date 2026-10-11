@@ -19,26 +19,61 @@ pub use paint::resolve_font_and_line_height;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub fn configure_fonts(
+    ctx: &egui::Context,
+    typography: &crate::app::global_config::TypographyConfig,
+) {
+    let mut fonts = egui::FontDefinitions::default();
+    if let Some(path) = &typography.custom_font_path
+        && path.is_file()
+        && let Ok(bytes) = std::fs::read(path)
+    {
+        fonts.font_data.insert(
+            "custom_font".to_owned(),
+            std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Monospace)
+            .or_default()
+            .insert(0, "custom_font".to_owned());
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "custom_font".to_owned());
+    }
+    ctx.set_fonts(fonts);
+}
+
 pub struct NativeApp {
     pub application: Application,
     pub editor: EditorWidget,
     pub dialogs: creation::CreationDialogs,
     hints_tick: Instant,
+    last_typography: crate::app::global_config::TypographyConfig,
 }
 
 impl NativeApp {
     pub fn new(mut application: Application, context: &egui::Context) -> Self {
         let wake_context = context.clone();
         application.set_storage_waker(Arc::new(move || wake_context.request_repaint()));
+        configure_fonts(context, application.shell.typography());
+        let last_typography = application.shell.typography().clone();
         Self {
             application,
             editor: EditorWidget::default(),
             hints_tick: Instant::now(),
             dialogs: creation::CreationDialogs::default(),
+            last_typography,
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
+        if self.application.shell.typography() != &self.last_typography {
+            configure_fonts(&context, self.application.shell.typography());
+            self.last_typography = self.application.shell.typography().clone();
+        }
         self.events(&context);
         self.application.poll();
         let now = Instant::now();

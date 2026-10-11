@@ -258,3 +258,36 @@ fn test_visual_mode_character_and_line_highlighting_dimensions() {
         "Regular line character highlight must have standard line height 23.0"
     );
 }
+
+#[test]
+fn test_configure_fonts() {
+    let ctx = egui::Context::default();
+    let typography = truff_ui::app::global_config::TypographyConfig::default();
+    truff_ui::native::configure_fonts(&ctx, &typography);
+
+    // Test with non-existent custom font path
+    let custom_typo = truff_ui::app::global_config::TypographyConfig {
+        custom_font_path: Some(std::path::PathBuf::from("/nonexistent/font.ttf")),
+        ..Default::default()
+    };
+    truff_ui::native::configure_fonts(&ctx, &custom_typo);
+
+    // Test with existing custom font file
+    let temp_font = std::env::temp_dir().join("test_font_dummy.ttf");
+    let _ = std::fs::write(&temp_font, b"dummy font data");
+    let custom_typo_file = truff_ui::app::global_config::TypographyConfig {
+        custom_font_path: Some(temp_font.clone()),
+        ..Default::default()
+    };
+    truff_ui::native::configure_fonts(&ctx, &custom_typo_file);
+    let _ = std::fs::remove_file(&temp_font);
+}
+
+#[test]
+fn test_native_app_typography_change_handled_in_show() {
+    let (mut app, context) = scratch("hello font\n");
+    let mut new_typo = app.application.shell.typography().clone();
+    new_typo.base_font_size = 22.0;
+    app.application.shell.set_typography(new_typo);
+    frame(&mut app, &context, vec![]);
+}
