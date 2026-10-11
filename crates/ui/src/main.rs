@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use truff_ui::app::Application;
-use truff_ui::native::NativeApp;
 use truff_ui::editor::EditorProbe;
+use truff_ui::native::NativeApp;
 use truff_ui::perf_scenarios::{
     PerfSample, run_edit_latency, run_memory_retention, run_scroll_layout, run_startup,
     run_workers_shutdown, write_metadata_toml, write_samples_csv, write_summary_md,
@@ -150,9 +150,9 @@ fn main() {
         .any(|arg| arg == "--probe" || arg == "--headless")
     {
         println!("Truff v2 Editor Probe (headless benchmark)");
-        let mut probe = EditorProbe::new(
-            "Truff v2 editor viewport probe\nTesting egui & Crop\nПривет мир!",
-        ).expect("small probe text is valid");
+        let mut probe =
+            EditorProbe::new("Truff v2 editor viewport probe\nTesting egui & Crop\nПривет мир!")
+                .expect("small probe text is valid");
         probe.relayout(Some(800.0));
         let hit = probe.hit_test(100.0, 10.0);
         println!(
@@ -172,17 +172,22 @@ fn main() {
             eprintln!("Cannot open vault: {error}");
             std::process::exit(1);
         }
+    } else {
+        let _ = application.try_auto_open_saved_vault();
     }
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: egui::ViewportBuilder::default()
+            .with_app_id("truff")
             .with_inner_size([1100.0, 700.0])
             .with_min_inner_size([640.0, 400.0]),
         ..Default::default()
     };
-    if let Err(error) = eframe::run_native("Truff v2", options, Box::new(move |context| {
-        Ok(Box::new(NativeApp::new(application, &context.egui_ctx)))
-    })) {
+    if let Err(error) = eframe::run_native(
+        "Truff v2",
+        options,
+        Box::new(move |context| Ok(Box::new(NativeApp::new(application, &context.egui_ctx)))),
+    ) {
         eprintln!("Cannot run Truff: {error}");
         std::process::exit(1);
     }

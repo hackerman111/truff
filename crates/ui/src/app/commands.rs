@@ -14,14 +14,23 @@ use crate::theme::Theme;
 
 impl Application {
     pub fn execute_command(&mut self, command: &str) -> AppResult<()> {
-        let before = self.shell.editor_buffer().map(|buffer| (buffer.id(), buffer.revision()));
+        let before = self
+            .shell
+            .editor_buffer()
+            .map(|buffer| (buffer.id(), buffer.revision()));
         let result = self.execute_command_inner(command);
         if let Some(buffer) = self.shell.editor_buffer()
-            && before.is_some_and(|(id, revision)| id == buffer.id() && revision != buffer.revision())
+            && before
+                .is_some_and(|(id, revision)| id == buffer.id() && revision != buffer.revision())
         {
-            self.recovery_deadline = Some(std::time::Instant::now() + if buffer.is_dirty() {
-                std::time::Duration::from_millis(750)
-            } else { std::time::Duration::ZERO });
+            self.recovery_deadline = Some(
+                std::time::Instant::now()
+                    + if buffer.is_dirty() {
+                        std::time::Duration::from_millis(750)
+                    } else {
+                        std::time::Duration::ZERO
+                    },
+            );
         }
         result
     }
@@ -33,7 +42,40 @@ impl Application {
             .unwrap_or((command, ""));
         let argument = argument.trim();
         match name {
-            "vault" => self.open_vault(Path::new(argument)),
+            "vault" => {
+                if argument.is_empty() {
+                    let config = super::global_config::GlobalConfig::load();
+                    if config.recent_vaults.is_empty() {
+                        self.status = "No saved vaults. Usage: :vault <path>".into();
+                    } else {
+                        let list = config
+                            .recent_vaults
+                            .iter()
+                            .map(|p| p.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        self.status = format!("Saved vaults: {list}");
+                    }
+                    Ok(())
+                } else {
+                    self.open_vault(Path::new(argument))
+                }
+            }
+            "vaults" => {
+                let config = super::global_config::GlobalConfig::load();
+                if config.recent_vaults.is_empty() {
+                    self.status = "No saved vaults".into();
+                } else {
+                    let list = config
+                        .recent_vaults
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.status = format!("Saved vaults: {list}");
+                }
+                Ok(())
+            }
             "e" | "open" => self.open_note(argument),
             "w" | "write" => self.save(false),
             "wq" => self.save(true),

@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use truff_core::markdown::facts::{DocFacts, MarkdownFacts};
@@ -80,8 +80,15 @@ impl CatalogReplies {
     fn send(&self, event: CatalogEvent) -> Result<(), mpsc::SendError<CatalogEvent>> {
         self.sender.send(event)?;
         if !self.wake.pending.swap(true, Ordering::AcqRel) {
-            let callback = self.wake.callback.lock().unwrap_or_else(|poison| poison.into_inner()).clone();
-            if let Some(callback) = callback { callback(); }
+            let callback = self
+                .wake
+                .callback
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .clone();
+            if let Some(callback) = callback {
+                callback();
+            }
         }
         Ok(())
     }
@@ -100,7 +107,10 @@ impl CatalogWorker {
         let (sender, jobs) = mpsc::sync_channel(8);
         let (events_tx, events) = mpsc::sync_channel(16);
         let wake = Arc::new(CatalogWake::default());
-        let events_tx = CatalogReplies { sender: events_tx, wake: wake.clone() };
+        let events_tx = CatalogReplies {
+            sender: events_tx,
+            wake: wake.clone(),
+        };
         let handle = thread::Builder::new()
             .name("truff-catalog".into())
             .spawn(move || {
@@ -174,8 +184,14 @@ impl CatalogWorker {
     }
 
     pub fn set_event_waker(&self, callback: crate::worker::EventWaker) {
-        *self.wake.callback.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(callback.clone());
-        if self.wake.pending.load(Ordering::Acquire) { callback(); }
+        *self
+            .wake
+            .callback
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = Some(callback.clone());
+        if self.wake.pending.load(Ordering::Acquire) {
+            callback();
+        }
     }
 
     pub fn shutdown(&mut self) {

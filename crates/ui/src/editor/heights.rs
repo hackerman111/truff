@@ -93,8 +93,11 @@ impl HeightIndex {
     /// Source offsets remain in the Rope; the native viewport needs only row heights.
     pub fn init_uniform(&mut self, count: usize) {
         self.blocks.resize_with(count.max(1), || BlockInfo {
-            source_range: 0..0, height: self.default_line_height,
-            is_measured: false, line_count: 1, revision: 0,
+            source_range: 0..0,
+            height: self.default_line_height,
+            is_measured: false,
+            line_count: 1,
+            revision: 0,
         });
         for block in &mut self.blocks {
             block.height = self.default_line_height;
@@ -109,7 +112,9 @@ impl HeightIndex {
         for index in 1..self.sums.len() {
             self.sums[index] += f64::from(self.blocks[index - 1].height);
             let parent = index + (index & index.wrapping_neg());
-            if parent < self.sums.len() { self.sums[parent] += self.sums[index]; }
+            if parent < self.sums.len() {
+                self.sums[parent] += self.sums[index];
+            }
         }
     }
 
@@ -125,7 +130,9 @@ impl HeightIndex {
 
     /// Mutable access to blocks.
     pub fn set_block_revision(&mut self, index: usize, revision: u64) {
-        if let Some(block) = self.blocks.get_mut(index) { block.revision = revision; }
+        if let Some(block) = self.blocks.get_mut(index) {
+            block.revision = revision;
+        }
     }
 
     /// Total vertical height of all blocks.
@@ -137,7 +144,10 @@ impl HeightIndex {
     pub fn y_for_block(&self, block_index: usize) -> f32 {
         let mut index = block_index.min(self.blocks.len());
         let mut sum = 0.0;
-        while index > 0 { sum += self.sums[index]; index &= index - 1; }
+        while index > 0 {
+            sum += self.sums[index];
+            index &= index - 1;
+        }
         sum as f32
     }
 
@@ -176,7 +186,9 @@ impl HeightIndex {
             return;
         }
 
-        if !new_height.is_finite() || new_height <= 0.0 { return; }
+        if !new_height.is_finite() || new_height <= 0.0 {
+            return;
+        }
         let old_height = self.blocks[block_index].height;
         let delta = new_height - old_height;
         self.blocks[block_index].height = new_height;
@@ -217,4 +229,3 @@ impl ScrollAnchor {
         }
     }
 }
-

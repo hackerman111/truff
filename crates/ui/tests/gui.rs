@@ -1,42 +1,84 @@
 //! Production egui event path with real vault files, without a native GPU window.
-use std::time::{Duration, Instant};
 use eframe::egui::{self, Event};
+use std::time::{Duration, Instant};
 use truff_ui::app::Application;
 use truff_ui::native::NativeApp;
 
-struct Window { app: NativeApp, context: egui::Context }
+struct Window {
+    app: NativeApp,
+    context: egui::Context,
+}
 impl Window {
-    fn event(&mut self, event: Event) { self.frame(vec![event]); }
-    fn redraw(&mut self) { self.frame(vec![]); }
+    fn event(&mut self, event: Event) {
+        self.frame(vec![event]);
+    }
+    fn redraw(&mut self) {
+        self.frame(vec![]);
+    }
     fn frame(&mut self, events: Vec<Event>) {
-        self.context.run_ui(egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1100.0,700.0))), events, ..Default::default()
-        }, |ui| self.app.show(ui)).drop_without_applying_deltas();
+        self.context
+            .run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 700.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| self.app.show(ui),
+            )
+            .drop_without_applying_deltas();
     }
 }
 fn window(application: Application) -> (Window, ()) {
     let context = egui::Context::default();
     let app = NativeApp::new(application, &context);
     let mut window = Window { app, context };
-    window.redraw(); (window, ())
+    window.redraw();
+    (window, ())
 }
 fn text(root: &mut Window, keys: &str) {
-    for ch in keys.chars() { root.event(Event::Text(ch.to_string())); }
+    for ch in keys.chars() {
+        root.event(Event::Text(ch.to_string()));
+    }
 }
 fn named(root: &mut Window, key: egui::Key) {
-    root.event(Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
+    root.event(Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    });
 }
-fn command(root: &mut Window, cmd: &str) { text(root, &format!(":{cmd}")); named(root, egui::Key::Enter); }
-fn with_app<T>(root: &Window, _: (), f: impl FnOnce(&Application)->T) -> T { f(&root.app.application) }
+fn command(root: &mut Window, cmd: &str) {
+    text(root, &format!(":{cmd}"));
+    named(root, egui::Key::Enter);
+}
+fn with_app<T>(root: &Window, _: (), f: impl FnOnce(&Application) -> T) -> T {
+    f(&root.app.application)
+}
 fn idle(root: &mut Window, _: ()) {
     let start = Instant::now();
     while root.app.application.needs_poll() {
-        assert!(start.elapsed() < Duration::from_secs(15), "{}", root.app.application.status);
-        std::thread::sleep(Duration::from_millis(5)); root.redraw();
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "{}",
+            root.app.application.status
+        );
+        std::thread::sleep(Duration::from_millis(5));
+        root.redraw();
     }
 }
-fn close(root: &mut Window, _: ()) { root.app.application.shutdown().unwrap(); }
-fn scratch(text: &str) -> Application { let mut app = Application::new(); app.shell.set_editor_text(text); app }
+fn close(root: &mut Window, _: ()) {
+    root.app.application.shutdown().unwrap();
+}
+fn scratch(text: &str) -> Application {
+    let mut app = Application::new();
+    app.shell.set_editor_text(text);
+    app
+}
 
 #[test]
 fn window_editor_runs_vim_instead_of_inserting_normal_keys() {
@@ -63,7 +105,10 @@ fn window_editor_runs_vim_instead_of_inserting_normal_keys() {
 fn composition_and_paste_edit_the_workspace_once() {
     let (mut root, id) = window(scratch(""));
     text(&mut root, "i");
-    root.event(Event::Ime(egui::ImeEvent::Preedit { text: "候補".into(), active_range_chars: Some(0..2) }));
+    root.event(Event::Ime(egui::ImeEvent::Preedit {
+        text: "候補".into(),
+        active_range_chars: Some(0..2),
+    }));
     assert_eq!(with_app(&root, id, |app| app.shell.editor_text()), "");
     root.event(Event::Ime(egui::ImeEvent::Commit("字🦀".into())));
     root.event(Event::Paste(" Привет".into()));
@@ -74,7 +119,6 @@ fn composition_and_paste_edit_the_workspace_once() {
     );
     named(&mut root, egui::Key::Escape);
     assert!(root.app.editor.cached_paragraph_count() > 0);
-
 }
 
 #[test]
@@ -188,14 +232,13 @@ fn window_keyboard_workflow_saves_renames_and_restores_real_files() {
 #[test]
 fn retained_paragraphs_are_bounded_and_scroll_reuses_layout() {
     let doc = "one two three\n".repeat(10_000);
-    let (mut root, id) = window(scratch(&doc));
+    let (mut root, _id) = window(scratch(&doc));
     named(&mut root, egui::Key::PageDown);
     assert!(root.app.editor.scroll_offset() > 0.0);
     assert!(root.app.editor.cached_paragraph_count() < 100);
     let builds = root.app.editor.layout_rebuild_count();
     root.redraw();
     assert_eq!(root.app.editor.layout_rebuild_count(), builds);
-
 }
 
 #[test]

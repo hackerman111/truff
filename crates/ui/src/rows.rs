@@ -92,4 +92,3 @@ impl VirtualRows {
         range.end - range.start
     }
 }
-

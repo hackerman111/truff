@@ -110,7 +110,7 @@ fn ime_surrounding_deletion_counts_scalars_and_undoes_with_insert() {
     shell.set_editor_text("aé\u{301}🙂z");
     keys(&mut shell, "i");
     shell
-        .apply_input(EditorInput::SetSelection { start: 5, end: 5 })
+        .apply_input(EditorInput::SetSelection { anchor: 5, head: 5 })
         .unwrap();
     shell
         .apply_input(EditorInput::ImeDeleteSurrounding {
@@ -175,13 +175,15 @@ fn remapped_binding_retains_count_and_registry_context() {
     use truff_core::vim::Mode;
     let mut shell = Shell::new();
     shell.set_editor_text("a\nb\nc\nd");
-    let mut config = KeymapConfig::default();
-    config.bindings = vec![KeyBinding {
-        mode: Mode::Normal,
-        keys: vec![Key::Char('z'), Key::Char('j')],
-        command: CommandId::new("motion.down"),
-        description: "down".into(),
-    }];
+    let config = KeymapConfig {
+        bindings: vec![KeyBinding {
+            mode: Mode::Normal,
+            keys: vec![Key::Char('z'), Key::Char('j')],
+            command: CommandId::new("motion.down"),
+            description: "down".into(),
+        }],
+        ..Default::default()
+    };
     shell.set_keymap(config).unwrap();
     keys(&mut shell, "2zj");
     assert_eq!(shell.editor_view().unwrap().head().get(), 4);

@@ -17,14 +17,25 @@ fn idle(app: &mut Application) {
 #[test]
 fn clean_buffer_command_edits_schedule_and_write_idle_recovery() {
     for command in ["link target", "color #3388ff"] {
-        let vault = std::env::temp_dir().join(format!("truff-command-recovery-{}-{}", std::process::id(), BufferId::next()));
+        let vault = std::env::temp_dir().join(format!(
+            "truff-command-recovery-{}-{}",
+            std::process::id(),
+            BufferId::next()
+        ));
         std::fs::create_dir_all(&vault).unwrap();
         std::fs::write(vault.join("note.md"), "word").unwrap();
         let mut app = Application::new();
         app.open_vault(&vault).unwrap();
         idle(&mut app);
         let id = app.shell.workspace().active_view().unwrap();
-        app.shell.workspace_mut().get_view_mut(id).unwrap().set_cursor(truff_core::text::BytePos::ZERO, truff_core::text::BytePos::new(4));
+        app.shell
+            .workspace_mut()
+            .get_view_mut(id)
+            .unwrap()
+            .set_cursor(
+                truff_core::text::BytePos::ZERO,
+                truff_core::text::BytePos::new(4),
+            );
         assert!(!app.shell.editor_buffer().unwrap().is_dirty());
         assert!(app.recovery_deadline().is_none());
         app.execute_command(command).unwrap();
@@ -35,7 +46,10 @@ fn clean_buffer_command_edits_schedule_and_write_idle_recovery() {
         let snapshots = recovery.recover_all_latest_snapshots().unwrap();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].content, expected);
-        assert_eq!(std::fs::read_to_string(vault.join("note.md")).unwrap(), "word");
+        assert_eq!(
+            std::fs::read_to_string(vault.join("note.md")).unwrap(),
+            "word"
+        );
         app.shutdown().unwrap();
         drop(app);
         std::fs::remove_dir_all(vault).unwrap();

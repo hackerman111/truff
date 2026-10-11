@@ -381,7 +381,14 @@ impl Shell {
                 }
             }
         }
-        self.flash.activate_ranges(targets);
+        let candidates = targets
+            .into_iter()
+            .map(|range| {
+                let text = buffer.slice(range.clone()).to_string();
+                (range, text)
+            })
+            .collect::<Vec<_>>();
+        self.flash.activate_candidates(candidates);
         self.flash_kind = kind;
         Ok(())
     }

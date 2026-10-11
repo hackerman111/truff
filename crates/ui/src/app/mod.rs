@@ -1,5 +1,6 @@
 //! Application orchestration: one Shell/Workspace, storage jobs, and retained widgets.
 mod commands;
+pub mod global_config;
 mod io;
 mod navigation;
 mod registered;
@@ -18,7 +19,6 @@ use truff_store::session::SessionViewEntry;
 use truff_store::{Store, VaultPaths};
 
 use crate::shell::{Focus, Shell, ShellAction};
-
 
 pub type AppResult<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -107,7 +107,9 @@ impl Application {
         if let Some(store) = &mut self.store {
             store.set_event_waker(callback.clone());
         }
-        if let Some(catalog) = &self.catalog { catalog.set_event_waker(callback); }
+        if let Some(catalog) = &self.catalog {
+            catalog.set_event_waker(callback);
+        }
     }
 
     /// Deadline for a native timer; waking here submits an idle recovery checkpoint.
@@ -136,7 +138,9 @@ impl Application {
         self.watched_generation = None;
         let paths = store.paths().clone();
         let catalog = CatalogWorker::start(paths.clone())?;
-        if let Some(callback) = &self.storage_waker { catalog.set_event_waker(callback.clone()); }
+        if let Some(callback) = &self.storage_waker {
+            catalog.set_event_waker(callback.clone());
+        }
         self.shell = Shell::new();
         self.shell.set_focus(Focus::Sidebar);
         self.store = Some(store);
@@ -155,10 +159,28 @@ impl Application {
         self.pending_recovery.clear();
         self.recovery_deadline = None;
         self.quit_requested = false;
-        self.status = "Reading vault…".into();
         self.restore_session()?;
         self.refresh_watch_targets();
+        let mut config = global_config::GlobalConfig::load();
+        config.record_vault(&path);
         Ok(())
+    }
+
+    pub fn try_auto_open_saved_vault(&mut self) -> AppResult<bool> {
+        let config = global_config::GlobalConfig::load();
+        let Some(last_vault) = config.last_vault else {
+            return Ok(false);
+        };
+        if !last_vault.is_dir() {
+            return Ok(false);
+        }
+        match self.open_vault(&last_vault) {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                self.status = format!("Could not open saved vault: {e}");
+                Ok(false)
+            }
+        }
     }
 
     pub fn open_note(&mut self, path: &str) -> AppResult<()> {
@@ -207,7 +229,9 @@ impl Application {
         let result = match action {
             ShellAction::Core(action) => self.dispatch(action),
             ShellAction::Command(command) => self.execute_command(&command),
-            ShellAction::RegisteredCommand { id, argument } => self.registered_command(&id, &argument),
+            ShellAction::RegisteredCommand { id, argument } => {
+                self.registered_command(&id, &argument)
+            }
             ShellAction::SidebarSelectFile(path) => self.open_note(&path),
             ShellAction::SidebarDeleteFile(path) => self.trash(&path),
             ShellAction::Error(error) => Err(error.into()),

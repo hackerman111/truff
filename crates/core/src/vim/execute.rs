@@ -300,13 +300,12 @@ impl VimState {
         self.run_command(cmd, ctx)
     }
     pub fn run_command(&mut self, cmd: Command, ctx: InputContext<'_>) -> InputResult {
-        if let InputContext::Editor { buffer, view, .. } = &ctx {
-            if [view.anchor().get(), view.head().get()]
+        if let InputContext::Editor { buffer, view, .. } = &ctx
+            && [view.anchor().get(), view.head().get()]
                 .into_iter()
                 .any(|p| p > buffer.byte_len() || !buffer.is_char_boundary(p))
-            {
-                return self.error("Editor cursor is not a valid source boundary");
-            }
+        {
+            return self.error("Editor cursor is not a valid source boundary");
         }
         if !self.macro_stack.is_empty() {
             self.total_macro_steps += 1;

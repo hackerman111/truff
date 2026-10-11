@@ -203,17 +203,18 @@ impl FlashOverlay {
         Self::label_candidates(candidates)
     }
 
-    /// Syntax/semantic producers provide source ranges; labeling stays UI-owned.
-    pub fn activate_ranges(&mut self, ranges: impl IntoIterator<Item = std::ops::Range<usize>>) {
-        self.targets = Self::label_candidates(
-            ranges
-                .into_iter()
-                .take(100)
-                .map(|range| (range, String::new()))
-                .collect(),
-        );
+    pub fn activate_candidates(
+        &mut self,
+        candidates: impl IntoIterator<Item = (std::ops::Range<usize>, String)>,
+    ) {
+        self.targets = Self::label_candidates(candidates.into_iter().take(100).collect());
         self.query.clear();
         self.active = !self.targets.is_empty();
+    }
+
+    /// Syntax/semantic producers provide source ranges; labeling stays UI-owned.
+    pub fn activate_ranges(&mut self, ranges: impl IntoIterator<Item = std::ops::Range<usize>>) {
+        self.activate_candidates(ranges.into_iter().map(|r| (r, String::new())));
     }
     fn label_candidates(candidates: Vec<(std::ops::Range<usize>, String)>) -> Vec<FlashTarget> {
         let alphabet = Self::HOME_ROW_LETTERS;

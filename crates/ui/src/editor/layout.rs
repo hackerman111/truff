@@ -20,30 +20,63 @@ pub struct VirtualizedLayout {
     rebuild_count: usize,
 }
 
-impl Default for VirtualizedLayout { fn default() -> Self { Self::new(16.0) } }
+impl Default for VirtualizedLayout {
+    fn default() -> Self {
+        Self::new(16.0)
+    }
+}
 
 impl VirtualizedLayout {
     pub fn new(font_size: f32) -> Self {
-        Self { context: font_context(), font_size, cache: HashMap::new(), rebuild_count: 0 }
+        Self {
+            context: font_context(),
+            font_size,
+            cache: HashMap::new(),
+            rebuild_count: 0,
+        }
     }
-    pub fn rebuild_count(&self) -> usize { self.rebuild_count }
-    pub fn clear_cache(&mut self) { self.cache.clear(); }
+    pub fn rebuild_count(&self) -> usize {
+        self.rebuild_count
+    }
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
     pub fn layout_visible_window(
-        &mut self, text: &str, heights: &mut HeightIndex, top: f32,
-        height: f32, width: Option<f32>, mut anchor: Option<&mut ScrollAnchor>,
+        &mut self,
+        text: &str,
+        heights: &mut HeightIndex,
+        top: f32,
+        height: f32,
+        width: Option<f32>,
+        mut anchor: Option<&mut ScrollAnchor>,
     ) -> Vec<usize> {
-        if heights.block_count() == 0 { return Vec::new(); }
+        if heights.block_count() == 0 {
+            return Vec::new();
+        }
         let (first, _) = heights.block_at_y((top - height).max(0.0));
         let (last, _) = heights.block_at_y(top + height * 2.0);
         let key = width.map_or(0, f32::to_bits);
-        self.cache.retain(|index, _| *index >= first && *index <= last);
+        self.cache
+            .retain(|index, _| *index >= first && *index <= last);
         for index in first..=last {
             let block = &heights.blocks()[index];
-            if self.cache.get(&index).is_some_and(|(revision, old_width, _)| *revision == block.revision && *old_width == key) { continue; }
+            if self
+                .cache
+                .get(&index)
+                .is_some_and(|(revision, old_width, _)| {
+                    *revision == block.revision && *old_width == key
+                })
+            {
+                continue;
+            }
             let source = text.get(block.source_range.clone()).unwrap_or("");
             let galley = shape(&self.context, source, self.font_size, width);
             let revision = block.revision;
-            heights.update_block_height(index, galley.size().y.max(self.font_size), anchor.as_deref_mut());
+            heights.update_block_height(
+                index,
+                galley.size().y.max(self.font_size),
+                anchor.as_deref_mut(),
+            );
             self.cache.insert(index, (revision, key, galley));
             self.rebuild_count += 1;
         }
@@ -60,34 +93,64 @@ pub struct EditorLayout {
     galley: std::sync::Arc<eframe::egui::Galley>,
     font_size: f32,
 }
-impl Default for EditorLayout { fn default() -> Self { Self::new(16.0) } }
+impl Default for EditorLayout {
+    fn default() -> Self {
+        Self::new(16.0)
+    }
+}
 impl EditorLayout {
     pub fn new(font_size: f32) -> Self {
         let context = font_context();
         let galley = shape(&context, "", font_size, None);
-        Self { context, galley, font_size }
+        Self {
+            context,
+            galley,
+            font_size,
+        }
     }
     pub fn compute(&mut self, text: &str, width: Option<f32>) {
         self.galley = shape(&self.context, text, self.font_size, width);
     }
-    pub fn height(&self) -> f32 { self.galley.size().y }
-    pub fn width(&self) -> f32 { self.galley.size().x }
-    pub fn galley(&self) -> &std::sync::Arc<eframe::egui::Galley> { &self.galley }
+    pub fn height(&self) -> f32 {
+        self.galley.size().y
+    }
+    pub fn width(&self) -> f32 {
+        self.galley.size().x
+    }
+    pub fn galley(&self) -> &std::sync::Arc<eframe::egui::Galley> {
+        &self.galley
+    }
     pub fn hit_test(&self, text: &str, x: f32, y: f32) -> usize {
-        let index = self.galley.cursor_from_pos(eframe::egui::vec2(x, y)).index.0;
-        let byte = text.char_indices().nth(index).map_or(text.len(), |(byte, _)| byte);
+        let index = self
+            .galley
+            .cursor_from_pos(eframe::egui::vec2(x, y))
+            .index
+            .0;
+        let byte = text
+            .char_indices()
+            .nth(index)
+            .map_or(text.len(), |(byte, _)| byte);
         snap_to_grapheme_boundary(text, byte)
     }
 }
 fn font_context() -> eframe::egui::Context {
     let context = eframe::egui::Context::default();
-    context.run_ui(Default::default(), |_| {}).drop_without_applying_deltas();
+    context
+        .run_ui(Default::default(), |_| {})
+        .drop_without_applying_deltas();
     context
 }
-fn shape(context: &eframe::egui::Context, text: &str, size: f32, width: Option<f32>) -> std::sync::Arc<eframe::egui::Galley> {
+fn shape(
+    context: &eframe::egui::Context,
+    text: &str,
+    size: f32,
+    width: Option<f32>,
+) -> std::sync::Arc<eframe::egui::Galley> {
     let mut job = eframe::egui::text::LayoutJob::simple(
-        text.to_owned(), eframe::egui::FontId::monospace(size),
-        eframe::egui::Color32::WHITE, width.filter(|width| *width > 0.0).unwrap_or(f32::INFINITY),
+        text.to_owned(),
+        eframe::egui::FontId::monospace(size),
+        eframe::egui::Color32::WHITE,
+        width.filter(|width| *width > 0.0).unwrap_or(f32::INFINITY),
     );
     job.break_on_newline = true;
     context.fonts_mut(|fonts| fonts.layout_job(job))

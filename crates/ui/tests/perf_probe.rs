@@ -58,7 +58,9 @@ fn test_probe_1mib_performance_baseline() {
     // 4. 500 sequential edits
     let t3 = Instant::now();
     for i in 0..500 {
-        probe.handle_input(EditorInput::InsertText(format!("{i} "))).unwrap();
+        probe
+            .handle_input(EditorInput::InsertText(format!("{i} ")))
+            .unwrap();
     }
     let edits_duration = t3.elapsed();
     let avg_edit_us = edits_duration.as_micros() as f64 / 500.0;
