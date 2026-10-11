@@ -80,6 +80,7 @@ pub struct Shell {
     editor_vim: VimState,
     which_key: WhichKeyOverlay,
     theme: Theme,
+    typography: crate::app::global_config::TypographyConfig,
     pending_prefix: Option<Key>,
 }
 
@@ -123,6 +124,7 @@ impl Shell {
             editor_vim: VimState::new(),
             which_key: WhichKeyOverlay::new(),
             theme: Theme::default(),
+            typography: crate::app::global_config::TypographyConfig::default(),
             pending_prefix: None,
         }
     }
@@ -135,6 +137,14 @@ impl Shell {
     /// Updates the visual theme without touching buffer contents or syntax structures.
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
+    }
+
+    pub fn typography(&self) -> &crate::app::global_config::TypographyConfig {
+        &self.typography
+    }
+
+    pub fn set_typography(&mut self, typography: crate::app::global_config::TypographyConfig) {
+        self.typography = typography;
     }
 
     /// Access the WhichKey overlay controller.

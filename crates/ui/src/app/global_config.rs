@@ -14,7 +14,42 @@ fn default_theme() -> String {
     "nord".to_string()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn default_font_family() -> String {
+    "monospace".to_string()
+}
+
+fn default_base_font_size() -> f32 {
+    15.0
+}
+
+fn default_line_height_multiplier() -> f32 {
+    1.5
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TypographyConfig {
+    #[serde(default = "default_font_family")]
+    pub font_family: String,
+    #[serde(default = "default_base_font_size")]
+    pub base_font_size: f32,
+    #[serde(default = "default_line_height_multiplier")]
+    pub line_height_multiplier: f32,
+    #[serde(default)]
+    pub custom_font_path: Option<PathBuf>,
+}
+
+impl Default for TypographyConfig {
+    fn default() -> Self {
+        Self {
+            font_family: default_font_family(),
+            base_font_size: default_base_font_size(),
+            line_height_multiplier: default_line_height_multiplier(),
+            custom_font_path: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub last_vault: Option<PathBuf>,
     #[serde(default)]
@@ -23,6 +58,8 @@ pub struct GlobalConfig {
     pub theme: String,
     #[serde(default)]
     pub themes: BTreeMap<String, CustomThemeConfig>,
+    #[serde(default)]
+    pub typography: TypographyConfig,
 }
 
 impl Default for GlobalConfig {
@@ -32,6 +69,7 @@ impl Default for GlobalConfig {
             recent_vaults: Vec::new(),
             theme: default_theme(),
             themes: BTreeMap::new(),
+            typography: TypographyConfig::default(),
         }
     }
 }

@@ -62,6 +62,7 @@ impl Application {
         let mut shell = Shell::new();
         let config = global_config::GlobalConfig::load();
         shell.set_theme(config.resolve_theme());
+        shell.set_typography(config.typography.clone());
         Self {
             shell,
             status: "Open a vault with :vault <path>".into(),

@@ -154,3 +154,25 @@ fn test_remove_recent_vault() {
     assert_eq!(config.recent_vaults, vec![p1.clone()]);
     assert_eq!(config.last_vault, Some(p1));
 }
+
+#[test]
+fn typography_config_defaults_and_parsing() {
+    let toml_str = r#"
+        theme = "nord"
+        [typography]
+        font_family = "monospace"
+        base_font_size = 18.0
+        line_height_multiplier = 1.6
+    "#;
+    let config: truff_ui::app::global_config::GlobalConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(config.typography.font_family, "monospace");
+    assert_eq!(config.typography.base_font_size, 18.0);
+    assert_eq!(config.typography.line_height_multiplier, 1.6);
+    assert_eq!(config.typography.custom_font_path, None);
+
+    let default_config = truff_ui::app::global_config::GlobalConfig::default();
+    assert_eq!(default_config.typography.font_family, "monospace");
+    assert_eq!(default_config.typography.base_font_size, 15.0);
+    assert_eq!(default_config.typography.line_height_multiplier, 1.5);
+    assert_eq!(default_config.typography.custom_font_path, None);
+}
