@@ -73,12 +73,18 @@ impl NativeApp {
         egui::Panel::top("tabs")
             .frame(
                 egui::Frame::new()
-                    .fill(color(theme.bg_secondary))
+                    .fill(color(crate::theme::Color::from_hex("#20242c").unwrap()))
                     .stroke(egui::Stroke::new(1.0, color(theme.border)))
-                    .inner_margin(egui::Margin::symmetric(8, 2)),
+                    .inner_margin(egui::Margin {
+                        left: 8,
+                        right: 8,
+                        top: 2,
+                        bottom: 0,
+                    }),
             )
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
                     let active_view_id = self.application.shell.workspace().active_view();
                     let mut views: Vec<_> = self
                         .application
@@ -147,10 +153,11 @@ impl NativeApp {
                                     sw: 0,
                                     se: 0,
                                 })
-                                .inner_margin(egui::Margin::symmetric(10, 4));
+                                .inner_margin(egui::Margin::symmetric(10, 5));
 
-                            frame.show(ui, |ui| {
+                            let frame_resp = frame.show(ui, |ui| {
                                 ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 6.0;
                                     let glyph = if is_active { "📄 " } else { " " };
                                     let rich = egui::RichText::new(format!("{glyph}{title}"))
                                         .size(12.5)
@@ -159,19 +166,36 @@ impl NativeApp {
                                     if resp.clicked() {
                                         switch_view = Some(view_id);
                                     }
-                                    if is_dirty {
+
+                                    let is_hovered = ui.rect_contains_pointer(resp.rect)
+                                        || resp.hovered();
+
+                                    if is_hovered {
+                                        if ui.small_button("×").on_hover_text("Close buffer").clicked() {
+                                            close_view = Some(view_id);
+                                        }
+                                    } else if is_dirty {
                                         ui.label(
                                             egui::RichText::new("●")
                                                 .size(10.0)
                                                 .color(color(theme.accent)),
                                         );
-                                    }
-                                    if ui.small_button("×").on_hover_text("Close buffer").clicked()
-                                    {
-                                        close_view = Some(view_id);
+                                    } else {
+                                        ui.add_space(8.0);
                                     }
                                 });
                             });
+
+                            if is_active {
+                                let rect = frame_resp.response.rect;
+                                ui.painter().line_segment(
+                                    [
+                                        egui::pos2(rect.left(), rect.bottom()),
+                                        egui::pos2(rect.right(), rect.bottom()),
+                                    ],
+                                    egui::Stroke::new(2.0, color(theme.accent)),
+                                );
+                            }
                         }
                     }
 

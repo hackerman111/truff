@@ -387,3 +387,14 @@ fn test_tab_bar_renders_open_buffers_and_switches_active() {
         Some(view2)
     );
 }
+
+#[test]
+fn test_tab_close_button_hover() {
+    let app = Application::new();
+    let (mut root, ()) = window(app);
+    // Draw without pointer hover - tabs render without panic
+    root.redraw();
+    // Simulate pointer hover over tab area
+    root.event(egui::Event::PointerMoved(egui::pos2(50.0, 15.0)));
+    root.redraw();
+}
