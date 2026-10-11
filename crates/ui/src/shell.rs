@@ -1074,8 +1074,10 @@ impl TreeNode {
             return;
         }
         if parts.len() == 1 {
-            self.children
-                .push(TreeNode::new_file(parts[0].to_string(), full_path.to_string()));
+            self.children.push(TreeNode::new_file(
+                parts[0].to_string(),
+                full_path.to_string(),
+            ));
         } else {
             let dir_name = parts[0];
             if let Some(pos) = self
@@ -1131,7 +1133,7 @@ fn build_tree_items(files: &[String]) -> Vec<RowItem> {
     let mut root = TreeNode::new_dir(String::new());
     for file in files {
         let parts: Vec<&str> = file
-            .split(|c| c == '/' || c == '\\')
+            .split(['/', '\\'])
             .filter(|p| !p.is_empty())
             .collect();
         root.insert(&parts, file);

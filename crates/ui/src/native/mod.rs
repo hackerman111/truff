@@ -8,6 +8,7 @@ use crate::shell::Focus;
 pub use editor::EditorWidget;
 use editor::color;
 use eframe::egui;
+pub use paint::resolve_font_and_line_height;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -79,8 +80,13 @@ impl NativeApp {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let active_view_id = self.application.shell.workspace().active_view();
-                    let mut views: Vec<_> =
-                        self.application.shell.workspace().views().values().collect();
+                    let mut views: Vec<_> = self
+                        .application
+                        .shell
+                        .workspace()
+                        .views()
+                        .values()
+                        .collect();
                     views.sort_by_key(|v| v.id().get());
 
                     let mut switch_view = None;
@@ -160,10 +166,7 @@ impl NativeApp {
                                                 .color(color(theme.accent)),
                                         );
                                     }
-                                    if ui
-                                        .small_button("×")
-                                        .on_hover_text("Close buffer")
-                                        .clicked()
+                                    if ui.small_button("×").on_hover_text("Close buffer").clicked()
                                     {
                                         close_view = Some(view_id);
                                     }
@@ -173,7 +176,10 @@ impl NativeApp {
                     }
 
                     if let Some(id) = switch_view {
-                        self.application.shell.workspace_mut().set_active_view(Some(id));
+                        self.application
+                            .shell
+                            .workspace_mut()
+                            .set_active_view(Some(id));
                         self.application.shell.reset_editor_input();
                     }
                     if let Some(id) = close_view {
@@ -246,7 +252,8 @@ impl NativeApp {
                                     .color(color(theme.text_muted)),
                             );
                             ui.add_space(8.0);
-                            let cursor_str = if let Some(view) = self.application.shell.editor_view()
+                            let cursor_str = if let Some(view) =
+                                self.application.shell.editor_view()
                                 && let Some(buffer) = self.application.shell.editor_buffer()
                             {
                                 let head = view.head().get().min(buffer.byte_len());
@@ -333,7 +340,11 @@ impl NativeApp {
                                 let indent = (row.depth as f32) * 14.0;
                                 let is_selected = index == selected;
                                 let glyph = if row.is_folder {
-                                    if row.is_collapsed { "▸ 📁 " } else { "▾ 📁 " }
+                                    if row.is_collapsed {
+                                        "▸ 📁 "
+                                    } else {
+                                        "▾ 📁 "
+                                    }
                                 } else {
                                     "  📄 "
                                 };
@@ -361,7 +372,10 @@ impl NativeApp {
                         }
                     });
                     if let Some(id) = toggle_folder {
-                        self.application.shell.sidebar_model_mut().toggle_collapse(id);
+                        self.application
+                            .shell
+                            .sidebar_model_mut()
+                            .toggle_collapse(id);
                     }
                     if let Some(path) = open
                         && let Err(error) = self.application.open_note(&path)

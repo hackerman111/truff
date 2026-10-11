@@ -230,13 +230,41 @@ fn live_preview_projects_color_wrappers_and_keeps_code_literal() {
 #[test]
 fn test_editor_readable_column_and_margin() {
     let available_width = 1200.0;
-    let (content_width, margin_x) = truff_ui::native::EditorWidget::calculate_column_metrics(available_width);
+    let (content_width, margin_x) =
+        truff_ui::native::EditorWidget::calculate_column_metrics(available_width);
     assert_eq!(content_width, 780.0);
     assert_eq!(margin_x, (1200.0 - 780.0) / 2.0);
 
     // Narrow window clamps to available_width - 48
     let narrow_width = 600.0;
-    let (content_width_narrow, margin_x_narrow) = truff_ui::native::EditorWidget::calculate_column_metrics(narrow_width);
+    let (content_width_narrow, margin_x_narrow) =
+        truff_ui::native::EditorWidget::calculate_column_metrics(narrow_width);
     assert_eq!(content_width_narrow, 600.0 - 48.0);
     assert_eq!(margin_x_narrow, 24.0);
+}
+
+#[test]
+fn test_typography_hierarchy_scale() {
+    use eframe::egui::FontId;
+    use truff_ui::native::resolve_font_and_line_height;
+
+    let (f_h1, lh_h1) = resolve_font_and_line_height("# Heading 1");
+    assert_eq!(f_h1, FontId::proportional(28.0));
+    assert_eq!(lh_h1, 36.0);
+
+    let (f_h2, lh_h2) = resolve_font_and_line_height("## Heading 2");
+    assert_eq!(f_h2, FontId::proportional(22.0));
+    assert_eq!(lh_h2, 30.0);
+
+    let (f_h3, lh_h3) = resolve_font_and_line_height("### Heading 3");
+    assert_eq!(f_h3, FontId::proportional(18.0));
+    assert_eq!(lh_h3, 26.0);
+
+    let (f_code, lh_code) = resolve_font_and_line_height("```rust");
+    assert_eq!(f_code, FontId::monospace(13.5));
+    assert_eq!(lh_code, 20.0);
+
+    let (f_body, lh_body) = resolve_font_and_line_height("Regular markdown text");
+    assert_eq!(f_body, FontId::proportional(15.5));
+    assert_eq!(lh_body, 24.0);
 }

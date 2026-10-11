@@ -3,24 +3,29 @@ use eframe::egui::{self, Color32, FontId, Galley, Painter};
 use std::sync::Arc;
 use truff_core::text::BytePos;
 
+/// Resolves font family, size and line height according to Truff design specification.
+pub fn resolve_font_and_line_height(source: &str) -> (FontId, f32) {
+    let source_trim = source.trim_start();
+    if source_trim.starts_with("# ") {
+        (FontId::proportional(28.0), 36.0)
+    } else if source_trim.starts_with("## ") {
+        (FontId::proportional(22.0), 30.0)
+    } else if source_trim.starts_with("### ") {
+        (FontId::proportional(18.0), 26.0)
+    } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
+        (FontId::monospace(13.5), 20.0)
+    } else {
+        (FontId::proportional(15.5), 24.0)
+    }
+}
+
 pub(super) fn shape(
     painter: &Painter,
     display: &DisplayMap,
     foreground: Color32,
     width: f32,
 ) -> Arc<Galley> {
-    let source_trim = display.source_text().trim_start();
-    let (font, line_height) = if source_trim.starts_with("# ") {
-        (FontId::proportional(22.0), 32.0)
-    } else if source_trim.starts_with("## ") {
-        (FontId::proportional(18.5), 28.0)
-    } else if source_trim.starts_with("### ") {
-        (FontId::proportional(16.5), 25.0)
-    } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
-        (FontId::monospace(14.0), 22.0)
-    } else {
-        (FontId::proportional(15.0), 24.0)
-    };
+    let (font, line_height) = resolve_font_and_line_height(display.source_text());
 
     let mut job =
         egui::text::LayoutJob::simple(display.visual_text().to_owned(), font, foreground, width);
