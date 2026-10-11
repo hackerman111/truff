@@ -91,6 +91,9 @@ impl NativeApp {
     }
 
     pub(super) fn events(&mut self, context: &egui::Context) {
+        if self.dialogs.is_any_open() || context.egui_wants_keyboard_input() {
+            return;
+        }
         // Text events are authoritative for printable characters; OS Key events would duplicate them.
         let events = context.input(|input| input.events.clone());
         for event in events {

@@ -13,6 +13,12 @@ pub fn resolve_font_and_line_height(source: &str) -> (FontId, f32) {
         (FontId::proportional(22.0), 30.0)
     } else if source_trim.starts_with("### ") {
         (FontId::proportional(18.0), 26.0)
+    } else if source_trim.starts_with("#### ") {
+        (FontId::proportional(16.0), 24.0)
+    } else if source_trim.starts_with("##### ") {
+        (FontId::proportional(15.0), 22.0)
+    } else if source_trim.starts_with("###### ") {
+        (FontId::proportional(14.0), 20.0)
     } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
         (FontId::monospace(13.5), 20.0)
     } else {

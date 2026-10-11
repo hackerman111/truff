@@ -170,3 +170,91 @@ fn test_zed_component_widgets() {
     });
     output.textures_delta.clear();
 }
+
+#[test]
+fn test_dialog_open_suppresses_flash_shortcut() {
+    let (mut app, context) = scratch("some test text for flash jumping\n");
+    // Ensure in Normal mode
+    assert_eq!(app.application.shell.mode(), truff_core::vim::Mode::Normal);
+
+    // Open folder creation dialog
+    app.dialogs.folder.open = true;
+
+    // Type 's'
+    frame(&mut app, &context, vec![Event::Text("s".into())]);
+
+    // Flash must NOT be active because dialog is open
+    assert!(
+        !app.application.shell.flash().is_active(),
+        "Typing 's' while folder dialog is open must not activate flash"
+    );
+
+    // Now close folder dialog
+    app.dialogs.folder.open = false;
+
+    // Type 's' in normal mode
+    frame(&mut app, &context, vec![Event::Text("s".into())]);
+
+    // Flash should activate now
+    assert!(
+        app.application.shell.flash().is_active(),
+        "Typing 's' in Normal mode with no dialog open should activate flash"
+    );
+}
+
+#[test]
+fn test_visual_mode_character_and_line_highlighting_dimensions() {
+    // 1. Heading line: "# Heading"
+    let (mut app, context) = scratch("# Heading\nregular text line\n");
+    frame(&mut app, &context, vec![]);
+
+    // In normal mode at the start of heading, cursor rect should have heading line height (36.0)
+    // and glyph width (not fixed 8.5)
+    let heading_cursor = app
+        .editor
+        .cursor_rect()
+        .expect("cursor rect must be present");
+    assert_eq!(
+        heading_cursor.height(),
+        36.0,
+        "Heading highlight must use the tallest character height (36.0)"
+    );
+    assert!(
+        heading_cursor.width() > 10.0,
+        "Heading character width must match glyph advance width (> 10.0), not fixed 8.5: got {}",
+        heading_cursor.width()
+    );
+
+    // Enter VisualChar mode with 'v'
+    frame(&mut app, &context, vec![Event::Text("v".into())]);
+    assert_eq!(
+        app.application.shell.mode(),
+        truff_core::vim::Mode::VisualChar
+    );
+
+    let visual_cursor = app
+        .editor
+        .cursor_rect()
+        .expect("cursor rect in visual mode");
+    assert_eq!(
+        visual_cursor.height(),
+        36.0,
+        "In visual mode, heading character highlight height must be 36.0"
+    );
+    assert!(
+        visual_cursor.width() > 10.0,
+        "In visual mode, heading character highlight width must not be fixed 8.5"
+    );
+
+    // Move to line 2 (regular text)
+    frame(&mut app, &context, vec![Event::Text("j".into())]);
+    let regular_cursor = app
+        .editor
+        .cursor_rect()
+        .expect("cursor rect on regular line");
+    assert_eq!(
+        regular_cursor.height(),
+        24.0,
+        "Regular line character highlight must have standard line height 24.0"
+    );
+}

@@ -57,8 +57,11 @@ fn test_roundtrip_toml() {
     assert_eq!(config, loaded);
 }
 
+static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn test_app_auto_opens_saved_vault() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let tmp = std::env::temp_dir().join(format!("truff-test-autoopen-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let config_dir = tmp.join("config");
@@ -89,11 +92,15 @@ fn test_app_auto_opens_saved_vault() {
     assert!(app.status.contains("Saved vaults:"));
 
     let _ = app.shutdown();
+    unsafe {
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[test]
 fn test_create_and_open_vault() {
+    let _guard = TEST_MUTEX.lock().unwrap();
     let tmp = std::env::temp_dir().join(format!("truff-test-create-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let target_vault = tmp.join("new_created_vault");
@@ -111,4 +118,39 @@ fn test_create_and_open_vault() {
 
     let _ = app.shutdown();
     let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_prune_nonexistent_removes_dead_vaults() {
+    let tmp = std::env::temp_dir().join(format!("truff-test-prune-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    let existing = tmp.join("existing_vault");
+    std::fs::create_dir_all(&existing).unwrap();
+    let dead = tmp.join("dead_vault"); // never created
+
+    let mut config = GlobalConfig::default();
+    config.add_recent_vault(existing.clone());
+    config.add_recent_vault(dead.clone());
+    assert_eq!(config.recent_vaults.len(), 2);
+    assert_eq!(config.last_vault, Some(dead.clone()));
+
+    let changed = config.prune_nonexistent();
+    assert!(changed);
+    assert_eq!(config.recent_vaults, vec![existing.clone()]);
+    assert_eq!(config.last_vault, Some(existing.clone()));
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_remove_recent_vault() {
+    let mut config = GlobalConfig::default();
+    let p1 = PathBuf::from("/tmp/vault_a");
+    let p2 = PathBuf::from("/tmp/vault_b");
+    config.add_recent_vault(p1.clone());
+    config.add_recent_vault(p2.clone());
+
+    config.remove_recent_vault(&p2);
+    assert_eq!(config.recent_vaults, vec![p1.clone()]);
+    assert_eq!(config.last_vault, Some(p1));
 }

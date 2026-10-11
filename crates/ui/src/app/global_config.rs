@@ -73,7 +73,30 @@ impl GlobalConfig {
         let Ok(contents) = fs::read_to_string(&path) else {
             return Self::default();
         };
-        toml::from_str(&contents).unwrap_or_default()
+        let mut config: Self = toml::from_str(&contents).unwrap_or_default();
+        if config.prune_nonexistent() {
+            let _ = config.save();
+        }
+        config
+    }
+
+    /// Prunes non-existent directory paths from recent vaults and last_vault.
+    pub fn prune_nonexistent(&mut self) -> bool {
+        let prev_len = self.recent_vaults.len();
+        self.recent_vaults.retain(|p| p.is_dir());
+        let last_vault_removed = self.last_vault.as_ref().is_some_and(|p| !p.is_dir());
+        if last_vault_removed {
+            self.last_vault = self.recent_vaults.first().cloned();
+        }
+        prev_len != self.recent_vaults.len() || last_vault_removed
+    }
+
+    /// Removes a specific vault path from recent vaults.
+    pub fn remove_recent_vault(&mut self, path: &Path) {
+        self.recent_vaults.retain(|p| p != path);
+        if self.last_vault.as_deref() == Some(path) {
+            self.last_vault = self.recent_vaults.first().cloned();
+        }
     }
 
     /// Saves the global configuration atomically to `config.toml`.
@@ -124,6 +147,14 @@ impl GlobalConfig {
     /// Records a vault opening and persists the global configuration.
     pub fn record_vault(&mut self, path: &Path) {
         let path_buf = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if !path_buf.is_dir() {
+            return;
+        }
+        let is_temp = path_buf.starts_with(std::env::temp_dir());
+        let has_custom_config = std::env::var_os("XDG_CONFIG_HOME").is_some();
+        if is_temp && !has_custom_config {
+            return;
+        }
         self.add_recent_vault(path_buf);
         let _ = self.save();
     }

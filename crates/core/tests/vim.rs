@@ -274,3 +274,55 @@ fn colon_commands_protect_dirty_buffers() {
         Some("No write since last change (use ! to override)")
     );
 }
+
+#[test]
+fn visual_mode_delete_lines_with_uppercase_x() {
+    let (mut buffer, mut view) = setup_editor("line 1\nline 2\nline 3\n");
+    let mut vim = VimState::new();
+
+    // In VisualChar mode: select some characters on line 2, then press 'X'
+    // Should delete the whole line 2 (linewise)
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[
+            Key::Char('j'), // move to line 2
+            Key::Char('v'), // enter VisualChar
+            Key::Char('w'), // select a word
+            Key::Char('X'), // delete line(s)
+        ],
+    );
+    assert_eq!(buffer.as_str(), "line 1\nline 3\n");
+    assert_eq!(vim.mode, Mode::Normal);
+
+    // In VisualLine mode: select line 1, press 'X'
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[
+            Key::Char('k'), // move to line 1
+            Key::Char('V'), // enter VisualLine
+            Key::Char('X'), // delete line
+        ],
+    );
+    assert_eq!(buffer.as_str(), "line 3\n");
+    assert_eq!(vim.mode, Mode::Normal);
+}
+
+#[test]
+fn visual_mode_delete_selection_with_lowercase_x() {
+    let (mut buffer, mut view) = setup_editor("hello world\n");
+    let mut vim = VimState::new();
+
+    // Select "hello " in VisualChar, then press 'x'
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char('v'), Key::Char('e'), Key::Char('x')],
+    );
+    assert_eq!(buffer.as_str(), " world\n");
+    assert_eq!(vim.mode, Mode::Normal);
+}
