@@ -181,11 +181,15 @@ impl NativeApp {
                                         switch_view = Some(view_id);
                                     }
 
-                                    let is_hovered = ui.rect_contains_pointer(resp.rect)
-                                        || resp.hovered();
+                                    let is_hovered =
+                                        ui.rect_contains_pointer(resp.rect) || resp.hovered();
 
                                     if is_hovered {
-                                        if ui.small_button("×").on_hover_text("Close buffer").clicked() {
+                                        if ui
+                                            .small_button("×")
+                                            .on_hover_text("Close buffer")
+                                            .clicked()
+                                        {
                                             close_view = Some(view_id);
                                         }
                                     } else if is_dirty {
@@ -405,8 +409,8 @@ impl NativeApp {
                             if let Some(row) = model.get_visible_row(index) {
                                 let indent = (row.depth as f32) * 16.0;
                                 let is_selected = index == selected;
-                                let is_active = !row.is_folder
-                                    && row.data.as_deref() == active_file.as_deref();
+                                let is_active =
+                                    !row.is_folder && row.data.as_deref() == active_file.as_deref();
                                 let is_dirty = row
                                     .data
                                     .as_deref()

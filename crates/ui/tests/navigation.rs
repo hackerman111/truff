@@ -365,8 +365,7 @@ fn test_sidebar_hierarchical_folders_and_auto_expansion() {
 #[test]
 fn test_active_vs_selected_file_state() {
     let mut app = truff_ui::app::Application::new();
-    let target =
-        std::env::temp_dir().join(format!("truff_tree_state_test_{}", std::process::id()));
+    let target = std::env::temp_dir().join(format!("truff_tree_state_test_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&target);
     std::fs::create_dir_all(&target).unwrap();
     std::fs::write(target.join("file1.md"), "# File 1").unwrap();

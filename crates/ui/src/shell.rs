@@ -1132,10 +1132,7 @@ impl TreeNode {
 fn build_tree_items(files: &[String]) -> Vec<RowItem> {
     let mut root = TreeNode::new_dir(String::new());
     for file in files {
-        let parts: Vec<&str> = file
-            .split(['/', '\\'])
-            .filter(|p| !p.is_empty())
-            .collect();
+        let parts: Vec<&str> = file.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
         root.insert(&parts, file);
     }
     root.sort();

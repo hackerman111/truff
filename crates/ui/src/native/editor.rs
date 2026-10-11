@@ -44,9 +44,11 @@ pub fn color(value: Color) -> Color32 {
 }
 
 impl EditorWidget {
+    pub const TOP_MARGIN: f32 = 48.0;
+
     /// Calculates the constrained readable column width and centered horizontal margin.
     pub fn calculate_column_metrics(available_width: f32) -> (f32, f32) {
-        let content_width = (available_width - 48.0).clamp(320.0, 780.0);
+        let content_width = (available_width - 48.0).clamp(320.0, 720.0);
         let margin_x = ((available_width - content_width) / 2.0).max(24.0);
         (content_width, margin_x)
     }
@@ -351,7 +353,7 @@ impl EditorWidget {
             let origin = rect.left_top()
                 + Vec2::new(
                     margin_x - if long { self.horizontal } else { 0.0 },
-                    self.heights.y_for_block(line) - self.scroll,
+                    Self::TOP_MARGIN + self.heights.y_for_block(line) - self.scroll,
                 );
             let caret_at = |source: usize| {
                 let visual = entry
