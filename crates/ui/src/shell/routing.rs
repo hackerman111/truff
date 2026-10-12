@@ -144,6 +144,82 @@ impl Shell {
             self.which_key.hide();
             return ShellAction::Incomplete;
         }
+        if key == Key::Ctrl('p')
+            && self.mode() == Mode::Normal
+            && self.command.is_none()
+            && self.search_query().is_none()
+        {
+            return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Commands);
+        }
+        if let Some(Key::Char(' ')) = self.pending_prefix {
+            self.pending_prefix = None;
+            self.which_key.hide();
+            match key {
+                Key::Char('f') => {
+                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Files);
+                }
+                Key::Char('s') => {
+                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Sessions);
+                }
+                Key::Char('c') => {
+                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Commands);
+                }
+                Key::Char('b') => {
+                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Boards);
+                }
+                Key::Char('o') => {
+                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Outline);
+                }
+                Key::Char('l') => {
+                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Links);
+                }
+                Key::Esc => return ShellAction::Incomplete,
+                _ => {}
+            }
+        }
+        if key == Key::Char(' ')
+            && self.mode() == Mode::Normal
+            && self.command.is_none()
+            && self.search_query().is_none()
+        {
+            self.pending_prefix = Some(Key::Char(' '));
+            self.which_key.set_prefix_hints_with_title(
+                "<Space> Навигатор",
+                vec![
+                    truff_core::config::KeyHint {
+                        key: Key::Char('f'),
+                        description: "Файлы и папки".into(),
+                        is_prefix: false,
+                    },
+                    truff_core::config::KeyHint {
+                        key: Key::Char('s'),
+                        description: "Сессии и вкладки".into(),
+                        is_prefix: false,
+                    },
+                    truff_core::config::KeyHint {
+                        key: Key::Char('c'),
+                        description: "Все команды".into(),
+                        is_prefix: false,
+                    },
+                    truff_core::config::KeyHint {
+                        key: Key::Char('b'),
+                        description: "Kanban и задачи".into(),
+                        is_prefix: false,
+                    },
+                    truff_core::config::KeyHint {
+                        key: Key::Char('o'),
+                        description: "Структура (Outline)".into(),
+                        is_prefix: false,
+                    },
+                    truff_core::config::KeyHint {
+                        key: Key::Char('l'),
+                        description: "Ссылки (Backlinks)".into(),
+                        is_prefix: false,
+                    },
+                ],
+            );
+            return ShellAction::Incomplete;
+        }
         // 1. Handle pane navigation prefixes (<C-w>h / <C-w>l / <C-w>w)
         if let Some(Key::Ctrl('w')) = self.pending_prefix {
             self.pending_prefix = None;
@@ -160,6 +236,7 @@ impl Shell {
                             }
                         }
                         Focus::Sidebar => Focus::Sidebar,
+                        _ => Focus::Editor,
                     };
                     self.set_focus(next);
                     return ShellAction::FocusChanged(self.focus);
@@ -175,6 +252,7 @@ impl Shell {
                             }
                         }
                         Focus::RightPanel => Focus::RightPanel,
+                        _ => Focus::Editor,
                     };
                     self.set_focus(next);
                     return ShellAction::FocusChanged(self.focus);
@@ -198,6 +276,7 @@ impl Shell {
                                 Focus::Editor
                             }
                         }
+                        _ => Focus::Editor,
                     };
                     self.set_focus(next);
                     return ShellAction::FocusChanged(self.focus);
@@ -216,17 +295,17 @@ impl Shell {
                 vec![
                     truff_core::config::KeyHint {
                         key: Key::Char('h'),
-                        description: "Focus left pane".into(),
+                        description: "Левая панель (дерево)".into(),
                         is_prefix: false,
                     },
                     truff_core::config::KeyHint {
                         key: Key::Char('l'),
-                        description: "Focus right pane".into(),
+                        description: "Правая панель (backlinks)".into(),
                         is_prefix: false,
                     },
                     truff_core::config::KeyHint {
                         key: Key::Char('w'),
-                        description: "Cycle pane".into(),
+                        description: "Сменить панель".into(),
                         is_prefix: false,
                     },
                 ],
@@ -388,6 +467,13 @@ impl Shell {
                     InputResult::Ignored => ShellAction::Ignored,
                     _ => ShellAction::Incomplete,
                 }
+            }
+            Focus::Navigator | Focus::CommandBar => {
+                if key == Key::Esc {
+                    let prev = self.pop_focus();
+                    return ShellAction::FocusChanged(prev);
+                }
+                ShellAction::Incomplete
             }
         }
     }

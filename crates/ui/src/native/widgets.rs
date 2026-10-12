@@ -9,25 +9,20 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
 
     let is_hovered = resp.hovered();
     let is_pressed = resp.is_pointer_button_down_on();
+    let visuals = ui.visuals();
 
     if is_pressed {
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(5),
-            egui::Color32::from_rgb(0x2D, 0x33, 0x3F),
-        );
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(5), visuals.widgets.active.bg_fill);
     } else if is_hovered {
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(5),
-            egui::Color32::from_rgb(0x39, 0x43, 0x51),
-        );
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(5), visuals.widgets.hovered.bg_fill);
     }
 
     let icon_color = if is_hovered || is_pressed {
-        egui::Color32::from_rgb(0xE2, 0xE6, 0xED)
+        visuals.widgets.hovered.fg_stroke.color
     } else {
-        egui::Color32::from_rgb(0x8B, 0x95, 0xA5)
+        visuals.widgets.inactive.fg_stroke.color
     };
 
     render_icon(ui.painter(), icon, rect, icon_color, 1.5);
@@ -39,18 +34,18 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
     }
 }
 
-/// Primary button: height 32 px, radius 5 px, prominent accent fill `#88A9C1`.
+/// Primary button: height 32 px, radius 5 px, prominent accent fill.
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     let font = FontId::proportional(13.0);
-    let rich = RichText::new(text)
-        .font(font)
-        .strong()
-        .color(egui::Color32::from_rgb(0x20, 0x24, 0x2C));
+    let visuals = ui.visuals();
+    let fill = visuals.selection.stroke.color;
+    let text_color = visuals.panel_fill;
+    let rich = RichText::new(text).font(font).strong().color(text_color);
 
     let btn = egui::Button::new(rich)
         .min_size(vec2(0.0, 32.0))
         .corner_radius(CornerRadius::same(5))
-        .fill(egui::Color32::from_rgb(0x88, 0xA9, 0xC1));
+        .fill(fill);
 
     ui.add(btn)
 }
@@ -58,9 +53,9 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
 /// Secondary button: height 32 px, radius 5 px, ghost transparent in default state.
 pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
     let font = FontId::proportional(13.0);
-    let rich = RichText::new(text)
-        .font(font)
-        .color(egui::Color32::from_rgb(0x8B, 0x95, 0xA5));
+    let visuals = ui.visuals();
+    let text_color = visuals.widgets.inactive.fg_stroke.color;
+    let rich = RichText::new(text).font(font).color(text_color);
 
     let btn = egui::Button::new(rich)
         .min_size(vec2(0.0, 32.0))

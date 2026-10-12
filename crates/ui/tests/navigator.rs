@@ -1,0 +1,302 @@
+use truff_core::commands::CommandId;
+use truff_core::text::BufferId;
+use truff_ui::navigator::{NavKey, NavigatorAction, NavigatorItem, NavigatorMode, NavigatorState};
+
+#[test]
+fn test_navigator_initial_state_and_mode_setup() {
+    let mut state = NavigatorState::new();
+    assert!(!state.is_open());
+    assert_eq!(state.visible_count(), 0);
+
+    let items = vec![
+        NavigatorItem::new_file(1, "Moch.md".into(), "Moch.md".into(), false, 0),
+        NavigatorItem::new_file(2, "docs".into(), "docs".into(), true, 0),
+        NavigatorItem::new_file(3, "Truff.md".into(), "docs/Truff.md".into(), false, 1),
+    ];
+
+    state.open_mode(NavigatorMode::Files, "Vault / Test", items);
+    assert!(state.is_open());
+    assert_eq!(state.mode, NavigatorMode::Files);
+    assert_eq!(state.context_title, "Vault / Test");
+    assert_eq!(state.visible_count(), 3);
+    assert_eq!(state.selected_index, 0);
+    assert_eq!(state.selected_item().unwrap().title, "Moch.md");
+}
+
+#[test]
+fn test_navigator_fuzzy_search_and_score() {
+    let mut state = NavigatorState::new();
+    let items = vec![
+        NavigatorItem::new_file(1, "Moch.md".into(), "Moch.md".into(), false, 0),
+        NavigatorItem::new_file(2, "Truff.md".into(), "Truff.md".into(), false, 0),
+        NavigatorItem::new_file(3, "Починить.md".into(), "Починить.md".into(), false, 0),
+        NavigatorItem::new_file(4, "readme.txt".into(), "readme.txt".into(), false, 0),
+    ];
+    state.open_mode(NavigatorMode::Files, "Vault", items);
+
+    // Filter by "moch"
+    state.set_query("moch");
+    assert_eq!(state.visible_count(), 1);
+    assert_eq!(state.selected_item().unwrap().title, "Moch.md");
+
+    // Filter by "md" (should match all .md files)
+    state.set_query("md");
+    assert_eq!(state.visible_count(), 3);
+
+    // Filter with no matches
+    state.set_query("xyz_not_found");
+    assert_eq!(state.visible_count(), 0);
+    assert!(state.selected_item().is_none());
+
+    // Clear query
+    state.set_query("");
+    assert_eq!(state.visible_count(), 4);
+}
+
+#[test]
+fn test_navigator_vim_motion_navigation() {
+    let mut state = NavigatorState::new();
+    let items = vec![
+        NavigatorItem::new_file(1, "1.md".into(), "1.md".into(), false, 0),
+        NavigatorItem::new_file(2, "2.md".into(), "2.md".into(), false, 0),
+        NavigatorItem::new_file(3, "3.md".into(), "3.md".into(), false, 0),
+    ];
+    state.open_mode(NavigatorMode::Files, "Vault", items);
+
+    // Initial at index 0
+    assert_eq!(state.selected_index, 0);
+
+    // j moves down
+    state.handle_key_event(NavKey::Char('j'), false);
+    assert_eq!(state.selected_index, 1);
+
+    // j moves down again
+    state.handle_key_event(NavKey::Char('j'), false);
+    assert_eq!(state.selected_index, 2);
+
+    // j at bottom stays at bottom
+    state.handle_key_event(NavKey::Char('j'), false);
+    assert_eq!(state.selected_index, 2);
+
+    // k moves up
+    state.handle_key_event(NavKey::Char('k'), false);
+    assert_eq!(state.selected_index, 1);
+
+    // G moves to bottom
+    state.handle_key_event(NavKey::Char('G'), false);
+    assert_eq!(state.selected_index, 2);
+}
+
+#[test]
+fn test_navigator_mode_transitions_and_search_mode() {
+    let mut state = NavigatorState::new();
+    let items = vec![
+        NavigatorItem::new_file(1, "Alpha.md".into(), "Alpha.md".into(), false, 0),
+        NavigatorItem::new_file(2, "Beta.md".into(), "Beta.md".into(), false, 0),
+    ];
+    state.open_mode(NavigatorMode::Files, "Vault", items);
+    assert!(!state.search_mode);
+
+    // '/' enters search mode
+    let action = state.handle_key_event(NavKey::Char('/'), false);
+    assert_eq!(action, NavigatorAction::None);
+    assert!(state.search_mode);
+
+    // In search mode, letters type query characters
+    state.handle_key_event(NavKey::Char('b'), false);
+    state.handle_key_event(NavKey::Char('e'), false);
+    state.handle_key_event(NavKey::Char('t'), false);
+    assert_eq!(state.query, "bet");
+    assert_eq!(state.visible_count(), 1);
+    assert_eq!(state.selected_item().unwrap().title, "Beta.md");
+
+    // Esc in search mode exits search mode back to normal navigation, preserving query
+    let action = state.handle_key_event(NavKey::Escape, false);
+    assert_eq!(action, NavigatorAction::None);
+    assert!(!state.search_mode);
+    assert_eq!(state.query, "bet");
+
+    // Esc in normal mode closes navigator
+    let action = state.handle_key_event(NavKey::Escape, false);
+    assert_eq!(action, NavigatorAction::Close);
+    assert!(!state.is_open());
+}
+
+#[test]
+fn test_navigator_quick_actions_and_context_menu() {
+    let mut state = NavigatorState::new();
+    let items = vec![NavigatorItem::new_file(
+        1,
+        "Notes.md".into(),
+        "work/Notes.md".into(),
+        false,
+        0,
+    )];
+    state.open_mode(NavigatorMode::Files, "Vault", items);
+
+    // Primary action on Enter
+    let act = state.primary_action();
+    assert_eq!(
+        act,
+        NavigatorAction::OpenFile {
+            path: "work/Notes.md".to_string()
+        }
+    );
+
+    // '?' opens context actions menu
+    state.handle_key_event(NavKey::Char('?'), false);
+    assert!(state.actions_menu_open);
+
+    let actions = state.context_actions();
+    assert!(!actions.is_empty());
+    assert!(actions.iter().any(|a| a.key == "a"));
+    assert!(actions.iter().any(|a| a.key == "r"));
+    assert!(actions.iter().any(|a| a.key == "d"));
+
+    // Selecting 'r' for rename inside actions menu
+    let act = state.handle_key_event(NavKey::Char('r'), false);
+    assert_eq!(
+        act,
+        NavigatorAction::RenameFile {
+            path: "work/Notes.md".to_string()
+        }
+    );
+    assert!(!state.actions_menu_open);
+}
+
+#[test]
+fn test_navigator_sessions_and_commands_mode() {
+    let mut state = NavigatorState::new();
+    let buf1 = BufferId::new(1);
+    let buf2 = BufferId::new(2);
+
+    let items = vec![
+        NavigatorItem::new_buffer(
+            1,
+            buf1,
+            "First.md".into(),
+            Some("First.md".into()),
+            false,
+            25,
+        ),
+        NavigatorItem::new_buffer(
+            2,
+            buf2,
+            "Second.md".into(),
+            Some("Second.md".into()),
+            true,
+            50,
+        ),
+    ];
+
+    state.open_mode(NavigatorMode::Sessions, "Вкладки", items);
+    assert_eq!(state.visible_count(), 2);
+
+    // Primary action switches buffer
+    assert_eq!(
+        state.primary_action(),
+        NavigatorAction::SwitchBuffer { buffer_id: buf1 }
+    );
+
+    // 'd' in sessions mode closes the selected buffer
+    let act = state.handle_key_event(NavKey::Char('d'), false);
+    assert_eq!(act, NavigatorAction::CloseBuffer { buffer_id: buf1 });
+
+    // Switch to commands mode
+    let cmd_items = vec![NavigatorItem::new_command(
+        10,
+        CommandId::new("file.open"),
+        "Открыть файл".into(),
+        "Найти и открыть заметку".into(),
+        "Файлы".into(),
+        Some("Space f".into()),
+    )];
+    state.open_mode(NavigatorMode::Commands, "Команды", cmd_items);
+    assert_eq!(state.visible_count(), 1);
+
+    assert_eq!(
+        state.primary_action(),
+        NavigatorAction::ExecuteCommand {
+            command_id: CommandId::new("file.open"),
+        }
+    );
+}
+
+#[test]
+fn test_navigator_normal_mode_shortcuts_and_native_app_integration() {
+    use truff_core::vim::Key;
+    use truff_ui::app::Application;
+    use truff_ui::native::NativeApp;
+    use truff_ui::shell::Focus;
+
+    let ctx = eframe::egui::Context::default();
+    let mut app = NativeApp::new(Application::new(), &ctx);
+    app.application
+        .shell
+        .set_editor_text("# Hello World\nSome content\n## Section 2\n");
+    assert_eq!(app.application.shell.focus(), Focus::Editor);
+
+    // 1. Space -> populates prefix hints with 300ms delay
+    let action = app.application.shell.feed_key(Key::Char(' '));
+    assert_eq!(action, truff_ui::shell::ShellAction::Incomplete);
+    assert!(!app.application.shell.which_key().hints().is_empty());
+    assert!(!app.application.shell.which_key().is_visible());
+
+    // After 350ms delay, Which-Key becomes visible
+    app.application.shell.which_key_mut().tick(350);
+    assert!(app.application.shell.which_key().is_visible());
+
+    let action = app.application.shell.feed_key(Key::Char('f'));
+    assert_eq!(
+        action,
+        truff_ui::shell::ShellAction::OpenNavigator(NavigatorMode::Files)
+    );
+    app.open_navigator(NavigatorMode::Files);
+    assert!(app.navigator.is_open());
+    assert_eq!(app.navigator.mode, NavigatorMode::Files);
+    assert_eq!(app.application.shell.focus(), Focus::Navigator);
+
+    // Close navigator -> restores focus
+    app.handle_navigator_action(NavigatorAction::Close);
+    assert!(!app.navigator.is_open());
+    assert_eq!(app.application.shell.focus(), Focus::Editor);
+
+    // 2. Ctrl-P -> opens Commands navigator
+    let action = app.application.shell.feed_key(Key::Ctrl('p'));
+    assert_eq!(
+        action,
+        truff_ui::shell::ShellAction::OpenNavigator(NavigatorMode::Commands)
+    );
+    app.open_navigator(NavigatorMode::Commands);
+    assert!(app.navigator.is_open());
+    assert_eq!(app.navigator.mode, NavigatorMode::Commands);
+    assert!(app.navigator.visible_count() > 0);
+    // Ensure all commands have human-readable titles
+    assert!(
+        app.navigator
+            .items
+            .iter()
+            .any(|item| item.title.contains("файл")
+                || item.title.contains("Команд")
+                || item.title.contains("Открыть"))
+    );
+
+    // Close
+    app.handle_navigator_action(NavigatorAction::Close);
+    assert_eq!(app.application.shell.focus(), Focus::Editor);
+
+    // 3. Space o -> opens Outline navigator
+    let _ = app.application.shell.feed_key(Key::Char(' '));
+    let action = app.application.shell.feed_key(Key::Char('o'));
+    assert_eq!(
+        action,
+        truff_ui::shell::ShellAction::OpenNavigator(NavigatorMode::Outline)
+    );
+    app.open_navigator(NavigatorMode::Outline);
+    assert!(app.navigator.is_open());
+    assert_eq!(app.navigator.mode, NavigatorMode::Outline);
+    // Check heading extraction
+    assert_eq!(app.navigator.visible_count(), 2);
+    assert_eq!(app.navigator.items[0].title, "# Hello World");
+    assert_eq!(app.navigator.items[1].title, "## Section 2");
+}

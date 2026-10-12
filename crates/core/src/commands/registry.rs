@@ -10,6 +10,48 @@ impl CommandRegistry {
     pub fn specs(&self) -> &[CommandSpec] {
         &self.specs
     }
+    /// Returns specs grouped by their category.
+    pub fn by_category(&self) -> std::collections::BTreeMap<&str, Vec<&CommandSpec>> {
+        let mut grouped = std::collections::BTreeMap::<&str, Vec<&CommandSpec>>::new();
+        for spec in &self.specs {
+            grouped.entry(&spec.group).or_default().push(spec);
+        }
+        grouped
+    }
+    /// Searches commands by query matching title, description, group, or id.
+    pub fn search(&self, query: &str) -> Vec<&CommandSpec> {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return self.specs.iter().collect();
+        }
+        let mut scored = Vec::new();
+        for spec in &self.specs {
+            let title = spec.title.to_lowercase();
+            let desc = spec.description.to_lowercase();
+            let id = spec.id.as_str().to_lowercase();
+            let group = spec.group.to_lowercase();
+
+            let score = if title == q || id == q {
+                100
+            } else if title.starts_with(&q) {
+                80
+            } else if title.contains(&q) {
+                60
+            } else if desc.contains(&q) {
+                40
+            } else if group.contains(&q) || id.contains(&q) {
+                20
+            } else {
+                0
+            };
+
+            if score > 0 {
+                scored.push((score, spec));
+            }
+        }
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
+        scored.into_iter().map(|(_, spec)| spec).collect()
+    }
     pub fn get(&self, id: &CommandId) -> Result<&CommandSpec, RegistryError> {
         self.specs
             .iter()

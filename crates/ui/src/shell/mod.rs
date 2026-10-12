@@ -15,14 +15,7 @@ mod panels;
 mod routing;
 mod tree;
 
-/// Active focused panel in the application layout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Focus {
-    Sidebar,
-    #[default]
-    Editor,
-    RightPanel,
-}
+pub use crate::focus::{Focus, FocusManager};
 
 /// Action resulting from feeding an input key to the Shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +31,7 @@ pub enum ShellAction {
     Error(String),
     VisualRow { down: bool, count: usize },
     RegisteredCommand { id: CommandId, argument: String },
+    OpenNavigator(crate::navigator::NavigatorMode),
 }
 
 #[derive(Debug)]
@@ -62,6 +56,7 @@ impl std::error::Error for InputError {}
 /// Main application shell coordinating sidebar, editor, right panel, overlays, and focus routing.
 pub struct Shell {
     focus: Focus,
+    focus_manager: FocusManager,
     sidebar_files: Vec<String>,
     sidebar_model: RowModel,
     right_model: RowModel,
@@ -104,6 +99,7 @@ impl Shell {
 
         Self {
             focus: Focus::Editor,
+            focus_manager: FocusManager::new(),
             sidebar_files: Vec::new(),
             sidebar_model: RowModel::new(),
             right_model: RowModel::new(),

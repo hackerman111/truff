@@ -402,3 +402,29 @@ fn test_active_vs_selected_file_state() {
     let _ = app.shutdown();
     let _ = std::fs::remove_dir_all(target);
 }
+
+#[test]
+fn test_focus_manager_stack_and_deterministic_pop() {
+    let mut shell = Shell::new();
+    shell.set_sidebar_files(vec!["file1.md".into()]);
+    shell.set_focus(Focus::Sidebar);
+    assert_eq!(shell.focus(), Focus::Sidebar);
+
+    // Push Navigator focus (e.g. user pressed Space f)
+    shell.push_focus(Focus::Navigator);
+    assert_eq!(shell.focus(), Focus::Navigator);
+
+    // Pressing Esc in Navigator pops focus back to Sidebar deterministically
+    let action = shell.feed_key(Key::Esc);
+    assert_eq!(action, ShellAction::FocusChanged(Focus::Sidebar));
+    assert_eq!(shell.focus(), Focus::Sidebar);
+
+    // Now in Editor: push Navigator and pop back to Editor
+    shell.set_focus(Focus::Editor);
+    shell.push_focus(Focus::Navigator);
+    assert_eq!(shell.focus(), Focus::Navigator);
+
+    let action2 = shell.feed_key(Key::Esc);
+    assert_eq!(action2, ShellAction::FocusChanged(Focus::Editor));
+    assert_eq!(shell.focus(), Focus::Editor);
+}

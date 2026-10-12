@@ -3,7 +3,9 @@
 pub mod app;
 pub mod driver;
 pub mod editor;
+pub mod focus;
 pub mod native;
+pub mod navigator;
 pub mod overlays;
 pub mod rows;
 pub mod shell;

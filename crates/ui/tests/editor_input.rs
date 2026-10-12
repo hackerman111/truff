@@ -203,3 +203,29 @@ fn test_four_tier_palette_tokens() {
         truff_ui::theme::Color::from_hex("#8b95a5").unwrap()
     );
 }
+
+#[test]
+fn test_semantic_design_tokens() {
+    let nord = Theme::nord();
+    assert_eq!(nord.bg_canvas, nord.bg_primary);
+    assert_eq!(nord.bg_panel, nord.bg_secondary);
+    assert_eq!(nord.bg_elevated, nord.bg_surface);
+    assert_eq!(nord.border_subtle, nord.border);
+    assert_eq!(nord.accent_primary, nord.accent);
+    assert_eq!(nord.density, truff_ui::theme::Density::Compact);
+    assert_eq!(nord.geometry.tab_height, 32.0);
+    assert_eq!(nord.geometry.tree_row_height, 28.0);
+    assert_eq!(nord.geometry.status_height, 26.0);
+
+    let dark = Theme::obsidian_dark();
+    assert_eq!(dark.bg_canvas, dark.bg_primary);
+    assert_eq!(dark.bg_panel, dark.bg_secondary);
+    assert_eq!(dark.bg_elevated, dark.bg_surface);
+    assert_eq!(dark.accent_primary, dark.accent);
+
+    let light = Theme::light();
+    assert_eq!(light.bg_canvas, light.bg_primary);
+    assert_eq!(light.bg_panel, light.bg_secondary);
+    assert_eq!(light.bg_elevated, light.bg_surface);
+    assert_eq!(light.accent_primary, light.accent);
+}

@@ -111,6 +111,7 @@ pub struct CommandSpec {
     pub title: Cow<'static, str>,
     pub description: Cow<'static, str>,
     pub group: Cow<'static, str>,
+    pub default_key: Option<Cow<'static, str>>,
     pub contexts: Vec<CommandContext>,
 }
 

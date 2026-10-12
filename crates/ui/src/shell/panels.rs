@@ -1,7 +1,7 @@
 use truff_core::navigation::RowModel;
 
 use super::tree::build_tree_items;
-use super::{Focus, Shell};
+use super::{Focus, FocusManager, Shell};
 
 impl Shell {
     /// Returns whether the right panel (e.g. backlinks/references) is available.
@@ -41,11 +41,36 @@ impl Shell {
 
     /// Sets the focused panel.
     pub fn set_focus(&mut self, focus: Focus) {
-        let resolved = match focus {
+        let resolved = self.resolve_focus(focus);
+        self.focus_manager.set_focus(resolved);
+        self.apply_focus_switch(resolved);
+    }
+
+    /// Pushes current focus to history and shifts to `focus`.
+    pub fn push_focus(&mut self, focus: Focus) {
+        let resolved = self.resolve_focus(focus);
+        if self.focus != resolved {
+            self.focus_manager.push_focus(resolved);
+            self.apply_focus_switch(resolved);
+        }
+    }
+
+    /// Pops previously focused component and restores focus to it.
+    pub fn pop_focus(&mut self) -> Focus {
+        let restored = self.focus_manager.pop_focus();
+        self.apply_focus_switch(restored);
+        self.focus
+    }
+
+    fn resolve_focus(&self, focus: Focus) -> Focus {
+        match focus {
             Focus::Sidebar if !self.has_sidebar() => Focus::Editor,
             Focus::RightPanel if !self.has_right_panel() => Focus::Editor,
             other => other,
-        };
+        }
+    }
+
+    fn apply_focus_switch(&mut self, resolved: Focus) {
         if self.focus != resolved {
             self.reset_editor_input();
         }
@@ -56,6 +81,11 @@ impl Shell {
         self.row_vim.cancel_input();
         self.which_key.hide();
         self.flash.cancel();
+    }
+
+    /// Access focus manager.
+    pub fn focus_manager(&self) -> &FocusManager {
+        &self.focus_manager
     }
 
     /// Populates sidebar files and initializes its row model as a hierarchical tree.

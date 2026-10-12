@@ -86,12 +86,18 @@ impl NativeApp {
                     self.application.status = error.to_string();
                 }
             }
+            ShellAction::OpenNavigator(mode) => {
+                self.open_navigator(mode);
+            }
             action => self.application.handle_shell_action(action),
         }
     }
 
     pub(super) fn events(&mut self, context: &egui::Context) {
-        if self.dialogs.is_any_open() || context.egui_wants_keyboard_input() {
+        if self.dialogs.is_any_open()
+            || self.navigator.is_open()
+            || context.egui_wants_keyboard_input()
+        {
             return;
         }
         // Text events are authoritative for printable characters; OS Key events would duplicate them.

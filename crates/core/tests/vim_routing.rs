@@ -290,3 +290,37 @@ fn compiled_keymap_validates_registry_and_contextual_hints() {
         Err(KeymapError::DuplicateBinding { .. })
     ));
 }
+
+#[test]
+fn test_command_registry_human_readable_and_search() {
+    use truff_core::commands::{CommandId, CommandRegistry};
+    let registry = CommandRegistry::default();
+
+    // Verify human-readable titles (not raw internal IDs)
+    let save_cmd = registry
+        .get(&CommandId::from_static("buffer.save"))
+        .unwrap();
+    assert_eq!(save_cmd.title, "Сохранить заметку");
+    assert_eq!(save_cmd.default_key.as_deref(), Some(":w"));
+
+    let files_cmd = registry
+        .get(&CommandId::from_static("panel.files"))
+        .unwrap();
+    assert_eq!(files_cmd.title, "Файлы и папки");
+    assert_eq!(files_cmd.default_key.as_deref(), Some("Space f"));
+
+    // Verify search
+    let results = registry.search("сохранить");
+    assert!(!results.is_empty());
+    assert!(results.iter().any(|s| s.id.as_str() == "buffer.save"));
+
+    let panel_results = registry.search("папки");
+    assert!(!panel_results.is_empty());
+    assert!(panel_results.iter().any(|s| s.id.as_str() == "panel.files"));
+
+    // Verify categories
+    let categories = registry.by_category();
+    assert!(categories.contains_key("Панели"));
+    assert!(categories.contains_key("Файлы"));
+    assert!(categories.contains_key("Редактирование"));
+}
