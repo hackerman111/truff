@@ -59,13 +59,13 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                     ui.add_space(4.0);
                     ui.label(
                         egui::RichText::new(focus_str)
-                            .size(11.5)
+                            .size(12.0)
                             .color(color(theme.text_muted)),
                     );
                     ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new(&application.status)
-                            .size(11.5)
+                            .size(12.0)
                             .color(color(theme.text_muted)),
                     );
 
@@ -73,7 +73,7 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Markdown · UTF-8")
-                                .size(11.5)
+                                .size(12.0)
                                 .color(color(theme.text_muted)),
                         );
                         ui.add_space(8.0);
@@ -92,7 +92,7 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                         ui.label(
                             egui::RichText::new(cursor_str)
                                 .monospace()
-                                .size(11.5)
+                                .size(12.0)
                                 .color(color(theme.text_muted)),
                         );
                     });

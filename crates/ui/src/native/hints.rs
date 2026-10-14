@@ -68,7 +68,7 @@ pub(super) fn show(shell: &crate::shell::Shell, context: &egui::Context) {
                 ui.label(
                     egui::RichText::new(format!("⌨  {title}"))
                         .strong()
-                        .size(13.0)
+                        .size(14.0)
                         .color(color(theme.accent_primary)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -187,7 +187,7 @@ pub(super) fn show(shell: &crate::shell::Shell, context: &egui::Context) {
                                                 ui.label(
                                                     egui::RichText::new(&category.name)
                                                         .strong()
-                                                        .size(12.5)
+                                                        .size(12.0)
                                                         .color(color(theme.accent_primary)),
                                                 );
                                                 ui.add_space(4.0);
@@ -214,7 +214,7 @@ pub(super) fn show(shell: &crate::shell::Shell, context: &egui::Context) {
                                                                         hint.key.to_string(),
                                                                     )
                                                                     .monospace()
-                                                                    .size(10.5)
+                                                                    .size(11.0)
                                                                     .strong()
                                                                     .color(color(
                                                                         theme.accent_primary,
@@ -227,7 +227,7 @@ pub(super) fn show(shell: &crate::shell::Shell, context: &egui::Context) {
                                                                     &hint.description,
                                                                 ),
                                                             )
-                                                            .size(11.5)
+                                                            .size(12.0)
                                                             .color(color(theme.text_primary)),
                                                         );
                                                     });

@@ -229,12 +229,12 @@ impl Paragraph {
                         && selection.contains(&self.range.start))
                     || self.range.contains(&selection.start);
                 if is_selected {
-                    let width = self.galley.size().x.max(view.content_width);
+                    let width = (self.galley.size().x + self.text_indent).max(view.content_width);
                     let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
                     painter.rect_filled(
                         Rect::from_min_max(
-                            Pos2::new(origin.x, min_y),
-                            Pos2::new(origin.x + width, max_y),
+                            Pos2::new(origin.x - self.text_indent, min_y),
+                            Pos2::new(origin.x - self.text_indent + width, max_y),
                         ),
                         2.0,
                         color(view.theme.selection),
@@ -270,7 +270,7 @@ impl Paragraph {
             cursor_rect = Some(caret);
             if let Some(text) = view.preedit {
                 let galley =
-                    painter.layout_no_wrap(text.to_owned(), FontId::proportional(15.0), self.color);
+                    painter.layout_no_wrap(text.to_owned(), FontId::proportional(14.0), self.color);
                 painter.galley(caret.left_top(), galley, self.color);
             }
         }

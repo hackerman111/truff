@@ -36,7 +36,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
 
 /// Primary button: height 32 px, radius 5 px, prominent accent fill.
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
-    let font = FontId::proportional(13.0);
+    let font = FontId::proportional(14.0);
     let visuals = ui.visuals();
     let fill = visuals.selection.stroke.color;
     let text_color = visuals.panel_fill;
@@ -52,7 +52,7 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
 
 /// Secondary button: height 32 px, radius 5 px, ghost transparent in default state.
 pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
-    let font = FontId::proportional(13.0);
+    let font = FontId::proportional(14.0);
     let visuals = ui.visuals();
     let text_color = visuals.widgets.inactive.fg_stroke.color;
     let rich = RichText::new(text).font(font).color(text_color);

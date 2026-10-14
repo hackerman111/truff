@@ -281,20 +281,20 @@ fn test_typography_hierarchy_scale() {
     let default_typo = TypographyConfig::default();
 
     let (f_h1, lh_h1) = resolve_font_and_line_height("# Heading 1", &default_typo);
-    assert_eq!(f_h1, FontId::new(27.0, FontFamily::Monospace));
-    assert_eq!(lh_h1, 35.0);
+    assert_eq!(f_h1, FontId::new(24.0, FontFamily::Monospace));
+    assert_eq!(lh_h1, 31.0);
 
     let (f_h2, lh_h2) = resolve_font_and_line_height("## Heading 2", &default_typo);
-    assert_eq!(f_h2, FontId::new(22.0, FontFamily::Monospace));
-    assert_eq!(lh_h2, 30.0);
+    assert_eq!(f_h2, FontId::new(20.0, FontFamily::Monospace));
+    assert_eq!(lh_h2, 27.0);
 
     let (f_h3, lh_h3) = resolve_font_and_line_height("### Heading 3", &default_typo);
-    assert_eq!(f_h3, FontId::new(19.0, FontFamily::Monospace));
-    assert_eq!(lh_h3, 27.0);
+    assert_eq!(f_h3, FontId::new(17.0, FontFamily::Monospace));
+    assert_eq!(lh_h3, 24.0);
 
     let (f_code, lh_code) = resolve_font_and_line_height("```rust", &default_typo);
-    assert_eq!(f_code, FontId::new(14.0, FontFamily::Monospace));
-    assert_eq!(lh_code, 21.0);
+    assert_eq!(f_code, FontId::new(15.0, FontFamily::Monospace));
+    assert_eq!(lh_code, 23.0);
 
     let (f_body, lh_body) = resolve_font_and_line_height("Regular markdown text", &default_typo);
     assert_eq!(f_body, FontId::new(15.0, FontFamily::Monospace));
@@ -307,8 +307,8 @@ fn test_typography_hierarchy_scale() {
     };
 
     let (f_h1_scaled, lh_h1_scaled) = resolve_font_and_line_height("# Heading 1", &scaled_typo);
-    assert_eq!(f_h1_scaled, FontId::new(36.0, FontFamily::Monospace));
-    assert_eq!(lh_h1_scaled, 47.0);
+    assert_eq!(f_h1_scaled, FontId::new(32.0, FontFamily::Monospace));
+    assert_eq!(lh_h1_scaled, 42.0);
 
     let (f_body_scaled, lh_body_scaled) =
         resolve_font_and_line_height("Regular markdown text", &scaled_typo);
@@ -316,6 +316,66 @@ fn test_typography_hierarchy_scale() {
     assert_eq!(lh_body_scaled, 30.0);
 
     let (f_code_scaled, lh_code_scaled) = resolve_font_and_line_height("```rust", &scaled_typo);
-    assert_eq!(f_code_scaled, FontId::new(18.0, FontFamily::Monospace));
-    assert_eq!(lh_code_scaled, 27.0);
+    assert_eq!(f_code_scaled, FontId::new(20.0, FontFamily::Monospace));
+    assert_eq!(lh_code_scaled, 30.0);
+}
+#[test]
+fn unchanged_projection_borrows_source_storage() {
+    for mode in [ProjectionMode::Source, ProjectionMode::LivePreview] {
+        let mut display = DisplayMap::new("plain 字🦀 text", mode);
+        assert_eq!(display.visual_text(), "plain 字🦀 text");
+        assert_eq!(
+            display.visual_text().as_ptr(),
+            display.source_text().as_ptr()
+        );
+        display.set_text("updated café");
+        assert_eq!(display.visual_text(), "updated café");
+        assert_eq!(
+            display.visual_text().as_ptr(),
+            display.source_text().as_ptr()
+        );
+    }
+}
+#[test]
+fn list_projection_keeps_unicode_text_and_maps_rendered_markers_to_source() {
+    let text = "- верх\n  * вложенный\n    + глубже\n- [ ] задача\n- [X] готово\n";
+    let mut map = DisplayMap::new(text, ProjectionMode::LivePreview);
+    map.set_cursor(BytePos::new(text.len() + 1));
+    assert_eq!(
+        map.visual_text(),
+        "• верх\n  ◦ вложенный\n    ▪ глубже\n☐ задача\n☑ готово\n"
+    );
+    for word in ["верх", "вложенный", "глубже", "задача", "готово"] {
+        let source = text.find(word).unwrap();
+        let visual = map.source_to_visual(BytePos::new(source), Affinity::Right);
+        assert_eq!(
+            &map.visual_text()[visual.get()..visual.get() + word.len()],
+            word
+        );
+        assert_eq!(map.visual_to_source(visual).pos.get(), source);
+    }
+    map.set_cursor(BytePos::new(text.find("задача").unwrap()));
+    assert!(map.visual_text().contains("- [ ] задача"));
+    map.set_mode(ProjectionMode::Source);
+    assert_eq!(map.visual_text(), text);
+}
+
+#[test]
+fn list_projection_does_not_interpret_code_or_star_bullets_as_emphasis() {
+    let text = "* first\n* second\n\n```md\n- [ ] literal **bold**\n```\n\n    - code\n";
+    let mut map = DisplayMap::new(text, ProjectionMode::LivePreview);
+    map.set_cursor(BytePos::new(text.len() + 1));
+    assert_eq!(
+        map.visual_text(),
+        "• first\n• second\n\n```md\n- [ ] literal **bold**\n```\n\n    - code\n"
+    );
+}
+#[test]
+fn standard_inline_markers_and_wiki_links_still_project() {
+    let mut display = DisplayMap::new(
+        "**bold** _italic_ [[note]] `code`",
+        ProjectionMode::LivePreview,
+    );
+    display.set_cursor(BytePos::new(100));
+    assert_eq!(display.visual_text(), "bold italic note code");
 }

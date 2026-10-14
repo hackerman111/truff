@@ -87,11 +87,10 @@ impl Application {
                     .and_then(|id| self.shell.workspace_mut().editor_parts_mut(id))
                 && buffer.id() == key.buffer_id
             {
-                let text = buffer.as_str();
                 let anchor =
-                    crate::editor::snap_to_grapheme_boundary(&text, saved_view.cursor_anchor);
-                let head = crate::editor::snap_to_grapheme_boundary(&text, saved_view.cursor_head);
-                view.set_cursor(BytePos::new(anchor), BytePos::new(head));
+                    buffer.snap_to_grapheme_boundary(BytePos::new(saved_view.cursor_anchor));
+                let head = buffer.snap_to_grapheme_boundary(BytePos::new(saved_view.cursor_head));
+                view.set_cursor(anchor, head);
                 view.set_scroll_top_line(saved_view.top_line);
             }
             if let Err(error) = self.apply_pending_location() {

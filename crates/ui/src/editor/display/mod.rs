@@ -25,9 +25,11 @@ pub struct DisplayMap {
     cursor: BytePos,
     selection: Option<(BytePos, BytePos)>,
     chunks: Vec<DisplayChunk>,
-    visual_text: String,
+    visual_text: Option<Box<str>>,
     colors: Vec<truff_core::markdown::style::ColorSpan>,
     markers: Vec<(Range<usize>, Option<Range<usize>>)>,
+    lists: Vec<truff_core::markdown::presentation::ListMarker>,
+    presentation: Option<truff_core::markdown::presentation::LinePresentation>,
 }
 
 impl DisplayMap {
@@ -37,6 +39,14 @@ impl DisplayMap {
     }
 
     pub(crate) fn from_owned(text: String, mode: ProjectionMode) -> Self {
+        Self::from_owned_with_presentation(text, mode, None)
+    }
+
+    pub(crate) fn from_owned_with_presentation(
+        text: String,
+        mode: ProjectionMode,
+        presentation: Option<truff_core::markdown::presentation::LinePresentation>,
+    ) -> Self {
         let colors = truff_core::markdown::style::color_spans(&text);
         let mut map = Self {
             source_text: text,
@@ -44,9 +54,11 @@ impl DisplayMap {
             cursor: BytePos::ZERO,
             selection: None,
             chunks: Vec::new(),
-            visual_text: String::new(),
+            visual_text: None,
             colors,
             markers: Vec::new(),
+            lists: Vec::new(),
+            presentation,
         };
         map.scan_markers();
         map.rebuild();
@@ -68,6 +80,7 @@ impl DisplayMap {
 
     /// Updates the source text.
     pub fn set_text(&mut self, text: &str) {
+        self.presentation = None;
         self.source_text = text.to_string();
         self.colors = truff_core::markdown::style::color_spans(text);
         self.scan_markers();
@@ -78,6 +91,33 @@ impl DisplayMap {
         &self.colors
     }
 
+    pub(crate) fn task_at_visual(&self, position: VisualPos) -> Option<usize> {
+        let hit = self.visual_to_source(position);
+        self.lists.iter().find_map(|list| {
+            if !hit.in_marker
+                || hit.pos.get() != list.range.start
+                || !self
+                    .chunks
+                    .iter()
+                    .any(|chunk| chunk.hidden && chunk.source_range == list.range)
+            {
+                return None;
+            }
+            match list.kind {
+                truff_core::markdown::presentation::ListKind::Task { checkbox, .. } => {
+                    Some(checkbox)
+                }
+                _ => None,
+            }
+        })
+    }
+
+    pub(crate) fn list_content_start(&self) -> Option<VisualPos> {
+        (self.mode == ProjectionMode::LivePreview).then_some(())?;
+        let list = self.lists.first()?;
+        Some(self.source_to_visual(BytePos::new(list.range.end), Affinity::Right))
+    }
+
     /// Synchronizes a view projection with at most one marker rebuild.
     pub fn update(
         &mut self,
@@ -86,6 +126,7 @@ impl DisplayMap {
         selection: Option<(BytePos, BytePos)>,
     ) {
         if let Some(text) = text {
+            self.presentation = None;
             self.source_text.clear();
             self.source_text.push_str(text);
             self.colors = truff_core::markdown::style::color_spans(text);
@@ -105,7 +146,7 @@ impl DisplayMap {
 
     /// Current projected visual text.
     pub fn visual_text(&self) -> &str {
-        &self.visual_text
+        self.visual_text.as_deref().unwrap_or(&self.source_text)
     }
 
     /// Updates the active cursor position.

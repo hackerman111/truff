@@ -225,6 +225,31 @@ impl Buffer {
         super::grapheme::prev(&self.rope, pos.get()).map(BytePos::new)
     }
 
+    /// Snaps any byte offset to the nearest grapheme boundary, choosing the lower on ties.
+    /// Traverses borrowed Rope chunks instead of copying the document.
+    pub fn snap_to_grapheme_boundary(&self, pos: BytePos) -> BytePos {
+        let requested = pos.get().min(self.byte_len());
+        if requested == 0 || requested == self.byte_len() {
+            return BytePos::new(requested);
+        }
+        let char_pos = BytePos::new(self.floor_char_boundary(requested));
+        let mut before = self.grapheme_prev(char_pos).unwrap_or(BytePos::ZERO);
+        let mut after = self
+            .grapheme_next(before)
+            .unwrap_or(BytePos::new(self.byte_len()));
+        if after.get() < requested {
+            before = after;
+            after = self
+                .grapheme_next(before)
+                .unwrap_or(BytePos::new(self.byte_len()));
+        }
+        if requested - before.get() <= after.get() - requested {
+            before
+        } else {
+            after
+        }
+    }
+
     /// Applies a transaction atomically to the buffer.
     pub fn apply(&mut self, tx: Transaction) -> Result<ChangeSet, EditError> {
         let mut normalized_edits = tx.edits;

@@ -9,9 +9,9 @@ fn test_navigator_initial_state_and_mode_setup() {
     assert_eq!(state.visible_count(), 0);
 
     let items = vec![
-        NavigatorItem::new_file(1, "Moch.md".into(), "Moch.md".into(), false, 0),
-        NavigatorItem::new_file(2, "docs".into(), "docs".into(), true, 0),
-        NavigatorItem::new_file(3, "Truff.md".into(), "docs/Truff.md".into(), false, 1),
+        NavigatorItem::new_file(1, "Moch.md", "Moch.md".into(), false, 0),
+        NavigatorItem::new_file(2, "docs", "docs".into(), true, 0),
+        NavigatorItem::new_file(3, "Truff.md", "docs/Truff.md".into(), false, 1),
     ];
 
     state.open_mode(NavigatorMode::Files, "Vault / Test", items);
@@ -20,24 +20,24 @@ fn test_navigator_initial_state_and_mode_setup() {
     assert_eq!(state.context_title, "Vault / Test");
     assert_eq!(state.visible_count(), 3);
     assert_eq!(state.selected_index, 0);
-    assert_eq!(state.selected_item().unwrap().title, "Moch.md");
+    assert_eq!(state.selected_item().unwrap().display_title(), "Moch.md");
 }
 
 #[test]
 fn test_navigator_fuzzy_search_and_score() {
     let mut state = NavigatorState::new();
     let items = vec![
-        NavigatorItem::new_file(1, "Moch.md".into(), "Moch.md".into(), false, 0),
-        NavigatorItem::new_file(2, "Truff.md".into(), "Truff.md".into(), false, 0),
-        NavigatorItem::new_file(3, "Починить.md".into(), "Починить.md".into(), false, 0),
-        NavigatorItem::new_file(4, "readme.txt".into(), "readme.txt".into(), false, 0),
+        NavigatorItem::new_file(1, "Moch.md", "Moch.md".into(), false, 0),
+        NavigatorItem::new_file(2, "Truff.md", "Truff.md".into(), false, 0),
+        NavigatorItem::new_file(3, "Починить.md", "Починить.md".into(), false, 0),
+        NavigatorItem::new_file(4, "readme.txt", "readme.txt".into(), false, 0),
     ];
     state.open_mode(NavigatorMode::Files, "Vault", items);
 
     // Filter by "moch"
     state.set_query("moch");
     assert_eq!(state.visible_count(), 1);
-    assert_eq!(state.selected_item().unwrap().title, "Moch.md");
+    assert_eq!(state.selected_item().unwrap().display_title(), "Moch.md");
 
     // Filter by "md" (should match all .md files)
     state.set_query("md");
@@ -57,9 +57,9 @@ fn test_navigator_fuzzy_search_and_score() {
 fn test_navigator_vim_motion_navigation() {
     let mut state = NavigatorState::new();
     let items = vec![
-        NavigatorItem::new_file(1, "1.md".into(), "1.md".into(), false, 0),
-        NavigatorItem::new_file(2, "2.md".into(), "2.md".into(), false, 0),
-        NavigatorItem::new_file(3, "3.md".into(), "3.md".into(), false, 0),
+        NavigatorItem::new_file(1, "1.md", "1.md".into(), false, 0),
+        NavigatorItem::new_file(2, "2.md", "2.md".into(), false, 0),
+        NavigatorItem::new_file(3, "3.md", "3.md".into(), false, 0),
     ];
     state.open_mode(NavigatorMode::Files, "Vault", items);
 
@@ -91,8 +91,8 @@ fn test_navigator_vim_motion_navigation() {
 fn test_navigator_mode_transitions_and_search_mode() {
     let mut state = NavigatorState::new();
     let items = vec![
-        NavigatorItem::new_file(1, "Alpha.md".into(), "Alpha.md".into(), false, 0),
-        NavigatorItem::new_file(2, "Beta.md".into(), "Beta.md".into(), false, 0),
+        NavigatorItem::new_file(1, "Alpha.md", "Alpha.md".into(), false, 0),
+        NavigatorItem::new_file(2, "Beta.md", "Beta.md".into(), false, 0),
     ];
     state.open_mode(NavigatorMode::Files, "Vault", items);
     assert!(!state.search_mode);
@@ -108,7 +108,7 @@ fn test_navigator_mode_transitions_and_search_mode() {
     state.handle_key_event(NavKey::Char('t'), false);
     assert_eq!(state.query, "bet");
     assert_eq!(state.visible_count(), 1);
-    assert_eq!(state.selected_item().unwrap().title, "Beta.md");
+    assert_eq!(state.selected_item().unwrap().display_title(), "Beta.md");
 
     // Esc in search mode exits search mode back to normal navigation, preserving query
     let action = state.handle_key_event(NavKey::Escape, false);
@@ -127,7 +127,7 @@ fn test_navigator_quick_actions_and_context_menu() {
     let mut state = NavigatorState::new();
     let items = vec![NavigatorItem::new_file(
         1,
-        "Notes.md".into(),
+        "Notes.md",
         "work/Notes.md".into(),
         false,
         0,
@@ -276,9 +276,9 @@ fn test_navigator_normal_mode_shortcuts_and_native_app_integration() {
         app.navigator
             .items
             .iter()
-            .any(|item| item.title.contains("файл")
-                || item.title.contains("Команд")
-                || item.title.contains("Открыть"))
+            .any(|item| item.display_title().contains("файл")
+                || item.display_title().contains("Команд")
+                || item.display_title().contains("Открыть"))
     );
 
     // Close
@@ -297,6 +297,69 @@ fn test_navigator_normal_mode_shortcuts_and_native_app_integration() {
     assert_eq!(app.navigator.mode, NavigatorMode::Outline);
     // Check heading extraction
     assert_eq!(app.navigator.visible_count(), 2);
-    assert_eq!(app.navigator.items[0].title, "# Hello World");
-    assert_eq!(app.navigator.items[1].title, "## Section 2");
+    assert_eq!(app.navigator.items[0].display_title(), "# Hello World");
+    assert_eq!(app.navigator.items[1].display_title(), "## Section 2");
+}
+#[test]
+fn file_labels_borrow_path_and_preserve_explicit_names() {
+    use truff_ui::navigator::NavigatorItemPayload;
+    for separator in ['/', '\\'] {
+        let item =
+            NavigatorItem::new_file(1, "字🦀.md", format!("Папка{separator}字🦀.md"), false, 0);
+        let NavigatorItemPayload::File { path, .. } = &item.payload else {
+            unreachable!()
+        };
+        assert_eq!(item.display_title(), "字🦀.md");
+        assert_eq!(item.display_subtitle(), Some("Папка"));
+        assert_eq!(
+            item.display_title().as_ptr(),
+            path["Папка".len() + 1..].as_ptr()
+        );
+        assert_eq!(item.display_subtitle().unwrap().as_ptr(), path.as_ptr());
+    }
+    let item = NavigatorItem::new_file(2, "folder/note.md", "folder/note.md".into(), false, 0);
+    assert_eq!(item.display_title(), "folder/note.md");
+    assert_eq!(item.display_subtitle(), Some("folder"));
+    let folder = NavigatorItem::new_file(3, "folder", "folder".into(), true, 0);
+    assert_eq!(folder.display_subtitle(), Some("Папка"));
+    let root = NavigatorItem::new_file(4, "note.md", "note.md".into(), false, 0);
+    assert_eq!(root.display_subtitle(), None);
+}
+
+#[test]
+fn closing_navigator_releases_items_and_search_buffers() {
+    let mut state = NavigatorState::new();
+    state.open_mode(
+        NavigatorMode::Files,
+        "Vault",
+        (0..10_000)
+            .map(|id| NavigatorItem::new_file(id, "note.md", format!("{id}/note.md"), false, 0))
+            .collect(),
+    );
+    state.set_query("note");
+    state.move_bottom();
+    state.close();
+    assert!(!state.is_open());
+    assert!(state.selected_item().is_none());
+    assert_eq!(state.items.capacity(), 0);
+    assert_eq!(state.filtered_indices.capacity(), 0);
+    assert_eq!(state.query.capacity(), 0);
+    state.open_mode(
+        NavigatorMode::Files,
+        "Another vault",
+        vec![NavigatorItem::new_file(
+            1,
+            "new.md",
+            "new.md".into(),
+            false,
+            0,
+        )],
+    );
+    assert_eq!(state.selected_index, 0);
+    assert_eq!(
+        state.primary_action(),
+        NavigatorAction::OpenFile {
+            path: "new.md".into()
+        }
+    );
 }

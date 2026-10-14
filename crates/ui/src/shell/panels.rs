@@ -20,9 +20,7 @@ impl Shell {
 
     /// Returns whether the sidebar is available.
     pub fn has_sidebar(&self) -> bool {
-        self.sidebar_available
-            || !self.sidebar_files.is_empty()
-            || self.sidebar_model.visible_count() > 0
+        self.sidebar_available || !self.sidebar_model.all_items().is_empty()
     }
 
     /// Sets whether the sidebar is available.
@@ -91,17 +89,20 @@ impl Shell {
     /// Populates sidebar files and initializes its row model as a hierarchical tree.
     pub fn set_sidebar_files(&mut self, files: Vec<String>) {
         let is_empty = files.is_empty();
-        let items = build_tree_items(&files);
-        self.sidebar_files = files;
+        let items = build_tree_items(files);
         self.sidebar_model.set_items(items);
         if is_empty && !self.sidebar_available && self.focus == Focus::Sidebar {
             self.set_focus(Focus::Editor);
         }
     }
 
-    /// Returns list of files currently in the sidebar.
-    pub fn sidebar_files(&self) -> &[String] {
-        &self.sidebar_files
+    /// Borrows file paths from the tree, including children of collapsed folders.
+    pub fn sidebar_file_paths(&self) -> impl Iterator<Item = &str> + '_ {
+        self.sidebar_model
+            .all_items()
+            .iter()
+            .filter(|item| !item.is_folder)
+            .filter_map(|item| item.data.as_deref())
     }
 
     /// Access the sidebar row model.

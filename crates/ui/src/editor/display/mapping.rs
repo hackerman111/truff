@@ -21,7 +21,7 @@ impl DisplayMap {
                 if chunk.hidden {
                     return match affinity {
                         Affinity::Left => VisualPos(current_visual),
-                        Affinity::Right => VisualPos(current_visual),
+                        Affinity::Right => VisualPos(current_visual + chunk.visual_len),
                     };
                 } else {
                     let offset_in_chunk = source_offset - chunk.source_range.start;
@@ -33,7 +33,7 @@ impl DisplayMap {
                 if chunk.hidden {
                     // Pos is at end of hidden chunk
                     match affinity {
-                        Affinity::Left => return VisualPos(current_visual),
+                        Affinity::Left => return VisualPos(current_visual + chunk.visual_len),
                         Affinity::Right => {} // continue to see if next chunk is visible
                     }
                 } else {
@@ -44,9 +44,7 @@ impl DisplayMap {
                 }
             }
 
-            if !chunk.hidden {
-                current_visual += chunk.visual_len;
-            }
+            current_visual += chunk.visual_len;
         }
 
         VisualPos(current_visual)
@@ -54,7 +52,7 @@ impl DisplayMap {
 
     /// Maps a `VisualPos` back to a `SourceHit`.
     pub fn visual_to_source(&self, pos: VisualPos) -> SourceHit {
-        let visual_offset = pos.get().min(self.visual_text.len());
+        let visual_offset = pos.get().min(self.visual_text().len());
         if self.mode == ProjectionMode::Source {
             return SourceHit {
                 pos: BytePos(visual_offset),
@@ -66,6 +64,16 @@ impl DisplayMap {
         let mut current_visual = 0;
         for chunk in &self.chunks {
             if chunk.hidden {
+                if visual_offset >= current_visual
+                    && visual_offset < current_visual + chunk.visual_len
+                {
+                    return SourceHit {
+                        pos: BytePos(chunk.source_range.start),
+                        affinity: Affinity::Left,
+                        in_marker: true,
+                    };
+                }
+                current_visual += chunk.visual_len;
                 continue;
             }
 

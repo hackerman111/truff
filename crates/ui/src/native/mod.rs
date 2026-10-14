@@ -80,6 +80,7 @@ impl NativeApp {
         let context = ui.ctx().clone();
         if self.application.shell.typography() != &self.last_typography {
             configure_fonts(&context, self.application.shell.typography());
+            self.editor.invalidate_fonts();
             self.last_typography = self.application.shell.typography().clone();
         }
         self.events(&context);
@@ -177,8 +178,8 @@ impl NativeApp {
                 let title = format!("Vault / {vault_name}");
 
                 let mut items = Vec::new();
-                let files = self.application.shell.sidebar_files();
-                for (idx, path_str) in files.iter().enumerate() {
+                let files = self.application.shell.sidebar_file_paths();
+                for (idx, path_str) in files.enumerate() {
                     let path = std::path::Path::new(path_str);
                     let name = path
                         .file_name()
@@ -186,8 +187,8 @@ impl NativeApp {
                         .unwrap_or(path_str);
                     items.push(NavigatorItem::new_file(
                         idx as u64 + 1,
-                        name.to_string(),
-                        path_str.clone(),
+                        name,
+                        path_str.to_owned(),
                         false,
                         0,
                     ));
@@ -254,7 +255,7 @@ impl NativeApp {
                         spec.id.clone(),
                         spec.title.to_string(),
                         spec.description.to_string(),
-                        spec.group.to_string(),
+                        spec.group.clone(),
                         spec.default_key.as_ref().map(|k| k.to_string()),
                     ));
                 }
@@ -280,7 +281,7 @@ impl NativeApp {
                 for (idx, bl) in self.application.backlinks.iter().enumerate() {
                     items.push(NavigatorItem::new_file(
                         idx as u64 + 1,
-                        bl.source_path.clone(),
+                        &bl.source_path,
                         bl.source_path.clone(),
                         false,
                         0,
@@ -291,16 +292,15 @@ impl NativeApp {
             NavigatorMode::Boards => {
                 let title = "Kanban доски".to_string();
                 let mut items = Vec::new();
-                let files = self.application.shell.sidebar_files();
+                let files = self.application.shell.sidebar_file_paths();
                 for (idx, f) in files
-                    .iter()
                     .filter(|f| f.ends_with(".kanban.md") || f.contains("board"))
                     .enumerate()
                 {
                     items.push(NavigatorItem::new_file(
                         idx as u64 + 1,
-                        f.clone(),
-                        f.clone(),
+                        f,
+                        f.to_owned(),
                         false,
                         0,
                     ));
@@ -436,6 +436,6 @@ impl eframe::App for NativeApp {
         self.show(ui);
     }
     fn persist_egui_memory(&self) -> bool {
-        true
+        false
     }
 }

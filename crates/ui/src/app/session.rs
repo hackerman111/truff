@@ -125,16 +125,9 @@ impl Application {
                         .active_view()
                         .and_then(|id| self.shell.workspace_mut().editor_parts_mut(id))
                 {
-                    let text = buffer.as_str();
                     view.set_cursor(
-                        BytePos::new(crate::editor::snap_to_grapheme_boundary(
-                            &text,
-                            saved_view.cursor_anchor,
-                        )),
-                        BytePos::new(crate::editor::snap_to_grapheme_boundary(
-                            &text,
-                            saved_view.cursor_head,
-                        )),
+                        buffer.snap_to_grapheme_boundary(BytePos::new(saved_view.cursor_anchor)),
+                        buffer.snap_to_grapheme_boundary(BytePos::new(saved_view.cursor_head)),
                     );
                     view.set_scroll_top_line(saved_view.top_line);
                 }

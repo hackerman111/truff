@@ -162,7 +162,7 @@ impl VaultDialog {
                         ui.add_space(8.0);
                         ui.label(
                             egui::RichText::new("Подсказки:")
-                                .size(11.5)
+                                .size(12.0)
                                 .color(color(theme.text_muted)),
                         );
                         ui.horizontal_wrapped(|ui| {

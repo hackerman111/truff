@@ -65,7 +65,7 @@ fn show_welcome_screen(
         ui.add_space(top_padding);
         ui.label(
             egui::RichText::new("Truff v2")
-                .size(26.0)
+                .size(16.0)
                 .strong()
                 .color(color(theme.accent)),
         );
@@ -74,7 +74,7 @@ fn show_welcome_screen(
             egui::RichText::new(
                 "Персональная база знаний в формате Markdown с поддержкой Vim и вики-ссылок",
             )
-            .size(13.0)
+            .size(14.0)
             .color(color(theme.text_muted)),
         );
 

@@ -91,7 +91,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                         .show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new(badge_text)
-                                    .size(10.5)
+                                    .size(11.0)
                                     .monospace()
                                     .color(to_color32(badge_fg)),
                             );
@@ -119,7 +119,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new("🔍")
-                            .size(13.0)
+                            .size(14.0)
                             .color(to_color32(theme.text_muted)),
                     );
 
@@ -174,7 +174,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                             ui.add_space(40.0);
                             ui.label(
                                 egui::RichText::new("Ничего не найдено")
-                                    .size(13.0)
+                                    .size(14.0)
                                     .color(to_color32(theme.text_muted)),
                             );
                             if !state.query.is_empty() {
@@ -240,8 +240,8 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                                                 to_color32(theme.text_secondary)
                                             };
 
-                                            let mut title_text = egui::RichText::new(&item.title)
-                                                .size(12.5)
+                                            let mut title_text = egui::RichText::new(item.display_title())
+                                                .size(12.0)
                                                 .color(text_color);
                                             if is_selected {
                                                 title_text = title_text.strong();
@@ -249,10 +249,10 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                                             ui.label(title_text);
 
                                             // Subtitle or path
-                                            if let Some(sub) = &item.subtitle {
+                                            if let Some(sub) = item.display_subtitle() {
                                                 ui.label(
                                                     egui::RichText::new(sub)
-                                                        .size(10.5)
+                                                        .size(11.0)
                                                         .color(to_color32(theme.text_muted)),
                                                 );
                                             }
@@ -263,8 +263,8 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                                                     egui::Layout::right_to_left(egui::Align::Center),
                                                     |ui| {
                                                         ui.label(
-                                                            egui::RichText::new(sc)
-                                                                .size(10.0)
+                                                            egui::RichText::new(sc.as_ref())
+                                                                .size(11.0)
                                                                 .monospace()
                                                                 .color(to_color32(theme.accent_primary)),
                                                         );
@@ -315,13 +315,13 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                     if let Some(item) = state.selected_item() {
                         // Preview Header
                         ui.label(
-                            egui::RichText::new(&item.title)
-                                .size(13.5)
+                            egui::RichText::new(item.display_title())
+                                .size(14.0)
                                 .strong()
                                 .color(to_color32(theme.text_primary)),
                         );
 
-                        if let Some(sub) = &item.subtitle {
+                        if let Some(sub) = item.display_subtitle() {
                             ui.label(
                                 egui::RichText::new(sub)
                                     .size(11.0)
@@ -340,8 +340,8 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                             .show(ui, |ui| {
                                 if let Some(preview_text) = &item.preview {
                                     ui.label(
-                                        egui::RichText::new(preview_text)
-                                            .size(11.5)
+                                        egui::RichText::new(preview_text.as_ref())
+                                            .size(12.0)
                                             .color(to_color32(theme.text_secondary)),
                                     );
                                 } else {
@@ -354,7 +354,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                                                     if *is_dir { "Папка" } else { "Markdown заметка" },
                                                     path
                                                 ))
-                                                .size(11.5)
+                                                .size(12.0)
                                                 .color(to_color32(theme.text_muted)),
                                             );
                                         }
@@ -365,7 +365,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                                                     buffer_id,
                                                     path.as_deref().unwrap_or("Новый документ")
                                                 ))
-                                                .size(11.5)
+                                                .size(12.0)
                                                 .color(to_color32(theme.text_muted)),
                                             );
                                         }
@@ -376,14 +376,14 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                                                     command_id.as_str(),
                                                     item.category.as_deref().unwrap_or("Общее")
                                                 ))
-                                                .size(11.5)
+                                                .size(12.0)
                                                 .color(to_color32(theme.text_muted)),
                                             );
                                         }
                                         _ => {
                                             ui.label(
                                                 egui::RichText::new("Нажмите ↵ для выбора")
-                                                    .size(11.5)
+                                                    .size(12.0)
                                                     .color(to_color32(theme.text_muted)),
                                             );
                                         }
@@ -416,7 +416,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Меню действий для выбранного элемента:")
-                                .size(11.5)
+                                .size(12.0)
                                 .strong()
                                 .color(to_color32(theme.text_primary)),
                         );
@@ -424,7 +424,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                             if ui
                                 .label(
                                     egui::RichText::new("[Esc] Назад")
-                                        .size(10.5)
+                                        .size(11.0)
                                         .color(to_color32(theme.text_muted)),
                                 )
                                 .clicked()
@@ -459,7 +459,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                                     .show(ui, |ui| {
                                         ui.label(
                                             egui::RichText::new(&act.key)
-                                                .size(10.5)
+                                                .size(11.0)
                                                 .monospace()
                                                 .strong()
                                                 .color(to_color32(theme.accent_primary)),
@@ -468,12 +468,12 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
 
                                 ui.label(
                                     egui::RichText::new(&act.label)
-                                        .size(11.5)
+                                        .size(12.0)
                                         .color(to_color32(theme.text_primary)),
                                 );
                                 ui.label(
                                     egui::RichText::new(format!("— {}", act.description))
-                                        .size(10.5)
+                                        .size(11.0)
                                         .color(to_color32(theme.text_muted)),
                                 );
                             });

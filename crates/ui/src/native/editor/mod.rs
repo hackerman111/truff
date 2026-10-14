@@ -2,6 +2,7 @@
 mod invalidation;
 mod navigation;
 mod paragraph;
+mod syntax;
 mod viewport;
 
 use paragraph::Paragraph;
@@ -28,6 +29,7 @@ pub struct EditorWidget {
     heights: HeightIndex,
     buffer_id: Option<truff_core::text::BufferId>,
     revision: Option<u64>,
+    syntax: syntax::EditorSyntax,
 }
 
 pub fn color(value: Color) -> Color32 {

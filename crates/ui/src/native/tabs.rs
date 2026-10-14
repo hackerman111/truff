@@ -104,7 +104,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                                     1.4,
                                 );
 
-                                let rich = egui::RichText::new(title).size(12.5).color(text_color);
+                                let rich = egui::RichText::new(title).size(12.0).color(text_color);
                                 let resp = ui.selectable_label(false, rich);
 
                                 let (action_rect, action_resp) = ui.allocate_exact_size(

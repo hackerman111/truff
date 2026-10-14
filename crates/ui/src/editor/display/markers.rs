@@ -1,11 +1,147 @@
 use std::ops::Range;
 
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use truff_core::markdown::presentation::{LinePresentation, ListKind, ListMarker};
+
 use super::DisplayMap;
 
 impl DisplayMap {
     pub(super) fn scan_markers(&mut self) {
-        self.markers = scan_markdown_markers(&self.source_text);
-        // Marker parsing belongs to source changes, never to caret movement or scrolling.
+        self.markers.clear();
+        self.lists.clear();
+        if self.presentation.as_ref().is_some_and(|line| line.code) {
+            self.colors.clear();
+            return;
+        }
+        let text = &self.source_text;
+        let indent = if self
+            .presentation
+            .as_ref()
+            .is_some_and(|line| line.list.is_some())
+        {
+            text.len() - text.trim_start_matches([' ', '\t']).len()
+        } else {
+            0
+        };
+        let mut text_ranges: Vec<Range<usize>> = Vec::new();
+        let mut depth = 0usize;
+        let mut current_item = None;
+        for (event, range) in Parser::new_ext(
+            &text[indent..],
+            Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS,
+        )
+        .into_offset_iter()
+        {
+            let range = range.start + indent..range.end + indent;
+            match event {
+                Event::Start(Tag::List(_)) => depth += 1,
+                Event::End(TagEnd::List(_)) => depth = depth.saturating_sub(1),
+                Event::Start(Tag::Item) => {
+                    let tail = &text[range.start..range.end];
+                    let prefix_len = tail
+                        .bytes()
+                        .take_while(|byte| !byte.is_ascii_whitespace())
+                        .count();
+                    let end = range.start + prefix_len;
+                    let kind = if tail.starts_with(['-', '*', '+']) {
+                        ListKind::Bullet
+                    } else {
+                        ListKind::Ordered
+                    };
+                    self.lists.push(ListMarker {
+                        range: range.start..end,
+                        depth: depth.saturating_sub(1),
+                        kind,
+                    });
+                    current_item = Some(self.lists.len() - 1);
+                }
+                Event::TaskListMarker(checked) => {
+                    if let Some(index) = current_item {
+                        self.lists[index].range.end = range.end;
+                        self.lists[index].kind = ListKind::Task {
+                            checked,
+                            checkbox: range.start + 1,
+                        };
+                    }
+                }
+                Event::Start(Tag::Strong | Tag::Emphasis | Tag::Strikethrough) => {
+                    let source = &text[range.clone()];
+                    let marker_len = if source.starts_with("**")
+                        || source.starts_with("__")
+                        || source.starts_with("~~")
+                    {
+                        2
+                    } else {
+                        1
+                    };
+                    self.markers
+                        .push((range.start..range.start + marker_len, Some(range.clone())));
+                    self.markers
+                        .push((range.end - marker_len..range.end, Some(range)));
+                }
+                Event::Code(_) => {
+                    let count = text[range.clone()]
+                        .bytes()
+                        .take_while(|byte| *byte == b'`')
+                        .count();
+                    self.markers
+                        .push((range.start..range.start + count, Some(range.clone())));
+                    self.markers
+                        .push((range.end - count..range.end, Some(range)));
+                }
+                Event::Start(Tag::Heading { .. }) => {
+                    let prefix = text[range.clone()]
+                        .bytes()
+                        .take_while(|byte| *byte == b'#')
+                        .count();
+                    if prefix > 0 {
+                        let end = range.start + prefix;
+                        let end = end + usize::from(text.as_bytes().get(end) == Some(&b' '));
+                        self.markers.push((range.start..end, Some(range)));
+                    }
+                }
+                Event::Text(_) => {
+                    if let Some(previous) = text_ranges
+                        .last_mut()
+                        .filter(|previous| previous.end == range.start)
+                    {
+                        previous.end = range.end;
+                    } else {
+                        text_ranges.push(range);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for range in text_ranges {
+            let mut start = range.start;
+            while let Some(open) = text[start..range.end].find("[[") {
+                let open = start + open;
+                let Some(close) = text[open + 2..range.end].find("]]") else {
+                    break;
+                };
+                let close = open + 2 + close;
+                let span = open..close + 2;
+                self.markers.push((open..open + 2, Some(span.clone())));
+                self.markers.push((close..close + 2, Some(span)));
+                start = close + 2;
+            }
+        }
+        if let Some(LinePresentation { list, .. }) = &self.presentation {
+            self.lists.clear();
+            self.lists.extend(list.iter().cloned());
+        }
+        for list in &mut self.lists {
+            // Normalize marker spacing while keeping the source indentation intact.
+            while matches!(text.as_bytes().get(list.range.end), Some(b' ' | b'\t')) {
+                list.range.end += 1;
+            }
+            let end = text[list.range.end..]
+                .find('\n')
+                .map_or(text.len(), |len| list.range.end + len);
+            self.markers
+                .push((list.range.clone(), Some(list.range.start..end)));
+        }
         for span in &self.colors {
             self.markers.retain(|(range, _)| {
                 !ranges_touch(range, &span.opening) && !ranges_touch(range, &span.closing)
@@ -16,130 +152,30 @@ impl DisplayMap {
         }
         self.markers.sort_by_key(|(range, _)| range.start);
     }
+
+    pub(super) fn replacement(&self, range: &Range<usize>) -> Option<&'static str> {
+        let list = self.list_at_marker(range)?;
+        match list.kind {
+            ListKind::Bullet => Some(match list.depth % 3 {
+                0 => "• ",
+                1 => "◦ ",
+                _ => "▪ ",
+            }),
+            ListKind::Task { checked: false, .. } => Some("☐ "),
+            ListKind::Task { checked: true, .. } => Some("☑ "),
+            ListKind::Ordered => None,
+        }
+    }
+
+    pub(super) fn list_at_marker(&self, range: &Range<usize>) -> Option<&ListMarker> {
+        let index = self
+            .lists
+            .binary_search_by_key(&range.start, |list| list.range.start)
+            .ok()?;
+        self.lists.get(index).filter(|list| list.range == *range)
+    }
 }
 
 pub(super) fn ranges_touch(a: &Range<usize>, b: &Range<usize>) -> bool {
     a.start <= b.end && a.end >= b.start
-}
-
-/// Scans source text for standard Markdown syntax markers:
-/// - Bold: `**`
-/// - Italic: `*`
-/// - Strikethrough: `~~`
-/// - Inline code: `` ` ``
-/// - Headings: `# `, `## `, `### `
-/// - Wiki links: `[[` and `]]`
-fn scan_markdown_markers(text: &str) -> Vec<(Range<usize>, Option<Range<usize>>)> {
-    let mut markers = Vec::new();
-    let bytes = text.as_bytes();
-    let len = bytes.len();
-
-    // 1. Headings at start of lines: e.g. `# `, `## `, etc.
-    let mut line_start = 0;
-    while line_start < len {
-        let mut line_end = line_start;
-        while line_end < len && bytes[line_end] != b'\n' {
-            line_end += 1;
-        }
-
-        let line = &text[line_start..line_end];
-        let trimmed = line.trim_start();
-        let leading_spaces = line.len() - trimmed.len();
-
-        if trimmed.starts_with('#') {
-            let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-            if hash_count <= 6 {
-                let rest = &trimmed[hash_count..];
-                if rest.starts_with(' ') {
-                    let marker_start = line_start + leading_spaces;
-                    let marker_end = marker_start + hash_count + 1; // hashes + space
-                    markers.push((marker_start..marker_end, Some(line_start..line_end)));
-                }
-            }
-        }
-
-        line_start = if line_end < len {
-            line_end + 1
-        } else {
-            line_end
-        };
-    }
-
-    // 2. Bold `**...**` and Strikethrough `~~...~~`
-    scan_delimiter_pairs(text, "**", &mut markers);
-    scan_delimiter_pairs(text, "~~", &mut markers);
-
-    // 3. Wiki links `[[...]]`
-    let mut i = 0;
-    while i + 1 < len {
-        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
-            let open_start = i;
-            let open_end = i + 2;
-            if let Some(close_rel) = text[open_end..].find("]]") {
-                let close_start = open_end + close_rel;
-                let close_end = close_start + 2;
-                let span = open_start..close_end;
-
-                markers.push((open_start..open_end, Some(span.clone())));
-                markers.push((close_start..close_end, Some(span)));
-                i = close_end;
-                continue;
-            }
-        }
-        i += 1;
-    }
-
-    // 4. Single `*` italic (outside of `**`)
-    scan_single_italic(text, &mut markers);
-
-    markers
-}
-
-fn scan_delimiter_pairs(
-    text: &str,
-    delim: &str,
-    markers: &mut Vec<(Range<usize>, Option<Range<usize>>)>,
-) {
-    let mut search_from = 0;
-    while let Some(open_rel) = text[search_from..].find(delim) {
-        let open_start = search_from + open_rel;
-        let open_end = open_start + delim.len();
-
-        if let Some(close_rel) = text[open_end..].find(delim) {
-            let close_start = open_end + close_rel;
-            let close_end = close_start + delim.len();
-            let span = open_start..close_end;
-
-            markers.push((open_start..open_end, Some(span.clone())));
-            markers.push((close_start..close_end, Some(span)));
-            search_from = close_end;
-        } else {
-            break;
-        }
-    }
-}
-
-fn scan_single_italic(text: &str, markers: &mut Vec<(Range<usize>, Option<Range<usize>>)>) {
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    let mut open_idx = None;
-
-    while i < bytes.len() {
-        if bytes[i] == b'*' {
-            let prev_is_star = i > 0 && bytes[i - 1] == b'*';
-            let next_is_star = i + 1 < bytes.len() && bytes[i + 1] == b'*';
-
-            if !prev_is_star && !next_is_star {
-                if let Some(open_start) = open_idx.take() {
-                    let close_start = i;
-                    let span = open_start..close_start + 1;
-                    markers.push((open_start..open_start + 1, Some(span.clone())));
-                    markers.push((close_start..close_start + 1, Some(span)));
-                } else {
-                    open_idx = Some(i);
-                }
-            }
-        }
-        i += 1;
-    }
 }

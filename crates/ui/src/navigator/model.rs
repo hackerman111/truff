@@ -74,40 +74,45 @@ pub enum NavigatorItemPayload {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavigatorItem {
     pub id: u64,
-    pub title: String,
-    pub subtitle: Option<String>,
-    pub category: Option<String>,
-    pub shortcut: Option<String>,
+    pub title: Box<str>,
+    pub subtitle: Option<Box<str>>,
+    pub category: Option<Cow<'static, str>>,
+    pub shortcut: Option<Box<str>>,
     pub is_folder: bool,
     pub is_collapsed: bool,
     pub depth: usize,
-    pub preview: Option<String>,
+    pub preview: Option<Box<str>>,
     pub payload: NavigatorItemPayload,
+}
+
+fn file_name_start(path: &str) -> usize {
+    // Separators are ASCII bytes, so the result is always a UTF-8 boundary.
+    path.as_bytes()
+        .iter()
+        .rposition(|&byte| byte == b'/' || byte == b'\\')
+        .map_or(0, |index| index + 1)
 }
 
 impl NavigatorItem {
     pub fn new_file(
         id: u64,
-        name: String,
+        name: &str,
         relative_path: String,
         is_dir: bool,
         depth: usize,
     ) -> Self {
-        let subtitle = if is_dir {
-            Some("Папка".to_string())
+        let basename = &relative_path[file_name_start(&relative_path)..];
+        let title = if name == basename {
+            Box::default()
         } else {
-            std::path::Path::new(&relative_path)
-                .parent()
-                .and_then(|p| p.to_str())
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
+            name.into()
         };
 
         Self {
             id,
-            title: name,
-            subtitle,
-            category: Some("Файлы".to_string()),
+            title,
+            subtitle: None,
+            category: Some(Cow::Borrowed("Файлы")),
             shortcut: None,
             is_folder: is_dir,
             is_collapsed: false,
@@ -117,6 +122,30 @@ impl NavigatorItem {
                 path: relative_path,
                 is_dir,
             },
+        }
+    }
+
+    pub fn display_title(&self) -> &str {
+        if self.title.is_empty()
+            && let NavigatorItemPayload::File { path, .. } = &self.payload
+        {
+            return &path[file_name_start(path)..];
+        }
+        &self.title
+    }
+
+    pub fn display_subtitle(&self) -> Option<&str> {
+        if self.subtitle.is_some() {
+            return self.subtitle.as_deref();
+        }
+        match &self.payload {
+            NavigatorItemPayload::File { is_dir: true, .. } => Some("Папка"),
+            NavigatorItemPayload::File { path, .. } => file_name_start(path)
+                .checked_sub(1)
+                .map(|index| &path[..index])
+                .filter(|parent| !parent.is_empty()),
+            NavigatorItemPayload::Command { .. } => self.preview.as_deref(),
+            _ => None,
         }
     }
 
@@ -138,9 +167,9 @@ impl NavigatorItem {
 
         Self {
             id,
-            title,
-            subtitle: Some(subtitle),
-            category: Some("Буферы".to_string()),
+            title: title.into_boxed_str(),
+            subtitle: Some(subtitle.into_boxed_str()),
+            category: Some(Cow::Borrowed("Буферы")),
             shortcut: None,
             is_folder: false,
             is_collapsed: false,
@@ -155,19 +184,19 @@ impl NavigatorItem {
         command_id: CommandId,
         title: String,
         description: String,
-        category: String,
+        category: Cow<'static, str>,
         shortcut: Option<String>,
     ) -> Self {
         Self {
             id,
-            title,
-            subtitle: Some(description.clone()),
+            title: title.into_boxed_str(),
+            subtitle: None,
             category: Some(category),
-            shortcut,
+            shortcut: shortcut.map(String::into_boxed_str),
             is_folder: false,
             is_collapsed: false,
             depth: 0,
-            preview: Some(description),
+            preview: Some(description.into_boxed_str()),
             payload: NavigatorItemPayload::Command { command_id },
         }
     }
@@ -177,14 +206,16 @@ impl NavigatorItem {
         let title = format!("{prefix} {text}");
         Self {
             id,
-            title,
-            subtitle: Some(format!("Строка {line}")),
-            category: Some("Заголовки".to_string()),
+            title: title.into_boxed_str(),
+            subtitle: Some(format!("Строка {line}").into_boxed_str()),
+            category: Some(Cow::Borrowed("Заголовки")),
             shortcut: None,
             is_folder: false,
             is_collapsed: false,
             depth: level.saturating_sub(1),
-            preview: Some(format!("Заголовок уровня {level}: {text}\nСтрока: {line}")),
+            preview: Some(
+                format!("Заголовок уровня {level}: {text}\nСтрока: {line}").into_boxed_str(),
+            ),
             payload: NavigatorItemPayload::Heading { line, level, text },
         }
     }
@@ -293,7 +324,12 @@ impl NavigatorState {
         self.open = false;
         self.search_mode = false;
         self.actions_menu_open = false;
-        self.query.clear();
+        self.query = String::new();
+        self.context_title = String::new();
+        self.items = Vec::new();
+        self.filtered_indices = Vec::new();
+        self.selected_index = 0;
+        self.actions_menu_selected = 0;
     }
 
     /// Checks if Navigator is currently open.
@@ -324,14 +360,14 @@ impl NavigatorState {
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, item)| {
-                    let title_lower = lowercase(&item.title);
+                    let title_lower = lowercase(item.display_title());
                     let score = if title_lower == q {
                         200
                     } else if title_lower.starts_with(q.as_ref()) {
                         100
                     } else if title_lower.contains(q.as_ref()) {
                         50
-                    } else if lowercase(item.subtitle.as_deref().unwrap_or("")).contains(q.as_ref())
+                    } else if lowercase(item.display_subtitle().unwrap_or("")).contains(q.as_ref())
                     {
                         25
                     } else if lowercase(item.category.as_deref().unwrap_or("")).contains(q.as_ref())
@@ -481,7 +517,7 @@ impl NavigatorState {
                     acts.push(QuickAction {
                         key: "↵".to_string(),
                         label: "Открыть заметку".to_string(),
-                        description: format!("Открыть файл {}", item.title),
+                        description: format!("Открыть файл {}", item.display_title()),
                         action: NavigatorAction::OpenFile { path: path.clone() },
                     });
                 }
@@ -504,13 +540,13 @@ impl NavigatorState {
                 acts.push(QuickAction {
                     key: "r".to_string(),
                     label: "Переименовать".to_string(),
-                    description: format!("Изменить имя {}", item.title),
+                    description: format!("Изменить имя {}", item.display_title()),
                     action: NavigatorAction::RenameFile { path: path.clone() },
                 });
                 acts.push(QuickAction {
                     key: "d".to_string(),
                     label: "Удалить".to_string(),
-                    description: format!("Переместить {} в корзину", item.title),
+                    description: format!("Переместить {} в корзину", item.display_title()),
                     action: NavigatorAction::DeleteFile { path: path.clone() },
                 });
                 acts
@@ -536,7 +572,7 @@ impl NavigatorState {
             NavigatorItemPayload::Command { command_id } => vec![QuickAction {
                 key: "↵".to_string(),
                 label: "Выполнить команду".to_string(),
-                description: item.subtitle.clone().unwrap_or_default(),
+                description: item.display_subtitle().unwrap_or_default().to_owned(),
                 action: NavigatorAction::ExecuteCommand {
                     command_id: command_id.clone(),
                 },
@@ -773,6 +809,13 @@ fn is_subsequence(sub: &str, target: &str) -> bool {
 }
 
 fn lowercase(value: &str) -> Cow<'_, str> {
+    // Built-in categories repeat across thousands of rows in every filter pass.
+    match value {
+        "Файлы" => return Cow::Borrowed("файлы"),
+        "Буферы" => return Cow::Borrowed("буферы"),
+        "Заголовки" => return Cow::Borrowed("заголовки"),
+        _ => {}
+    }
     if value.is_ascii() && !value.bytes().any(|byte| byte.is_ascii_uppercase()) {
         Cow::Borrowed(value)
     } else {

@@ -11,8 +11,8 @@ fn old_filter(state: &NavigatorState) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter_map(|(idx, item)| {
-            let title = item.title.to_lowercase();
-            let subtitle = item.subtitle.as_deref().unwrap_or("").to_lowercase();
+            let title = item.display_title().to_lowercase();
+            let subtitle = item.display_subtitle().unwrap_or("").to_lowercase();
             let category = item.category.as_deref().unwrap_or("").to_lowercase();
             let score = if title == query {
                 200
@@ -59,11 +59,13 @@ fn borrowed_lowercase_filter_matches_previous_algorithm() {
         .iter()
         .enumerate()
         .map(|(id, title)| {
-            NavigatorItem::new_file(id as u64, (*title).into(), format!("dir/{title}"), false, 0)
+            NavigatorItem::new_file(id as u64, title, format!("dir/{title}"), false, 0)
         })
         .collect();
     state.items[8].subtitle = Some("Subtitle target".into());
     state.items[8].category = Some("Category target".into());
+    state.items[6].category = Some("Заголовки".into());
+    state.items[7].category = Some("Буферы".into());
 
     for query in [
         "",
@@ -77,6 +79,10 @@ fn borrowed_lowercase_filter_matches_previous_algorithm() {
         "i\u{307}",
         "subtitle",
         "category",
+        "Файлы",
+        "ФАЙЛЫ",
+        "заг",
+        "БуФеРы",
         "alp",
         "am",
         "missing",

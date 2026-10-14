@@ -1,95 +1,103 @@
+use std::ops::Range;
 use truff_core::navigation::{RowId, RowItem};
 
-#[derive(Debug)]
-struct TreeNode<'a> {
-    name: &'a str,
-    full_path: Option<&'a str>,
-    children: Vec<TreeNode<'a>>,
+struct TreePath {
+    path: String,
+    components: Range<usize>,
 }
 
-impl<'a> TreeNode<'a> {
-    fn new_dir(name: &'a str) -> Self {
-        Self {
-            name,
-            full_path: None,
-            children: Vec::new(),
-        }
+impl TreePath {
+    fn sort_key<'a>(
+        &'a self,
+        components: &'a [Range<usize>],
+    ) -> impl Iterator<Item = (bool, &'a str)> {
+        components[self.components.clone()]
+            .iter()
+            .enumerate()
+            .map(|(index, range)| {
+                (
+                    index + 1 == self.components.len(),
+                    &self.path[range.clone()],
+                )
+            })
     }
+}
 
-    fn new_file(name: &'a str, full_path: &'a str) -> Self {
-        Self {
-            name,
-            full_path: Some(full_path),
-            children: Vec::new(),
+pub(super) fn build_tree_items(files: Vec<String>) -> Vec<RowItem> {
+    // Parse once: repeatedly scanning separators during sorting dominates large catalogs.
+    let mut components = Vec::new();
+    let mut paths: Vec<TreePath> = files
+        .into_iter()
+        .map(|path| {
+            let first = components.len();
+            let mut start = 0;
+            for (end, byte) in path.bytes().enumerate() {
+                if byte == b'/' || byte == b'\\' {
+                    if start < end {
+                        components.push(start..end);
+                    }
+                    start = end + 1;
+                }
+            }
+            if start < path.len() {
+                components.push(start..path.len());
+            }
+            TreePath {
+                path,
+                components: first..components.len(),
+            }
+        })
+        .collect();
+    // Stable order preserves input order for paths equal after separator normalization.
+    paths.sort_by(|a, b| {
+        if let (Some(a_last), Some(b_last)) = (
+            components[a.components.clone()].last(),
+            components[b.components.clone()].last(),
+        ) && a.path[..a_last.start] == b.path[..b_last.start]
+        {
+            return a.path[a_last.clone()].cmp(&b.path[b_last.clone()]);
         }
-    }
-
-    fn insert(&mut self, parts: &[&'a str], full_path: &'a str) {
-        if parts.is_empty() {
-            return;
-        }
-        if parts.len() == 1 {
-            self.children.push(TreeNode::new_file(parts[0], full_path));
-        } else {
-            let dir_name = parts[0];
-            if let Some(pos) = self
-                .children
-                .iter()
-                .position(|c| c.name == dir_name && c.full_path.is_none())
-            {
-                self.children[pos].insert(&parts[1..], full_path);
+        a.sort_key(&components).cmp(b.sort_key(&components))
+    });
+    let mut items: Vec<RowItem> = Vec::with_capacity(paths.len() + paths.len() / 4);
+    let mut active_dirs: Vec<usize> = Vec::with_capacity(8);
+    for TreePath {
+        path,
+        components: range,
+    } in paths
+    {
+        for (depth, component) in components[range.clone()].iter().enumerate() {
+            let part = &path[component.clone()];
+            if depth + 1 < range.len() {
+                let current = active_dirs
+                    .get(depth)
+                    .map(|&index| items[index].title.as_str());
+                if current != Some(part) {
+                    active_dirs.truncate(depth);
+                    active_dirs.push(items.len());
+                    items.push(RowItem {
+                        id: RowId::new(items.len() as u64),
+                        title: part.to_owned(),
+                        depth,
+                        is_folder: true,
+                        is_collapsed: true,
+                        data: None,
+                    });
+                }
             } else {
-                let mut dir_node = TreeNode::new_dir(dir_name);
-                dir_node.insert(&parts[1..], full_path);
-                self.children.push(dir_node);
+                active_dirs.truncate(depth);
+                items.push(RowItem {
+                    id: RowId::new(items.len() as u64),
+                    title: part.to_owned(),
+                    depth,
+                    is_folder: false,
+                    is_collapsed: false,
+                    data: Some(path),
+                });
+                break;
             }
         }
     }
-
-    fn sort(&mut self) {
-        self.children.sort_by(|a, b| {
-            let a_is_dir = a.full_path.is_none();
-            let b_is_dir = b.full_path.is_none();
-            match (a_is_dir, b_is_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.cmp(b.name),
-            }
-        });
-        for child in &mut self.children {
-            child.sort();
-        }
-    }
-
-    fn flatten(&self, depth: usize, next_id: &mut u64, items: &mut Vec<RowItem>) {
-        for child in &self.children {
-            let id = RowId::new(*next_id);
-            *next_id += 1;
-            let is_folder = child.full_path.is_none();
-            items.push(RowItem {
-                id,
-                title: child.name.to_owned(),
-                depth,
-                is_folder,
-                is_collapsed: is_folder,
-                data: child.full_path.map(str::to_owned),
-            });
-            if is_folder {
-                child.flatten(depth + 1, next_id, items);
-            }
-        }
-    }
-}
-
-pub(super) fn build_tree_items(files: &[String]) -> Vec<RowItem> {
-    let mut root = TreeNode::new_dir("");
-    for file in files {
-        let parts: Vec<&str> = file.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
-        root.insert(&parts, file);
-    }
-    root.sort();
-    let mut items = Vec::new();
-    let mut next_id = 0;
-    root.flatten(0, &mut next_id, &mut items);
+    items.shrink_to_fit();
     items
 }

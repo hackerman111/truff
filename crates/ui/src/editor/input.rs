@@ -43,6 +43,8 @@ pub enum EditorInput {
     SelectAll,
     /// Paste text from clipboard.
     Paste(String),
+    /// Toggle the source character inside a task checkbox, preserving cursor and selection.
+    ToggleTask { checkbox: usize },
 }
 
 /// Unified input adapter maintaining transient IME composition state and executing edits.
@@ -99,6 +101,14 @@ impl InputAdapter {
             }
         }
         match input {
+            EditorInput::ToggleTask { checkbox } => {
+                let Some(transaction) =
+                    truff_core::markdown::presentation::toggle_task(buffer, checkbox)
+                else {
+                    return Ok(None);
+                };
+                buffer.apply(transaction).map(Some)
+            }
             EditorInput::ImePreedit { text, cursor: cur } => {
                 if text.is_empty() {
                     self.ime_preedit = None;

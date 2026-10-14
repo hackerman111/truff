@@ -111,7 +111,7 @@ mod tests {
             "Vault",
             vec![NavigatorItem::new_file(
                 1,
-                "Note.md".into(),
+                "Note.md",
                 "docs/Note.md".into(),
                 false,
                 0,

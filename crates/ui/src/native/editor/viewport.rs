@@ -53,7 +53,7 @@ impl EditorWidget {
                 self.cache.clear();
                 self.horizontal = 0.0;
             }
-            let y = self.heights.y_for_block(cursor_line);
+            let y = Self::TOP_MARGIN + self.heights.y_for_block(cursor_line);
             if y < self.scroll {
                 self.scroll = y;
             }
@@ -72,11 +72,14 @@ impl EditorWidget {
             .clamp(0.0, (self.heights.total_height() - rect.height()).max(0.0));
         let (top, local_y) = self.heights.block_at_y(self.scroll);
         let mut anchor = ScrollAnchor::new(top, local_y, self.scroll);
-        let first = self
+        let overscan = LINE_HEIGHT * 4.0;
+        let first = self.heights.block_at_y((self.scroll - overscan).max(0.0)).0;
+        let last = (self
             .heights
-            .block_at_y((self.scroll - rect.height()).max(0.0))
-            .0;
-        let last = (self.heights.block_at_y(self.scroll + rect.height() * 2.0).0 + 1).min(lines);
+            .block_at_y(self.scroll + rect.height() + overscan)
+            .0
+            + 1)
+        .min(lines);
         self.cache.retain(|line, _| *line >= first && *line < last);
         let foreground = color(theme.text_primary);
         let selection = if mode == Mode::VisualChar {
@@ -102,6 +105,7 @@ impl EditorWidget {
             None
         };
         let mut clicked = None;
+        let syntax = self.syntax.snapshot(buffer);
         for line in first..last {
             let start = line_start(buffer, line);
             let end = line_start(buffer, line + 1);
@@ -130,12 +134,33 @@ impl EditorWidget {
                 range.end -= 1;
             }
             let slice = buffer.slice(range.clone());
+            let presentation = if let Some(entry) = self.cache.get(&line).filter(|entry| {
+                entry.presentation_revision == buffer.revision() && entry.range == range
+            }) {
+                entry.presentation.clone()
+            } else {
+                let mut presentation = syntax
+                    .as_ref()
+                    .map(|syntax| syntax.line_presentation(range.clone()))
+                    .unwrap_or_default();
+                if let Some(list) = &mut presentation.list {
+                    list.range.start -= range.start;
+                    list.range.end -= range.start;
+                    if let truff_core::markdown::presentation::ListKind::Task { checkbox, .. } =
+                        &mut list.kind
+                    {
+                        *checkbox -= range.start;
+                    }
+                }
+                presentation
+            };
             let changed = self.cache.get(&line).is_none_or(|entry| {
-                (entry.range != range || entry.revision != buffer.revision())
-                    && !slice
-                        .chunks()
-                        .flat_map(str::bytes)
-                        .eq(entry.display.source_text().bytes())
+                entry.presentation != presentation
+                    || (entry.range != range || entry.revision != buffer.revision())
+                        && !slice
+                            .chunks()
+                            .flat_map(str::bytes)
+                            .eq(entry.display.source_text().bytes())
             });
             let style = ParagraphStyle {
                 foreground,
@@ -151,7 +176,13 @@ impl EditorWidget {
             if changed {
                 self.cache.insert(
                     line,
-                    Paragraph::new(range.clone(), slice.to_string(), &painter, style),
+                    Paragraph::new(
+                        range.clone(),
+                        slice.to_string(),
+                        presentation,
+                        &painter,
+                        style,
+                    ),
                 );
                 self.builds += 1;
             }
@@ -161,6 +192,7 @@ impl EditorWidget {
                 .expect("visible paragraph was inserted");
             entry.range = range.clone();
             entry.revision = buffer.revision();
+            entry.presentation_revision = buffer.revision();
             let paragraph_cursor = BytePos::new(if line == cursor_line {
                 cursor.saturating_sub(range.start)
             } else {
@@ -203,7 +235,8 @@ impl EditorWidget {
                     .galley
                     .pos_from_cursor(egui::text::CCursor::new(chars))
                     .min
-                    .x;
+                    .x
+                    + entry.text_indent;
                 if x < self.horizontal {
                     self.horizontal = x;
                 }
@@ -219,7 +252,7 @@ impl EditorWidget {
             self.scroll = anchor.scroll_offset_y;
             let origin = rect.left_top()
                 + Vec2::new(
-                    margin_x - if long { self.horizontal } else { 0.0 },
+                    margin_x + entry.text_indent - if long { self.horizontal } else { 0.0 },
                     Self::TOP_MARGIN + self.heights.y_for_block(line) - self.scroll,
                 );
             let intersects_viewport = origin.y < rect.bottom()
@@ -275,6 +308,14 @@ impl EditorWidget {
                     .char_indices()
                     .nth(index.0)
                     .map_or(entry.display.visual_text().len(), |(offset, _)| offset);
+                if response.clicked()
+                    && let Some(checkbox) = entry.display.task_at_visual(VisualPos::new(visual))
+                {
+                    clicked = Some(EditorInput::ToggleTask {
+                        checkbox: range.start + checkbox,
+                    });
+                    continue;
+                }
                 let source = range.start
                     + entry
                         .display

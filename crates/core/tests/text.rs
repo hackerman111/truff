@@ -588,6 +588,36 @@ fn rope_graphemes_handle_large_clusters_and_invalid_byte_positions() {
 }
 
 #[test]
+fn rope_snapping_matches_nearest_unicode_boundary_at_every_byte() {
+    use unicode_segmentation::UnicodeSegmentation;
+    for text in [String::new(), "é\r\na\u{301}👨‍👩‍👧‍👦🇷🇺क्‍ष".repeat(90)]
+    {
+        let buffer = Buffer::from_str(&text);
+        let boundaries: Vec<_> = text
+            .grapheme_indices(true)
+            .map(|(at, _)| at)
+            .chain([text.len()])
+            .collect();
+        for at in 0..=text.len() + 3 {
+            let expected = boundaries
+                .iter()
+                .copied()
+                .min_by_key(|&boundary| boundary.abs_diff(at))
+                .unwrap();
+            assert_eq!(
+                buffer.snap_to_grapheme_boundary(BytePos::new(at)),
+                BytePos::new(expected),
+                "at {at}"
+            );
+        }
+        assert_eq!(
+            buffer.snap_to_grapheme_boundary(BytePos::new(usize::MAX)),
+            BytePos::new(text.len())
+        );
+    }
+}
+
+#[test]
 fn buffer_floor_char_boundary_and_line_of_byte_multibyte() {
     let buffer = Buffer::from_str("АБВ\nГДЕёжз");
     // "А" is bytes 0..2, "Б" is 2..4, "В" is 4..6, "\n" is 6..7

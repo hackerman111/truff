@@ -14,25 +14,16 @@ pub fn resolve_font_and_line_height(source: &str, typography: &TypographyConfig)
     let base = typography.base_font_size;
     let source_trim = source.trim_start();
     if source_trim.starts_with("# ") {
-        let size = (base * 1.8).round();
+        let size = (base * 1.6).round();
         (FontId::new(size, family), (size * 1.3).round())
     } else if source_trim.starts_with("## ") {
-        let size = (base * 1.45).round();
+        let size = (base * 1.35).round();
         (FontId::new(size, family), (size * 1.35).round())
-    } else if source_trim.starts_with("### ") {
-        let size = (base * 1.25).round();
+    } else if source_trim.starts_with("### ") || source_trim.starts_with("#### ") {
+        let size = (base * 1.15).round();
         (FontId::new(size, family), (size * 1.4).round())
-    } else if source_trim.starts_with("#### ") {
-        let size = (base * 1.1).round();
-        (FontId::new(size, family), (size * 1.45).round())
-    } else if source_trim.starts_with("##### ") {
-        let size = (base * 1.0).round();
-        (FontId::new(size, family), (size * 1.5).round())
-    } else if source_trim.starts_with("###### ") {
-        let size = (base * 0.95).round();
-        (FontId::new(size, family), (size * 1.5).round())
     } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
-        let size = (base * 0.9).round();
+        let size = base;
         (
             FontId::new(size, egui::FontFamily::Monospace),
             (size * 1.5).round(),
@@ -52,8 +43,18 @@ pub(super) fn shape(
     foreground: Color32,
     width: f32,
     typography: &TypographyConfig,
-) -> Arc<Galley> {
+) -> (Arc<Galley>, f32) {
     let (font, line_height) = resolve_font_and_line_height(display.source_text(), typography);
+    let indent = display.list_content_start().map_or(0.0, |start| {
+        painter
+            .layout_no_wrap(
+                display.visual_text()[..start.get()].to_owned(),
+                font.clone(),
+                foreground,
+            )
+            .size()
+            .x
+    });
 
     let mut job =
         egui::text::LayoutJob::simple(display.visual_text().to_owned(), font, foreground, width);
@@ -104,7 +105,10 @@ pub(super) fn shape(
             format: base,
         });
     }
-    painter.layout_job(job)
+    // A negative first-row indent reserves a hanging margin for subsequent rows.
+    job.sections[0].leading_space = -indent;
+    job.wrap.max_width = (width - indent).max(1.0);
+    (painter.layout_job(job), indent)
 }
 
 pub(super) fn apply_theme(ui: &mut egui::Ui, theme: &crate::theme::Theme) {

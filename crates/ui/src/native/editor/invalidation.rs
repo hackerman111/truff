@@ -2,8 +2,14 @@ use super::EditorWidget;
 use truff_core::{Buffer, workspace::BufferChange};
 
 impl EditorWidget {
+    /// Font data changes invalidate galleys independently of the compact typography key.
+    pub(in crate::native) fn invalidate_fonts(&mut self) {
+        self.cache.clear();
+    }
+
     /// Rebase cached rows using the unchanged prefix/suffix of the edit summary.
     pub(in crate::native) fn apply_change(&mut self, buffer: &Buffer, change: &BufferChange) {
+        self.syntax.apply_change(buffer, change);
         if self.buffer_id != Some(buffer.id())
             || change.buffer_id != buffer.id()
             || change.revision != buffer.revision()

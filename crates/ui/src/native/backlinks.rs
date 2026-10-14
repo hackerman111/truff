@@ -37,7 +37,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                             let is_selected = index == application.backlink_selection;
                             let rich =
                                 egui::RichText::new(&application.backlinks[index].source_path)
-                                    .size(13.5)
+                                    .size(14.0)
                                     .color(if is_selected {
                                         color(theme.text_primary)
                                     } else {

@@ -169,7 +169,10 @@ fn focus_routes_once() {
     let action2 = shell.feed_key(Key::Char('d'));
     assert_eq!(action2, ShellAction::EditorEdit);
     assert_eq!(shell.editor_text(), "second line\n");
-    assert_eq!(shell.sidebar_files(), vec!["note1.md", "note2.md"]);
+    assert_eq!(
+        shell.sidebar_file_paths().collect::<Vec<_>>(),
+        vec!["note1.md", "note2.md"]
+    );
 
     // 2. Switch focus to Sidebar
     shell.set_focus(Focus::Sidebar);
@@ -427,4 +430,109 @@ fn test_focus_manager_stack_and_deterministic_pop() {
     let action2 = shell.feed_key(Key::Esc);
     assert_eq!(action2, ShellAction::FocusChanged(Focus::Editor));
     assert_eq!(shell.focus(), Focus::Editor);
+}
+#[test]
+fn sidebar_moves_path_storage_into_rows() {
+    let path = String::from("docs/字🦀.md");
+    let original_storage = path.as_ptr();
+    let mut shell = Shell::new();
+    shell.set_sidebar_files(vec![path]);
+    let row = shell
+        .sidebar_model()
+        .all_items()
+        .iter()
+        .find(|row| !row.is_folder)
+        .unwrap();
+    assert_eq!(row.title, "字🦀.md");
+    assert_eq!(row.data.as_ref().unwrap().as_ptr(), original_storage);
+}
+
+#[test]
+fn sidebar_tree_orders_folders_before_files_at_each_depth() {
+    let mut shell = Shell::new();
+    shell.set_sidebar_files(vec![
+        "z.md".into(),
+        "a/b/z.md".into(),
+        "a.md".into(),
+        "a/c.md".into(),
+        "a/b".into(),
+        "b\\sub\\字.md".into(),
+        "a/b/a.md".into(),
+        "a/b/deep/end.md".into(),
+        "a/c.md".into(),
+        "//empty///name.md".into(),
+        "".into(),
+    ]);
+    let rows: Vec<_> = shell
+        .sidebar_model()
+        .all_items()
+        .iter()
+        .map(|row| {
+            (
+                row.title.as_str(),
+                row.depth,
+                row.is_folder,
+                row.data.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("a", 0, true, None),
+            ("b", 1, true, None),
+            ("deep", 2, true, None),
+            ("end.md", 3, false, Some("a/b/deep/end.md")),
+            ("a.md", 2, false, Some("a/b/a.md")),
+            ("z.md", 2, false, Some("a/b/z.md")),
+            ("b", 1, false, Some("a/b")),
+            ("c.md", 1, false, Some("a/c.md")),
+            ("c.md", 1, false, Some("a/c.md")),
+            ("b", 0, true, None),
+            ("sub", 1, true, None),
+            ("字.md", 2, false, Some("b\\sub\\字.md")),
+            ("empty", 0, true, None),
+            ("name.md", 1, false, Some("//empty///name.md")),
+            ("a.md", 0, false, Some("a.md")),
+            ("z.md", 0, false, Some("z.md")),
+        ]
+    );
+    shell.select_sidebar_file("a/b/deep/end.md");
+    assert_eq!(
+        shell.sidebar_model().selected_row().unwrap().title,
+        "end.md"
+    );
+}
+
+#[test]
+fn sidebar_tree_normalizes_trailing_separators_for_ordering() {
+    let mut shell = Shell::new();
+    shell.set_sidebar_files(vec![
+        "a/".into(),
+        "a/b.md".into(),
+        "a\\".into(),
+        "///".into(),
+    ]);
+    let rows: Vec<_> = shell
+        .sidebar_model()
+        .all_items()
+        .iter()
+        .map(|row| {
+            (
+                row.title.as_str(),
+                row.depth,
+                row.is_folder,
+                row.data.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("a", 0, true, None),
+            ("b.md", 1, false, Some("a/b.md")),
+            ("a", 0, false, Some("a/")),
+            ("a", 0, false, Some("a\\")),
+        ]
+    );
 }

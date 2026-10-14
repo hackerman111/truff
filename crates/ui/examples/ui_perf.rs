@@ -92,7 +92,7 @@ fn run_navigator_filter() {
             let title = format!("note-{idx:05}.md");
             NavigatorItem::new_file(
                 idx as u64,
-                title.clone(),
+                &title,
                 format!("folder-{idx:05}/{title}"),
                 false,
                 0,

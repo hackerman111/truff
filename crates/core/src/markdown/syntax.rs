@@ -106,6 +106,31 @@ impl IncrementalSyntaxTree {
         self.snapshot()
     }
 
+    /// Reparses a summarized replacement while retaining unchanged syntax subtrees.
+    pub fn replace_rope_range(
+        &mut self,
+        old: &crop::Rope,
+        new: &crop::Rope,
+        old_range: Range<usize>,
+        new_range: Range<usize>,
+    ) {
+        let point = |rope: &crop::Rope, offset: usize| {
+            let row = rope.line_of_byte(offset);
+            tree_sitter::Point::new(row, offset - rope.byte_of_line(row))
+        };
+        if let Some(tree) = &mut self.tree {
+            tree.edit(&InputEdit {
+                start_byte: old_range.start,
+                old_end_byte: old_range.end,
+                new_end_byte: new_range.end,
+                start_position: point(old, old_range.start),
+                old_end_position: point(old, old_range.end),
+                new_end_position: point(new, new_range.end),
+            });
+        }
+        self.parse_rope(new);
+    }
+
     fn parse_rope(&mut self, rope: &crop::Rope) {
         self.tree = self.parser.parse_with_options(
             &mut |offset, _| {

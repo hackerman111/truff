@@ -103,9 +103,9 @@ impl WhichKeyOverlay {
     /// Hides the overlay and clears pending hints and categories.
     pub fn hide(&mut self) {
         self.visible = false;
-        self.hints.clear();
-        self.categories.clear();
-        self.title.clear();
+        self.hints = Vec::new();
+        self.categories = Vec::new();
+        self.title = String::new();
         self.mode = WhichKeyMode::Prefix;
         self.elapsed_ms = 0;
     }

@@ -152,7 +152,7 @@ impl SettingsDialog {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Путь к TTF/OTF:")
-                                .size(11.5)
+                                .size(12.0)
                                 .color(color(theme.text_muted)),
                         );
                         ui.add(

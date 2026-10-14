@@ -229,7 +229,7 @@ pub(super) fn show(
 
                                     let rich = egui::RichText::new(&row.title)
                                         .color(text_color)
-                                        .size(12.5);
+                                        .size(12.0);
                                     ui.label(rich);
 
                                     if is_dirty {
@@ -248,9 +248,7 @@ pub(super) fn show(
                                 });
                             });
 
-                            let rect = frame_resp.response.rect;
-                            let interact_resp =
-                                ui.interact(rect, ui.auto_id_with(row.id), egui::Sense::click());
+                            let interact_resp = frame_resp.response.interact(egui::Sense::click());
                             if interact_resp.clicked() {
                                 if row.is_folder {
                                     toggle_folder = Some(row.id);
@@ -260,6 +258,7 @@ pub(super) fn show(
                             }
 
                             if is_active {
+                                let rect = interact_resp.rect;
                                 ui.painter().line_segment(
                                     [
                                         egui::pos2(rect.left(), rect.top() + 3.0),

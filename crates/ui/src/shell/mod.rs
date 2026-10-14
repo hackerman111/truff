@@ -57,7 +57,6 @@ impl std::error::Error for InputError {}
 pub struct Shell {
     focus: Focus,
     focus_manager: FocusManager,
-    sidebar_files: Vec<String>,
     sidebar_model: RowModel,
     right_model: RowModel,
     right_available: bool,
@@ -100,7 +99,6 @@ impl Shell {
         Self {
             focus: Focus::Editor,
             focus_manager: FocusManager::new(),
-            sidebar_files: Vec::new(),
             sidebar_model: RowModel::new(),
             right_model: RowModel::new(),
             right_available: false,

@@ -40,6 +40,168 @@ fn scratch(text: &str) -> (NativeApp, egui::Context) {
 }
 
 #[test]
+fn native_lists_keep_depth_code_context_and_toggle_tasks_with_undo() {
+    let source =
+        "plain\n1. parent\n   - child\n     - [ ] task\n\n```md\n- [ ] literal **bold**\n```\n";
+    let (mut app, context) = scratch(source);
+    let output = frame(&mut app, &context, vec![]);
+    let text = |needle: &str| {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text.contains(needle) => Some(text),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing {needle}"))
+    };
+    assert_eq!(text("parent").galley.job.text, "1. parent");
+    assert_eq!(text("child").galley.job.text, "   ◦ child");
+    let task = text("task");
+    assert_eq!(task.galley.job.text, "     ☐ task");
+    assert_eq!(text("literal").galley.job.text, "- [ ] literal **bold**");
+    let glyph = &task.galley.rows[0].glyphs[5];
+    let position = task.pos
+        + egui::vec2(
+            glyph.pos.x + glyph.advance_width * 0.2,
+            task.galley.size().y * 0.5,
+        );
+    frame(&mut app, &context, vec![Event::PointerMoved(position)]);
+    for pressed in [true, false] {
+        frame(
+            &mut app,
+            &context,
+            vec![Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    assert!(app.application.shell.editor_text().contains("- [x] task"));
+    frame(&mut app, &context, vec![Event::Text("u".into())]);
+    assert_eq!(app.application.shell.editor_text(), source);
+    let builds = app.editor.layout_rebuild_count();
+    frame(&mut app, &context, vec![]);
+    assert_eq!(app.editor.layout_rebuild_count(), builds);
+}
+
+#[test]
+fn sidebar_frame_response_toggles_folders_and_opens_files() {
+    fn label_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == label => {
+                    Some(text.pos + text.galley.size() * 0.5)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing label {label}"))
+    }
+    fn click(app: &mut NativeApp, context: &egui::Context, pos: egui::Pos2) {
+        frame(app, context, vec![Event::PointerMoved(pos)]);
+        for pressed in [true, false] {
+            frame(
+                app,
+                context,
+                vec![Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+    }
+    let vault = std::env::temp_dir().join(format!(
+        "truff-native-sidebar-{}-{}",
+        std::process::id(),
+        truff_core::text::BufferId::next()
+    ));
+    std::fs::create_dir_all(vault.join("folder")).unwrap();
+    std::fs::write(vault.join("a.md"), "root note").unwrap();
+    std::fs::write(vault.join("folder/b.md"), "nested note").unwrap();
+    let mut application = Application::new();
+    application.open_vault(&vault).unwrap();
+    let start = std::time::Instant::now();
+    while application.needs_poll() {
+        application.poll();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(15),
+            "{}",
+            application.status
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let context = egui::Context::default();
+    let mut app = NativeApp::new(application, &context);
+    frame(&mut app, &context, vec![]);
+    let output = frame(&mut app, &context, vec![]);
+    let pos = label_center(&output, "folder");
+    click(&mut app, &context, pos);
+    assert_eq!(app.application.shell.sidebar_model().visible_count(), 3);
+    let output = frame(&mut app, &context, vec![]);
+    let pos = label_center(&output, "b.md");
+    click(&mut app, &context, pos);
+    assert_eq!(
+        app.application.active_relative_path().as_deref(),
+        Some("folder/b.md")
+    );
+    app.application.shutdown().unwrap();
+    drop(app);
+    std::fs::remove_dir_all(vault).unwrap();
+}
+
+#[test]
+fn viewport_cache_stays_near_one_screen_while_moving() {
+    let (mut app, context) = scratch(&"plain **bold** 字🦀\n".repeat(30_000));
+    assert!(app.editor.cached_paragraph_count() <= 40);
+    for step in 0..100 {
+        frame(&mut app, &context, vec![Event::Text("j".into())]);
+        assert!(app.editor.cached_paragraph_count() <= 40);
+        assert!(
+            app.editor.cursor_rect().is_some(),
+            "step {step}, top {}, scroll {}",
+            app.editor.top_line(),
+            app.editor.scroll_offset()
+        );
+    }
+}
+
+#[test]
+fn editor_font_sizes_share_four_levels_and_keep_configured_base() {
+    use truff_ui::{app::global_config::TypographyConfig, native::resolve_font_and_line_height};
+    for base in [12.0, 15.0, 22.0] {
+        let typography = TypographyConfig {
+            base_font_size: base,
+            ..Default::default()
+        };
+        let sources = [
+            "plain", "# a", "## b", "### c", "#### d", "##### e", "###### f", "```",
+        ];
+        let mut sizes: Vec<_> = sources
+            .iter()
+            .map(|text| {
+                resolve_font_and_line_height(text, &typography)
+                    .0
+                    .size
+                    .to_bits()
+            })
+            .collect();
+        sizes.sort_unstable();
+        sizes.dedup();
+        assert!(sizes.len() <= 4, "base {base}: {sizes:?}");
+        assert_eq!(
+            resolve_font_and_line_height("plain", &typography).0.size,
+            base
+        );
+    }
+}
+
+#[test]
 fn printable_os_key_and_text_are_dispatched_once() {
     let (mut app, context) = scratch("first\nsecond\n");
     frame(
@@ -238,16 +400,16 @@ fn test_visual_mode_character_and_line_highlighting_dimensions() {
     let (mut app, context) = scratch("# Heading\nregular text line\nЯ0g\n");
     frame(&mut app, &context, vec![]);
 
-    // 1. Heading line: '#' character highlight matches character height + padding, not full 40px line height
+    // The caret follows the shaped glyph height even when heading sizes are quantized.
     let heading_cursor = app.editor.cursor_rect().expect("heading cursor rect");
     assert!(
-        heading_cursor.height() >= 23.0 && heading_cursor.height() <= 27.0,
-        "Heading highlight height must match glyph height + padding (~24-26px), not full line height 40.0: got {}",
+        heading_cursor.height() >= 20.0 && heading_cursor.height() <= 24.0,
+        "Heading highlight must follow glyph height rather than the full line height: got {}",
         heading_cursor.height()
     );
     assert!(
-        heading_cursor.width() > 15.0,
-        "Heading character width must match glyph advance width + padding (> 15.0): got {}",
+        heading_cursor.width() > 13.0,
+        "Heading character width must match glyph advance width + padding: got {}",
         heading_cursor.width()
     );
 
@@ -417,4 +579,47 @@ fn test_settings_command_opens_dialog_in_native_app() {
     frame(&mut app, &context, vec![]);
     assert!(!app.application.settings_requested);
     assert!(app.dialogs.settings.open);
+}
+#[test]
+fn wrapped_list_rows_align_with_the_item_text() {
+    let source = format!("plain\n- {}", "word ".repeat(50));
+    let (mut app, context) = scratch(&source);
+    let output = frame(&mut app, &context, vec![]);
+    let text = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.starts_with("• ") => Some(text),
+            _ => None,
+        })
+        .unwrap();
+    assert!(text.galley.rows.len() > 1);
+    let first = &text.galley.rows[0];
+    let next = &text.galley.rows[1];
+    let first_x = first.pos.x + first.glyphs[2].pos.x;
+    let next_x = next.pos.x + next.glyphs[0].pos.x;
+    assert!((first_x - next_x).abs() < 1.0, "{first_x} != {next_x}");
+}
+
+#[test]
+fn editing_a_fence_updates_cached_list_context_on_other_lines() {
+    let (mut app, context) = scratch("plain\n- item\n");
+    app.application
+        .shell
+        .apply_transaction(truff_core::Transaction::replace(0..5, "```md"))
+        .unwrap();
+    let output = frame(&mut app, &context, vec![]);
+    assert!(output.shapes.iter().any(
+        |shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "- item")
+    ));
+    let view = app.application.shell.editor_view().unwrap().id();
+    app.application
+        .shell
+        .workspace_mut()
+        .dispatch(truff_core::commands::Action::Undo(view))
+        .unwrap();
+    let output = frame(&mut app, &context, vec![]);
+    assert!(output.shapes.iter().any(
+        |shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "• item")
+    ));
 }

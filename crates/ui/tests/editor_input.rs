@@ -229,3 +229,38 @@ fn test_semantic_design_tokens() {
     assert_eq!(light.bg_elevated, light.bg_surface);
     assert_eq!(light.accent_primary, light.accent);
 }
+#[test]
+fn task_toggle_preserves_selection_and_can_be_undone() {
+    let mut shell = Shell::new();
+    shell.set_editor_text("- [ ] задача\n- [X] готово\n");
+    shell
+        .apply_input(EditorInput::SetSelection {
+            anchor: 6,
+            head: 10,
+        })
+        .unwrap();
+    let before = shell.editor_view().unwrap().clone();
+    shell
+        .apply_input(EditorInput::ToggleTask { checkbox: 3 })
+        .unwrap();
+    assert!(shell.editor_text().starts_with("- [x]"));
+    let after = shell.editor_view().unwrap();
+    assert_eq!(after.anchor(), before.anchor());
+    assert_eq!(after.head(), before.head());
+    let id = after.id();
+    shell
+        .workspace_mut()
+        .dispatch(truff_core::commands::Action::Undo(id))
+        .unwrap();
+    assert!(shell.editor_text().starts_with("- [ ]"));
+    let revision = shell.editor_buffer().unwrap().revision();
+    shell
+        .apply_input(EditorInput::ToggleTask {
+            checkbox: usize::MAX,
+        })
+        .unwrap();
+    shell
+        .apply_input(EditorInput::ToggleTask { checkbox: 0 })
+        .unwrap();
+    assert_eq!(shell.editor_buffer().unwrap().revision(), revision);
+}

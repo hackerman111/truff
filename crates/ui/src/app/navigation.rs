@@ -38,9 +38,9 @@ impl Application {
         let Some((id, _)) = &self.pending_location else {
             return Ok(());
         };
-        if self.shell.editor_buffer().is_none() {
+        let Some(buffer) = self.shell.editor_buffer() else {
             return Ok(());
-        }
+        };
         if self
             .shell
             .editor_view()
@@ -50,10 +50,10 @@ impl Application {
             return Ok(());
         }
         let (_, location) = self.pending_location.take().expect("checked destination");
-        let text = self.shell.editor_text();
         let offset = match location {
             Location::Byte(offset) => offset,
             Location::Anchor(anchor) => {
+                let text = buffer.as_str();
                 let facts = MarkdownFacts::extract(&text)?;
                 facts
                     .headings
@@ -70,7 +70,7 @@ impl Application {
                     .ok_or("Link anchor is missing")?
             }
         };
-        let pos = BytePos::new(crate::editor::snap_to_grapheme_boundary(&text, offset));
+        let pos = buffer.snap_to_grapheme_boundary(BytePos::new(offset));
         if let Some(view_id) = self.shell.workspace().active_view()
             && let Some(view) = self.shell.workspace_mut().get_view_mut(view_id)
         {
