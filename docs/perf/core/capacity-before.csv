@@ -1,0 +1,11 @@
+run,scenario,iterations,total_ns,ns_per_op,history_bytes
+1,oversized_capacity_insert,1000,159757,159,1049608
+1,ordinary_insert,1000,157968,157,1040
+2,oversized_capacity_insert,1000,161218,161,1049608
+2,ordinary_insert,1000,166053,166,1040
+3,oversized_capacity_insert,1000,159574,159,1049608
+3,ordinary_insert,1000,158041,158,1040
+4,oversized_capacity_insert,1000,157840,157,1049608
+4,ordinary_insert,1000,154728,154,1040
+5,oversized_capacity_insert,1000,218534,218,1049608
+5,ordinary_insert,1000,156561,156,1040

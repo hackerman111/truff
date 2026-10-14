@@ -1,0 +1,6 @@
+run,scenario,iterations,total_ns,ns_per_op
+1,recovery_write_16k,100,530668395,5306683
+2,recovery_write_16k,100,532972567,5329725
+3,recovery_write_16k,100,511737064,5117370
+4,recovery_write_16k,100,475196814,4751968
+5,recovery_write_16k,100,514927643,5149276

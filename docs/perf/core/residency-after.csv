@@ -1,0 +1,6 @@
+run,scenario,resident_buffers,resident_text_bytes,history_bytes,rss_bytes,pss_bytes
+1,closed_32x512k,1,0,0,21336064,18772992
+2,closed_32x512k,1,0,0,21319680,18772992
+3,closed_32x512k,1,0,0,21340160,18765824
+4,closed_32x512k,1,0,0,21331968,18757632
+5,closed_32x512k,1,0,0,21327872,18764800

@@ -1,0 +1,6 @@
+run,scenario,iterations,ns_per_op
+1,alternating_empty_g,100000,1078
+2,alternating_empty_g,100000,1040
+3,alternating_empty_g,100000,1012
+4,alternating_empty_g,100000,1006
+5,alternating_empty_g,100000,1014

@@ -1,0 +1,11 @@
+run,scenario,iterations,ns_per_op
+1,alternating_empty_g,100000,604
+1,compiled_keymap,1000,8576
+2,alternating_empty_g,100000,619
+2,compiled_keymap,1000,8230
+3,alternating_empty_g,100000,599
+3,compiled_keymap,1000,8388
+4,alternating_empty_g,100000,631
+4,compiled_keymap,1000,8245
+5,alternating_empty_g,100000,598
+5,compiled_keymap,1000,8100
