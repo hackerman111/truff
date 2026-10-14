@@ -53,7 +53,7 @@ fn dirty_external_conflict() {
     let save_job = StoreJob::SaveFile {
         key,
         path: file_path.clone(),
-        content: dirty_content,
+        content: dirty_content.as_str().into(),
         base_fingerprint: Some(initial_fp),
     };
 
@@ -109,7 +109,7 @@ fn failed_save_keeps_dirty() {
     let job = StoreJob::SaveFile {
         key,
         path: bad_path,
-        content: "some text edit".to_string(),
+        content: "some text edit".into(),
         base_fingerprint: None,
     };
 
@@ -189,7 +189,7 @@ fn durable_queue_full() {
         let job = StoreJob::SaveFile {
             key,
             path: dummy_path.clone(),
-            content: format!("content {i}"),
+            content: format!("content {i}").as_str().into(),
             base_fingerprint: None,
         };
         match store.try_submit(job) {
@@ -218,7 +218,7 @@ fn shutdown_preserves_accepted_save() {
     let job = StoreJob::SaveFile {
         key,
         path: file_path.clone(),
-        content: "important data saved before exit\n".to_string(),
+        content: "important data saved before exit\n".into(),
         base_fingerprint: None,
     };
 

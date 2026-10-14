@@ -65,7 +65,12 @@ impl Shell {
             }
             self.custom_keymap = custom;
         }
-        let buffer = self.editor_buffer().ok_or(InputError::UnavailableTarget)?;
+        let buffer = self
+            .workspace
+            .active_view()
+            .and_then(|id| self.workspace.get_view(id))
+            .and_then(|view| self.workspace.buffers().get_buffer(view.buffer_id()))
+            .ok_or(InputError::UnavailableTarget)?;
         let mut targets = Vec::new();
         if kind == FlashKind::SyntaxObject {
             let objects = self
@@ -90,65 +95,74 @@ impl Shell {
                 if targets.len() == 100 {
                     break;
                 }
-                let visible = buffer.slice(range.clone()).to_string();
-                let candidates = match kind {
-                    FlashKind::Word => FlashOverlay::generate_targets(&visible, range.start)
-                        .into_iter()
-                        .map(|t| t.source_range)
-                        .collect::<Vec<_>>(),
-                    FlashKind::Sentence => visible
-                        .split_sentence_bound_indices()
-                        .filter(|(_, s)| !s.trim().is_empty())
-                        .take(100)
-                        .map(|(offset, s)| {
-                            let whitespace = s.len() - s.trim_start().len();
-                            range.start + offset + whitespace..range.start + offset + s.len()
-                        })
-                        .collect(),
+                let slice = buffer.slice(range.clone());
+                let mut chunks = slice.chunks();
+                let first = chunks.next().unwrap_or("");
+                let visible = if chunks.next().is_none() {
+                    std::borrow::Cow::Borrowed(first)
+                } else {
+                    std::borrow::Cow::Owned(slice.to_string())
+                };
+                let mut add = |target| {
+                    if !targets.contains(&target) {
+                        targets.push(target);
+                    }
+                    targets.len() == 100
+                };
+                match kind {
+                    FlashKind::Word => {
+                        for target in FlashOverlay::word_ranges(&visible, range.start) {
+                            if add(target) {
+                                break;
+                            }
+                        }
+                    }
+                    FlashKind::Sentence => {
+                        for (offset, sentence) in visible
+                            .split_sentence_bound_indices()
+                            .filter(|(_, s)| !s.trim().is_empty())
+                            .take(100)
+                        {
+                            let whitespace = sentence.len() - sentence.trim_start().len();
+                            if add(range.start + offset + whitespace
+                                ..range.start + offset + sentence.len())
+                            {
+                                break;
+                            }
+                        }
+                    }
                     FlashKind::Paragraph => {
-                        let mut candidates = Vec::new();
                         let mut offset = range.start;
                         let mut start = None;
+                        let mut count = 0;
                         for line in visible.split_inclusive('\n') {
                             if line.trim().is_empty() {
                                 if let Some(start) = start.take() {
-                                    candidates.push(start..offset);
+                                    count += 1;
+                                    if add(start..offset) || count == 100 {
+                                        break;
+                                    }
                                 }
                             } else if start.is_none() {
                                 start = Some(offset);
                             }
                             offset += line.len();
-                            if candidates.len() == 100 {
-                                break;
-                            }
                         }
-                        if candidates.len() < 100
+                        if count < 100
                             && let Some(start) = start
                         {
-                            candidates.push(start..offset);
+                            add(start..offset);
                         }
-                        candidates
                     }
                     FlashKind::SyntaxObject => unreachable!(),
-                };
-                for target in candidates {
-                    if !targets.contains(&target) {
-                        targets.push(target);
-                    }
-                    if targets.len() == 100 {
-                        break;
-                    }
                 }
             }
         }
-        let candidates = targets
-            .into_iter()
-            .map(|range| {
+        self.flash
+            .activate_candidates(targets.into_iter().map(|range| {
                 let text = buffer.slice(range.clone()).to_string();
                 (range, text)
-            })
-            .collect::<Vec<_>>();
-        self.flash.activate_candidates(candidates);
+            }));
         self.flash_kind = kind;
         Ok(())
     }

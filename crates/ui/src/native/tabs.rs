@@ -3,12 +3,13 @@ use super::icons;
 use crate::app::Application;
 use crate::theme::Theme;
 use eframe::egui;
+use truff_core::text::Buffer;
 
 pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &Theme) {
     egui::Panel::top("tabs")
         .frame(
             egui::Frame::new()
-                .fill(color(crate::theme::Color::from_hex("#20242c").unwrap()))
+                .fill(egui::Color32::from_rgb(0x20, 0x24, 0x2c))
                 .stroke(egui::Stroke::new(1.0, color(theme.border)))
                 .inner_margin(egui::Margin {
                     left: 8,
@@ -29,7 +30,10 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                 let mut close_view = None;
 
                 let is_welcome = application.vault_path().is_none()
-                    && application.shell.editor_text().is_empty()
+                    && application
+                        .shell
+                        .editor_buffer()
+                        .is_none_or(Buffer::is_empty)
                     && application.shell.mode() == truff_core::vim::Mode::Normal;
 
                 if views.is_empty() || is_welcome {
@@ -53,8 +57,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                             .and_then(|e| e.path())
                             .and_then(|p| p.file_name())
                             .and_then(|n| n.to_str())
-                            .unwrap_or("Scratch")
-                            .to_string();
+                            .unwrap_or("Scratch");
                         let is_dirty = application
                             .shell
                             .workspace()
@@ -101,7 +104,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                                     1.4,
                                 );
 
-                                let rich = egui::RichText::new(&title).size(12.5).color(text_color);
+                                let rich = egui::RichText::new(title).size(12.5).color(text_color);
                                 let resp = ui.selectable_label(false, rich);
 
                                 let (action_rect, action_resp) = ui.allocate_exact_size(
@@ -120,7 +123,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                                         ui.painter().rect_filled(
                                             action_rect,
                                             egui::CornerRadius::same(3),
-                                            egui::Color32::from_hex("#394351").unwrap(),
+                                            egui::Color32::from_rgb(0x39, 0x43, 0x51),
                                         );
                                     }
                                     icons::render_icon(

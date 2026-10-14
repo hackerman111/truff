@@ -158,14 +158,37 @@ pub struct ChangeSet {
     /// coordinate spaces; use `batches()` or `map_pos()` to consume them.
     changes: Vec<Change>,
     batch_ends: Vec<usize>,
+    // Shift before each edit in large, sorted, disjoint batches. Small or
+    // externally constructed overlapping batches retain the linear fallback.
+    prefix_shifts: Vec<isize>,
 }
 
 impl ChangeSet {
     /// Creates a `ChangeSet` from a list of changes.
     pub fn new(changes: Vec<Change>) -> Self {
+        let mut prefix_shifts = Vec::new();
+        if changes.len() >= 32
+            && changes
+                .iter()
+                .all(|change| change.old_range.start <= change.old_range.end)
+            && changes
+                .windows(2)
+                .all(|pair| pair[0].old_range.end <= pair[1].old_range.start)
+        {
+            let mut shift = 0;
+            prefix_shifts = changes
+                .iter()
+                .map(|change| {
+                    let before = shift;
+                    shift += change.delta;
+                    before
+                })
+                .collect();
+        }
         Self {
             changes,
             batch_ends: Vec::new(),
+            prefix_shifts,
         }
     }
 
@@ -191,8 +214,22 @@ impl ChangeSet {
     }
 
     pub(crate) fn append_batch(&mut self, batch: Self) {
-        if !self.changes.is_empty() {
-            self.batch_ends.push(self.changes.len());
+        if self.changes.is_empty() {
+            *self = batch;
+            return;
+        }
+        let offset = self.changes.len();
+        self.batch_ends.push(offset);
+        self.batch_ends
+            .extend(batch.batch_ends.into_iter().map(|end| offset + end));
+        if !self.prefix_shifts.is_empty() || !batch.prefix_shifts.is_empty() {
+            self.prefix_shifts.resize(self.changes.len(), isize::MIN);
+            if batch.prefix_shifts.is_empty() {
+                self.prefix_shifts
+                    .resize(self.changes.len() + batch.changes.len(), isize::MIN);
+            } else {
+                self.prefix_shifts.extend(batch.prefix_shifts);
+            }
         }
         self.changes.extend(batch.changes);
     }
@@ -209,7 +246,27 @@ impl ChangeSet {
 
     /// Re-maps a byte offset from the pre-edit coordinate space to the post-edit coordinate space.
     pub fn map_pos(&self, pos: usize) -> usize {
+        let mut offset = 0;
         self.batches().fold(pos, |pos, batch| {
+            let indexed = self
+                .prefix_shifts
+                .get(offset)
+                .is_some_and(|&shift| shift != isize::MIN);
+            let shifts = self.prefix_shifts.get(offset..offset + batch.len());
+            offset += batch.len();
+            if indexed {
+                let end = batch.partition_point(|change| change.old_range.start <= pos);
+                if end == 0 {
+                    return pos;
+                }
+                let change = &batch[end - 1];
+                let shift = shifts.expect("indexed batch has a shift per edit")[end - 1];
+                return if pos <= change.old_range.end {
+                    (change.old_range.start as isize + shift) as usize + change.new_len
+                } else {
+                    (pos as isize + shift + change.delta) as usize
+                };
+            }
             let mut shift = 0isize;
             let mut mapped = None;
             for change in batch {

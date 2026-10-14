@@ -69,12 +69,12 @@ pub fn eval_text_object_range(
                 TextObjectTarget::Backtick => '`',
                 _ => unreachable!(),
             };
-            find_pair_on_line(buffer, current, quote_char, quote_char, obj.kind)
+            find_pair(buffer, current, quote_char, quote_char, obj.kind, 1)
         }
-        TextObjectTarget::Parentheses => find_pair_on_line(buffer, current, '(', ')', obj.kind),
-        TextObjectTarget::Bracket => find_pair_on_line(buffer, current, '[', ']', obj.kind),
-        TextObjectTarget::Brace => find_pair_on_line(buffer, current, '{', '}', obj.kind),
-        TextObjectTarget::AngleBracket => find_pair_on_line(buffer, current, '<', '>', obj.kind),
+        TextObjectTarget::Parentheses
+        | TextObjectTarget::Bracket
+        | TextObjectTarget::Brace
+        | TextObjectTarget::AngleBracket => eval_delimited_object_range(buffer, pos, obj, 1),
         TextObjectTarget::MarkdownLink
         | TextObjectTarget::MarkdownHeading
         | TextObjectTarget::MarkdownCodeBlock => None,
@@ -83,12 +83,36 @@ pub fn eval_text_object_range(
     }
 }
 
-fn find_pair_on_line(
+pub(crate) fn eval_delimited_object_range(
+    buffer: &Buffer,
+    pos: BytePos,
+    obj: TextObject,
+    count: usize,
+) -> Option<Range<usize>> {
+    let (open, close) = match obj.target {
+        TextObjectTarget::Parentheses => ('(', ')'),
+        TextObjectTarget::Bracket => ('[', ']'),
+        TextObjectTarget::Brace => ('{', '}'),
+        TextObjectTarget::AngleBracket => ('<', '>'),
+        _ => return None,
+    };
+    find_pair(
+        buffer,
+        pos.get().min(buffer.byte_len()),
+        open,
+        close,
+        obj.kind,
+        count,
+    )
+}
+
+fn find_pair(
     buffer: &Buffer,
     pos: usize,
     open: char,
     close: char,
     kind: TextObjectKind,
+    count: usize,
 ) -> Option<Range<usize>> {
     let line = buffer.line_of_byte(pos);
     let (start, end) = if open == close {
@@ -100,11 +124,13 @@ fn find_pair_on_line(
     let mut cursor = pos;
     let mut depth = 0;
     let mut left = None;
+    let mut remaining = count.max(1);
     // Include an opening delimiter at the cursor.
     if buffer.slice(pos..end).chars().next() == Some(open) {
         left = Some(pos);
+        remaining -= 1;
     }
-    if left.is_none() {
+    if remaining > 0 {
         for c in prefix.chars().rev() {
             cursor -= c.len_utf8();
             if open != close && c == close {
@@ -113,9 +139,13 @@ fn find_pair_on_line(
             if c == open {
                 if depth == 0 {
                     left = Some(cursor);
-                    break;
+                    remaining -= 1;
+                    if remaining == 0 {
+                        break;
+                    }
+                } else {
+                    depth -= 1;
                 }
-                depth -= 1;
             }
         }
     }

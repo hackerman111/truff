@@ -29,8 +29,12 @@ fn find_enclosing_tag(
             && candidate.ends_with(closing_tag)
             && let Some(tag_open_end) = candidate.find('>')
         {
-            let inner = &candidate[tag_open_end + 1..candidate.len() - closing_tag.len()];
-            return Some((range.clone(), inner.to_string()));
+            let inner_end = candidate.len() - closing_tag.len();
+            if let Some(inner) = candidate.get(tag_open_end + 1..inner_end)
+                && !inner.contains(closing_tag)
+            {
+                return Some((range.clone(), inner.to_string()));
+            }
         }
     }
 
@@ -45,8 +49,8 @@ fn find_enclosing_tag(
     let closing_pos = text[range.end..].find(closing_tag)? + range.end;
     let outer_end = closing_pos + closing_tag.len();
 
-    // Verify there are no other closing tags between tag_open_end and range.start
-    if text[tag_open_end..range.start].contains(closing_tag) {
+    // Reject spans whose content crosses another closing tag before the match.
+    if text[tag_open_end..closing_pos].contains(closing_tag) {
         return None;
     }
 
@@ -100,6 +104,10 @@ pub struct ColorSpan {
 /// Extract supported color wrappers outside fenced and inline code.
 pub fn color_spans(text: &str) -> Vec<ColorSpan> {
     use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let prefix = "<span style=\"color:#";
+    let Some(first) = text.find(prefix) else {
+        return Vec::new();
+    };
     let mut code = Vec::new();
     let mut fence_start = None;
     for (event, range) in Parser::new(text).into_offset_iter() {
@@ -115,8 +123,7 @@ pub fn color_spans(text: &str) -> Vec<ColorSpan> {
         }
     }
     let mut spans = Vec::new();
-    let prefix = "<span style=\"color:#";
-    let mut offset = 0;
+    let mut offset = first;
     while let Some(relative) = text[offset..].find(prefix) {
         let start = offset + relative;
         let hex_start = start + prefix.len();
@@ -130,15 +137,13 @@ pub fn color_spans(text: &str) -> Vec<ColorSpan> {
         }
         let content_start = hex_end + 2;
         let Some(close_relative) = text[content_start..].find("</span>") else {
-            continue;
+            break;
         };
         let close_start = content_start + close_relative;
         let end = close_start + 7;
         offset = end;
-        if code
-            .iter()
-            .any(|range| range.start < end && range.end > start)
-        {
+        let index = code.partition_point(|range| range.end <= start);
+        if code.get(index).is_some_and(|range| range.start < end) {
             continue;
         }
         let channel =

@@ -91,8 +91,8 @@ impl Shell {
     /// Populates sidebar files and initializes its row model as a hierarchical tree.
     pub fn set_sidebar_files(&mut self, files: Vec<String>) {
         let is_empty = files.is_empty();
-        self.sidebar_files = files.clone();
         let items = build_tree_items(&files);
+        self.sidebar_files = files;
         self.sidebar_model.set_items(items);
         if is_empty && !self.sidebar_available && self.focus == Focus::Sidebar {
             self.set_focus(Focus::Editor);
@@ -100,8 +100,8 @@ impl Shell {
     }
 
     /// Returns list of files currently in the sidebar.
-    pub fn sidebar_files(&self) -> Vec<String> {
-        self.sidebar_files.clone()
+    pub fn sidebar_files(&self) -> &[String] {
+        &self.sidebar_files
     }
 
     /// Access the sidebar row model.

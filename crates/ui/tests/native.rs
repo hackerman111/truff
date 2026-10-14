@@ -119,6 +119,36 @@ fn viewport_cache_is_bounded_reuses_shapes_and_handles_multi_megabyte_line() {
 }
 
 #[test]
+fn newline_edits_reuse_unchanged_paragraphs_and_theme_persists_between_frames() {
+    let (mut app, context) = scratch(&"a short line\n".repeat(1_000));
+    frame(&mut app, &context, vec![Event::Text("i".into())]);
+    let builds = app.editor.layout_rebuild_count();
+    frame(&mut app, &context, vec![Event::Text("新しい\n".into())]);
+    let rebuilt = app.editor.layout_rebuild_count() - builds;
+    assert!(
+        rebuilt < 8,
+        "rebuilt {rebuilt} paragraphs for one line insertion"
+    );
+    assert!(
+        app.application
+            .shell
+            .editor_text()
+            .starts_with("新しい\na short line\n")
+    );
+    let builds = app.editor.layout_rebuild_count();
+    frame(&mut app, &context, vec![]);
+    assert_eq!(builds, app.editor.layout_rebuild_count());
+    app.application
+        .shell
+        .set_theme(truff_ui::theme::Theme::light());
+    frame(&mut app, &context, vec![]);
+    let fill = context.global_style().visuals.panel_fill;
+    frame(&mut app, &context, vec![]);
+    assert_eq!(context.global_style().visuals.panel_fill, fill);
+    assert_eq!(fill, egui::Color32::from_rgb(250, 250, 252));
+}
+
+#[test]
 fn test_procedural_vector_icons_and_dirty_dot() {
     use truff_ui::native::icons::{Icon, draw_dirty_dot, render_icon};
     let ctx = egui::Context::default();

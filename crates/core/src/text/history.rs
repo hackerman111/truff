@@ -17,6 +17,16 @@ fn tx_heap_bytes(tx: &Transaction) -> usize {
             .sum::<usize>()
 }
 
+fn compact_transaction(tx: &mut Transaction) {
+    for edit in &mut tx.edits {
+        if edit.text.capacity() > edit.text.len().saturating_mul(2)
+            && edit.text.capacity() - edit.text.len() >= 4096
+        {
+            edit.text.shrink_to_fit();
+        }
+    }
+}
+
 /// A group of transactions applied under the same `UndoGroup`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryGroup {
@@ -44,7 +54,9 @@ impl HistoryGroup {
         }
     }
 
-    fn add(&mut self, forward_tx: Transaction, inverse_tx: Transaction) {
+    fn add(&mut self, mut forward_tx: Transaction, mut inverse_tx: Transaction) {
+        compact_transaction(&mut forward_tx);
+        compact_transaction(&mut inverse_tx);
         let payload = tx_heap_bytes(&forward_tx) + tx_heap_bytes(&inverse_tx);
         let old_capacity = self.forward.capacity() + self.inverse.capacity();
         self.forward.push(forward_tx);
@@ -138,7 +150,6 @@ impl History {
         for group in self.redo_stack.drain(..) {
             self.total_bytes = self.total_bytes.saturating_sub(group.size_in_bytes);
         }
-        self.redo_stack.shrink_to_fit();
         let before_state = self.current_state;
         self.current_state = self.next_state;
         self.next_state += 1;
@@ -225,8 +236,14 @@ impl History {
 
     fn enforce_memory_limit(&mut self) {
         while self.total_bytes() > self.max_bytes {
-            self.undo_stack.shrink_to_fit();
-            self.redo_stack.shrink_to_fit();
+            // Keep useful deque capacity between edits. Compact only after a
+            // substantial reduction, avoiding a realloc/evict cycle at the limit.
+            if self.undo_stack.capacity() > self.undo_stack.len().saturating_mul(2) {
+                self.undo_stack.shrink_to_fit();
+            }
+            if self.redo_stack.capacity() > self.redo_stack.len().saturating_mul(2) {
+                self.redo_stack.shrink_to_fit();
+            }
             if self.total_bytes() <= self.max_bytes {
                 break;
             }

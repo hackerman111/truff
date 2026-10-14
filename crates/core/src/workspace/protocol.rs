@@ -10,7 +10,7 @@ pub enum StoreJob {
     SaveFile {
         key: SnapshotKey,
         path: PathBuf,
-        content: String,
+        content: crop::Rope,
         base_fingerprint: Option<String>,
     },
     /// Explicitly approved reload, still invalidated by a newer local revision.
@@ -19,19 +19,19 @@ pub enum StoreJob {
     OverwriteFile {
         key: SnapshotKey,
         path: PathBuf,
-        content: String,
+        content: crop::Rope,
     },
     /// Durable creation of a distinct destination, preserving an existing file.
     SaveAsFile {
         key: SnapshotKey,
         path: PathBuf,
-        content: String,
+        content: crop::Rope,
     },
     /// Request writing an emergency crash recovery snapshot.
     WriteRecoverySnapshot {
         key: SnapshotKey,
         path: PathBuf,
-        content: String,
+        content: crop::Rope,
         base_fingerprint: Option<String>,
     },
     /// Request deleting recovery snapshots once a buffer returns to its savepoint.

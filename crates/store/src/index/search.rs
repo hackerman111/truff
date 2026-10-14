@@ -96,26 +96,35 @@ pub fn execute_search(conn: &Connection, query: &SearchQuery) -> rusqlite::Resul
         });
     }
 
-    let total_matches: i64 = conn.query_row(
-        "SELECT count(*) FROM notes_fts WHERE notes_fts MATCH ?1",
-        params![fts_query],
-        |row| row.get::<_, i64>(0),
-    )?;
+    let total_matches: i64 = conn
+        .prepare_cached("SELECT count(*) FROM notes_fts WHERE notes_fts MATCH ?1")?
+        .query_row(params![fts_query], |row| row.get::<_, i64>(0))?;
     let total_matches = total_matches as usize;
 
     let page_size = query.page_size.clamp(1, DEFAULT_MAX_SEARCH_PAGE_SIZE);
-    let offset = query.page * page_size;
+    let Some(offset) = query
+        .page
+        .checked_mul(page_size)
+        .and_then(|offset| i64::try_from(offset).ok())
+    else {
+        return Ok(SearchPage {
+            query_id: query.id,
+            page: query.page,
+            total_matches,
+            results: Vec::new(),
+        });
+    };
 
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT f.id, f.relative_path, f.title, snippet(notes_fts, 2, '<b>', '</b>', '...', 32)
          FROM notes_fts
-         JOIN files f ON f.id = notes_fts.file_id
+         JOIN files f ON f.id = notes_fts.rowid
          WHERE notes_fts MATCH ?1
          ORDER BY rank
          LIMIT ?2 OFFSET ?3",
     )?;
 
-    let rows = stmt.query_map(params![fts_query, page_size as i64, offset as i64], |row| {
+    let rows = stmt.query_map(params![fts_query, page_size as i64, offset], |row| {
         let file_id: i64 = row.get(0)?;
         let path: String = row.get(1)?;
         let title: String = row.get(2)?;

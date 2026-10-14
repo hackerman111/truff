@@ -7,6 +7,7 @@ use eframe::egui;
 pub(super) fn show(
     application: &mut Application,
     dialogs: &mut CreationDialogs,
+    recent: &mut super::recent::RecentVaults,
     ui: &mut egui::Ui,
     theme: &Theme,
 ) {
@@ -79,13 +80,7 @@ pub(super) fn show(
                 {
                     dialogs.vault.open = true;
                 }
-                let mut config = crate::app::global_config::GlobalConfig::load();
-                let existing_vaults: Vec<_> = config
-                    .recent_vaults
-                    .iter()
-                    .filter(|p| p.is_dir())
-                    .cloned()
-                    .collect();
+                let existing_vaults = recent.paths();
 
                 if !existing_vaults.is_empty() {
                     ui.add_space(12.0);
@@ -97,7 +92,7 @@ pub(super) fn show(
                     );
                     ui.add_space(4.0);
                     let mut remove_path = None;
-                    for path in &existing_vaults {
+                    for path in existing_vaults {
                         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("vault");
                         let path_str = path.display().to_string();
 
@@ -142,8 +137,7 @@ pub(super) fn show(
                         ui.add_space(2.0);
                     }
                     if let Some(to_remove) = remove_path {
-                        config.remove_recent_vault(&to_remove);
-                        let _ = config.save();
+                        recent.remove(&to_remove);
                     }
                 }
             } else {

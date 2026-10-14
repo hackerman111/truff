@@ -125,32 +125,42 @@ impl KeymapConfig {
             ));
         }
         let registry = CommandRegistry::default();
-        for (i, a) in self.bindings.iter().enumerate() {
-            if a.keys.len() > 32 {
+        for binding in &self.bindings {
+            if binding.keys.len() > 32 {
                 return Err(KeymapError::InvalidBinding(
                     "key sequence exceeds 32 keys".into(),
                 ));
             }
-            if a.keys.is_empty() {
+            if binding.keys.is_empty() {
                 return Err(KeymapError::InvalidBinding("empty key sequence".into()));
             }
-            registry.get(&a.command).map_err(KeymapError::Registry)?;
-            for (j, b) in self.bindings.iter().enumerate() {
-                if i != j && a.mode == b.mode {
-                    if a.keys == b.keys {
-                        return Err(KeymapError::DuplicateBinding {
-                            mode: a.mode,
-                            keys: a.keys.clone(),
-                        });
-                    }
-                    // Check if a is a strict prefix of b
-                    if a.keys.len() < b.keys.len() && b.keys.starts_with(&a.keys) {
-                        return Err(KeymapError::ShadowedPrefix {
-                            prefix: a.keys.clone(),
-                            conflicting_key: b.keys[a.keys.len()],
-                        });
-                    }
-                }
+            registry
+                .get(&binding.command)
+                .map_err(KeymapError::Registry)?;
+        }
+
+        let mut bindings: Vec<_> = self.bindings.iter().collect();
+        bindings.sort_unstable_by(|left, right| {
+            left.mode
+                .cmp(&right.mode)
+                .then_with(|| left.keys.cmp(&right.keys))
+        });
+        for pair in bindings.windows(2) {
+            let [left, right] = pair else { continue };
+            if left.mode != right.mode {
+                continue;
+            }
+            if left.keys == right.keys {
+                return Err(KeymapError::DuplicateBinding {
+                    mode: left.mode,
+                    keys: left.keys.clone(),
+                });
+            }
+            if right.keys.starts_with(&left.keys) {
+                return Err(KeymapError::ShadowedPrefix {
+                    prefix: left.keys.clone(),
+                    conflicting_key: right.keys[left.keys.len()],
+                });
             }
         }
         Ok(())

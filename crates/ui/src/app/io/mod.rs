@@ -46,8 +46,12 @@ impl Application {
                     }
                 }
                 Effect::StatusMessage(message) => self.status = message,
-                Effect::ViewClosed(_) if self.shell.workspace().active_view().is_none() => {
-                    self.quit_requested = true
+                Effect::ViewClosed(_) => {
+                    self.track_closed_buffers();
+                    if self.shell.workspace().active_view().is_none() {
+                        self.quit_requested = true;
+                    }
+                    self.release_closed_buffers();
                 }
                 _ => {}
             }
@@ -136,6 +140,7 @@ impl Application {
             self.status = error.to_string();
             changed = true;
         }
+        changed |= self.release_closed_buffers();
         changed
     }
 
@@ -150,6 +155,7 @@ impl Application {
         };
         let targets = registry
             .entries()
+            .filter(|entry| entry.buffer().is_some())
             .filter_map(|entry| {
                 Some((
                     registry.get_snapshot_key(entry.id())?,

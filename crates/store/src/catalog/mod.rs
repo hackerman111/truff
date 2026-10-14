@@ -70,13 +70,45 @@ impl CatalogWorker {
                     let mut ids = scan::rebuild(&paths, &mut db, &events_tx)?;
                     let _ = events_tx.send(CatalogEvent::Ready);
                     while let Ok(job) = jobs.recv() {
-                        let event = jobs::execute(job, &paths, &mut db, &ids);
-                        let refresh = matches!(
-                            event,
-                            Ok(CatalogEvent::Renamed { .. }
-                                | CatalogEvent::Trashed(_)
-                                | CatalogEvent::Created(_))
-                        );
+                        let event = jobs::execute(job, &paths, &mut db, &ids, &events_tx);
+                        let (changed, removed) = match &event {
+                            Ok(CatalogEvent::Created(path)) => (vec![path.clone()], Vec::new()),
+                            Ok(CatalogEvent::Trashed(path)) => {
+                                let removed = ids
+                                    .iter()
+                                    .filter(|(candidate, _)| {
+                                        std::path::Path::new(candidate).starts_with(path)
+                                    })
+                                    .map(|(_, &id)| id)
+                                    .collect();
+                                (Vec::new(), removed)
+                            }
+                            Ok(CatalogEvent::Renamed {
+                                from,
+                                to,
+                                rewritten,
+                            }) => {
+                                let mut changed = scan::affected_files(&paths, to)?;
+                                let mut removed = Vec::new();
+                                for (path, &id) in &ids {
+                                    if std::path::Path::new(path).starts_with(from) {
+                                        removed.push(id);
+                                    }
+                                }
+                                changed.extend(
+                                    rewritten.iter().map(|p| p.to_string_lossy().into_owned()),
+                                );
+                                (changed, removed)
+                            }
+                            _ => (Vec::new(), Vec::new()),
+                        };
+                        if !changed.is_empty() || !removed.is_empty() {
+                            scan::refresh(&paths, &mut db, &events_tx, &changed, &removed)?;
+                            ids = scan::indexed_paths(&db)?;
+                            let mut files: Vec<_> = ids.keys().cloned().collect();
+                            files.sort();
+                            let _ = events_tx.send(CatalogEvent::Files(files));
+                        }
                         if events_tx
                             .send(
                                 event
@@ -85,10 +117,6 @@ impl CatalogWorker {
                             .is_err()
                         {
                             break;
-                        }
-                        if refresh {
-                            ids = scan::rebuild(&paths, &mut db, &events_tx)?;
-                            let _ = events_tx.send(CatalogEvent::Ready);
                         }
                         if events_tx.send(CatalogEvent::JobDone).is_err() {
                             break;

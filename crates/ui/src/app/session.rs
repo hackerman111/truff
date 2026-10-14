@@ -168,6 +168,11 @@ impl Application {
             return Ok(());
         };
         let key = SnapshotKey::new(self.shell.workspace().epoch(), id, buffer.revision());
+        if self.pending_recovery.contains(&key) {
+            // A queued cleanup may share the revision of an earlier checkpoint.
+            // Keep it queued until that acknowledgement has released the key.
+            return Ok(());
+        }
         let job = if buffer.is_dirty() {
             StoreJob::WriteRecoverySnapshot {
                 key,
@@ -177,7 +182,7 @@ impl Application {
                     .ok_or("No vault")?
                     .relative_path(path)?
                     .to_path_buf(),
-                content: buffer.as_str(),
+                content: buffer.rope().clone(),
                 base_fingerprint: entry.fingerprint().map(str::to_owned),
             }
         } else {
@@ -288,5 +293,33 @@ impl Application {
         self.store.take();
         self.paths = None;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_cleanup_waits_for_an_inflight_checkpoint_at_the_same_revision() {
+        let mut app = Application::new();
+        let id = app
+            .shell
+            .workspace_mut()
+            .open_buffer_from_text("note.md".into(), "saved text")
+            .unwrap();
+        let key = app
+            .shell
+            .workspace()
+            .buffers()
+            .get_snapshot_key(id)
+            .unwrap();
+        app.pending_recovery.insert(key);
+        app.queued_recovery.push_back(id);
+
+        app.submit_next_recovery().unwrap();
+        assert_eq!(app.queued_recovery.front(), Some(&id));
+        assert_eq!(app.pending_recovery.len(), 1);
+        assert!(app.pending_recovery.contains(&key));
     }
 }

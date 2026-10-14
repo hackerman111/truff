@@ -42,7 +42,7 @@ impl VimState {
                 return self.error("Macro execution step limit exceeded");
             }
         }
-        let repeat_command = if let InputContext::Editor { buffer, view, .. } = &ctx {
+        let resolved_repeat = if let InputContext::Editor { buffer, view, .. } = &ctx {
             let resolved = match &cmd {
                 Command::OperatorSelection(op) => {
                     let (range, linewise) = Self::selection_range(buffer, view, self.mode);
@@ -59,44 +59,42 @@ impl VimState {
                 } => Some((*op, range.clone(), *linewise)),
                 _ => None,
             };
-            resolved
-                .map(|(op, range, linewise)| {
-                    let mut graphemes = 0;
-                    let mut cursor = BytePos::new(range.start);
-                    if range.start <= range.end
-                        && range.end <= buffer.byte_len()
-                        && buffer.is_char_boundary(range.start)
-                    {
-                        while cursor.get() < range.end {
-                            let Some(next) = buffer.grapheme_next(cursor) else {
-                                break;
-                            };
-                            graphemes += 1;
-                            cursor = next;
-                        }
-                    }
-                    let lines = linewise.then(|| {
-                        let end_pos = if range.end > range.start {
-                            buffer.floor_char_boundary(range.end.saturating_sub(1))
-                        } else {
-                            range.start
-                        };
-                        buffer.line_of_byte(end_pos) - buffer.line_of_byte(range.start) + 1
-                    });
-                    Command::OperatorExtent {
-                        op,
-                        graphemes,
-                        lines,
-                    }
-                })
-                .unwrap_or_else(|| cmd.clone())
+            resolved.map(|(op, range, linewise)| {
+                let mut graphemes = 0;
+                if !linewise
+                    && range.start < range.end
+                    && range.end <= buffer.byte_len()
+                    && buffer.is_char_boundary(range.start)
+                {
+                    // Include the boundary covering a final partial grapheme.
+                    graphemes = buffer
+                        .grapheme_boundaries_from(BytePos::new(range.start))
+                        .take_while(|next| next.get() < range.end)
+                        .count()
+                        + 1;
+                }
+                let lines = linewise.then(|| {
+                    let end_pos = if range.end > range.start {
+                        buffer.floor_char_boundary(range.end.saturating_sub(1))
+                    } else {
+                        range.start
+                    };
+                    buffer.line_of_byte(end_pos) - buffer.line_of_byte(range.start) + 1
+                });
+                Command::OperatorExtent {
+                    op,
+                    graphemes,
+                    lines,
+                }
+            })
         } else {
-            cmd.clone()
+            None
         };
+        let repeat_command = resolved_repeat.as_ref().unwrap_or(&cmd);
         if !matches!(
             cmd,
             Command::ToggleMacroRecord(_) | Command::StopMacroRecord
-        ) && let Err(e) = self.record(&repeat_command)
+        ) && let Err(e) = self.record(repeat_command)
         {
             return self.error(e);
         }
@@ -149,7 +147,7 @@ impl VimState {
         if starts_insert {
             self.insert_group = Some(UndoGroup::next());
             self.current_edit = vec![repeat_command.clone()];
-            self.current_edit_bytes = command_text_bytes(&repeat_command);
+            self.current_edit_bytes = command_text_bytes(repeat_command);
         } else if self.mode == Mode::Insert && !self.replaying_edit {
             let added = command_text_bytes(&cmd);
             if self.current_edit_bytes.saturating_add(added)
@@ -161,12 +159,17 @@ impl VimState {
             self.current_edit_bytes += added;
             self.current_edit.push(cmd.clone());
         }
-        let saved = repeat_command;
+        // TextCommit preserves Insert mode, so its owned repeat entry above
+        // suffices. Other edits can leave Insert mode during execution.
+        let saved = (is_edit
+            && !(self.mode == Mode::Insert && matches!(cmd, Command::TextCommit(_))))
+        .then(|| repeat_command.clone());
         let res = self.execute_command(cmd, ctx);
         if is_edit
             && self.mode != Mode::Insert
             && !self.replaying_edit
             && !matches!(res, InputResult::Error(_))
+            && let Some(saved) = saved
         {
             self.last_edit = Some(vec![saved]);
         }

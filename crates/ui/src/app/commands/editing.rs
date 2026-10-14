@@ -21,10 +21,10 @@ impl Application {
             return Err("Usage: :link <note or note#heading>".into());
         }
         let range = self.selection_range()?;
-        let text = self.shell.editor_text();
-        let label = &text[range.clone()];
-        self.shell
-            .apply_transaction(LinkSelection::wikilink(range, argument, Some(label)))?;
+        let buffer = self.shell.editor_buffer().ok_or("Note is still loading")?;
+        let label = buffer.slice(range.clone()).to_string();
+        let transaction = LinkSelection::wikilink(range, argument, Some(&label));
+        self.shell.apply_transaction(transaction)?;
         self.shell.feed_key(truff_core::vim::Key::Esc);
         self.status = "Link created; :follow to open".into();
         Ok(())

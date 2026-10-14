@@ -157,11 +157,8 @@ impl<'a> Resolver<'a> {
         // 1. Exact match by relative_path (as given, or with .md)
         let exact_opt: Option<i64> = self
             .conn
-            .query_row(
-                "SELECT id FROM files WHERE relative_path = ?1 OR relative_path = ?2",
-                params![path_or_name, with_md],
-                |row| row.get(0),
-            )
+            .prepare_cached("SELECT id FROM files WHERE relative_path = ?1 OR relative_path = ?2")?
+            .query_row(params![path_or_name, with_md], |row| row.get(0))
             .optional()?;
 
         if let Some(id) = exact_opt {
@@ -172,11 +169,8 @@ impl<'a> Resolver<'a> {
         if source.0 > 0 {
             let source_rel_opt: Option<String> = self
                 .conn
-                .query_row(
-                    "SELECT relative_path FROM files WHERE id = ?1",
-                    params![source.0],
-                    |row| row.get(0),
-                )
+                .prepare_cached("SELECT relative_path FROM files WHERE id = ?1")?
+                .query_row(params![source.0], |row| row.get(0))
                 .optional()?;
 
             if let Some(source_rel) = source_rel_opt {
@@ -192,11 +186,10 @@ impl<'a> Resolver<'a> {
 
                     let rel_exact_opt: Option<i64> = self
                         .conn
-                        .query_row(
+                        .prepare_cached(
                             "SELECT id FROM files WHERE relative_path = ?1 OR relative_path = ?2",
-                            params![resolved_str, resolved_with_md],
-                            |row| row.get(0),
-                        )
+                        )?
+                        .query_row(params![resolved_str, resolved_with_md], |row| row.get(0))
                         .optional()?;
 
                     if let Some(id) = rel_exact_opt {
@@ -213,28 +206,16 @@ impl<'a> Resolver<'a> {
             path_or_name
         };
 
-        let mut stmt = self.conn.prepare("SELECT id, relative_path FROM files")?;
-        let rows = stmt.query_map([], |row| {
-            let id: i64 = row.get(0)?;
-            let rel: String = row.get(1)?;
-            Ok((id, rel))
-        })?;
-
-        let mut matches = Vec::new();
-        for item in rows {
-            let (id, rel_path) = item?;
-            let path = Path::new(&rel_path);
-            let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-
-            if file_stem == target_stem
-                || file_name == path_or_name
-                || file_name == with_md
-                || file_stem == path_or_name
-            {
-                matches.push(FileId(id));
-            }
-        }
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id FROM files
+             WHERE file_stem IN (?1, ?2) OR file_name IN (?2, ?3)
+             ORDER BY id",
+        )?;
+        let matches = stmt
+            .query_map(params![target_stem, path_or_name, with_md], |row| {
+                Ok(FileId(row.get(0)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
 
         if matches.is_empty() {
             Ok(FileFindResult::Missing)
@@ -267,11 +248,11 @@ impl<'a> Resolver<'a> {
 
             let opt: Option<String> = self
                 .conn
-                .query_row(
-                    "SELECT block_anchor FROM blocks WHERE file_id = ?1 AND (block_anchor = ?2 OR block_anchor = ?3)",
+                .prepare_cached("SELECT block_anchor FROM blocks WHERE file_id = ?1 AND (block_anchor = ?2 OR block_anchor = ?3)")
+                .and_then(|mut stmt| stmt.query_row(
                     params![file_id.0, with_caret, without_caret],
                     |_row| Ok(with_caret.clone()),
-                )
+                ))
                 .optional()
                 .ok()
                 .flatten();
@@ -283,11 +264,11 @@ impl<'a> Resolver<'a> {
         let slug = slugify(clean);
         let opt: Option<String> = self
             .conn
-            .query_row(
-                "SELECT anchor FROM headings WHERE file_id = ?1 AND (anchor = ?2 OR text = ?3 COLLATE NOCASE)",
+            .prepare_cached("SELECT anchor FROM headings WHERE file_id = ?1 AND (anchor = ?2 OR text = ?3 COLLATE NOCASE)")
+            .and_then(|mut stmt| stmt.query_row(
                 params![file_id.0, slug, clean],
                 |row| row.get(0),
-            )
+            ))
             .optional()
             .ok()
             .flatten();

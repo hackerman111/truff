@@ -13,7 +13,17 @@ pub fn literal_search(
     if query.is_empty() {
         return None;
     }
-    let needle = query.as_bytes();
+    let pos = pos.min(buffer.byte_len());
+    if count == 0 {
+        return Some(snap_grapheme(buffer, pos));
+    }
+    let reversed;
+    let needle = if forward {
+        query.as_bytes()
+    } else {
+        reversed = query.bytes().rev().collect::<Vec<_>>();
+        &reversed
+    };
     let mut failure = vec![0; needle.len()];
     let mut matched = 0;
     for i in 1..needle.len() {
@@ -25,46 +35,107 @@ pub fn literal_search(
         }
         failure[i] = matched;
     }
-    let find = |position: usize| {
-        let slice = buffer.slice(0..buffer.byte_len());
-        let mut matched = 0;
-        let mut offset = 0;
-        let mut first = None;
-        let mut last = None;
-        let mut before = None;
-        let mut after = None;
-        for chunk in slice.chunks() {
-            for &byte in chunk.as_bytes() {
-                while matched > 0 && byte != needle[matched] {
-                    matched = failure[matched - 1];
-                }
-                if byte == needle[matched] {
-                    matched += 1;
-                }
-                offset += 1;
-                if matched == needle.len() {
-                    let start = offset - needle.len();
-                    first.get_or_insert(start);
-                    last = Some(start);
-                    if start < position {
-                        before = Some(start);
-                    }
-                    if start > position && after.is_none() {
-                        after = Some(start);
-                    }
-                    matched = failure[matched - 1];
-                }
-            }
-        }
+    let start = buffer.floor_char_boundary(pos);
+    // Include matches that straddle the cursor without matching across EOF.
+    let end = buffer.floor_char_boundary(pos.saturating_add(needle.len()));
+    let suffix = buffer.slice(start..buffer.byte_len());
+    let prefix = buffer.slice(0..end);
+    let cycle = |remaining: &mut usize| {
         if forward {
-            after.or(first)
+            scan(
+                suffix.chunks().flat_map(str::bytes),
+                start,
+                needle,
+                &failure,
+                true,
+                |m| m > pos,
+                remaining,
+            )
+            .or_else(|| {
+                scan(
+                    prefix.chunks().flat_map(str::bytes),
+                    0,
+                    needle,
+                    &failure,
+                    true,
+                    |m| m <= pos,
+                    remaining,
+                )
+            })
         } else {
-            before.or(last)
+            scan(
+                prefix.chunks().rev().flat_map(|s| s.bytes().rev()),
+                end,
+                needle,
+                &failure,
+                false,
+                |m| m < pos,
+                remaining,
+            )
+            .or_else(|| {
+                scan(
+                    suffix.chunks().rev().flat_map(|s| s.bytes().rev()),
+                    buffer.byte_len(),
+                    needle,
+                    &failure,
+                    false,
+                    |m| m >= pos,
+                    remaining,
+                )
+            })
         }
     };
-    let mut current = pos.min(buffer.byte_len());
-    for _ in 0..count {
-        current = find(current)?;
+    let mut remaining = count;
+    if let Some(found) = cycle(&mut remaining) {
+        return Some(snap_grapheme(buffer, found));
     }
-    Some(snap_grapheme(buffer, current))
+    let total = count - remaining;
+    if total == 0 {
+        return None;
+    }
+    // Once a complete cycle is known, arbitrarily large counts need one more
+    // bounded traversal, rather than count full scans or a vector of all matches.
+    remaining = (remaining - 1) % total + 1;
+    cycle(&mut remaining).map(|found| snap_grapheme(buffer, found))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan(
+    bytes: impl Iterator<Item = u8>,
+    mut offset: usize,
+    needle: &[u8],
+    failure: &[usize],
+    forward: bool,
+    accept: impl Fn(usize) -> bool,
+    remaining: &mut usize,
+) -> Option<usize> {
+    let mut matched = 0;
+    for byte in bytes {
+        while matched > 0 && byte != needle[matched] {
+            matched = failure[matched - 1];
+        }
+        if byte == needle[matched] {
+            matched += 1;
+        }
+        if forward {
+            offset += 1;
+        } else {
+            offset -= 1;
+        }
+        if matched == needle.len() {
+            let start = if forward {
+                offset - needle.len()
+            } else {
+                offset
+            };
+            if accept(start) {
+                *remaining -= 1;
+                if *remaining == 0 {
+                    return Some(start);
+                }
+            }
+            matched = failure[matched - 1];
+        }
+    }
+    None
 }

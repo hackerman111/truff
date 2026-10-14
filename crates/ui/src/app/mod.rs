@@ -5,6 +5,7 @@ mod io;
 mod navigation;
 pub mod path_completion;
 mod registered;
+mod retention;
 mod session;
 mod vault;
 
@@ -46,6 +47,7 @@ pub struct Application {
     catalog_indexing: bool,
     pending_catalog: usize,
     pending_recovery: HashSet<truff_core::workspace::SnapshotKey>,
+    closed_buffers: HashMap<BufferId, Option<truff_core::workspace::SnapshotKey>>,
     recovery_deadline: Option<Instant>,
     projection: crate::editor::ProjectionMode,
     storage_waker: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
@@ -86,6 +88,7 @@ impl Application {
             catalog_indexing: false,
             pending_catalog: 0,
             pending_recovery: HashSet::new(),
+            closed_buffers: HashMap::new(),
             recovery_deadline: None,
             projection: crate::editor::ProjectionMode::LivePreview,
             storage_waker: None,
@@ -148,9 +151,10 @@ impl Application {
         let Some(paths) = &self.paths else {
             return false;
         };
-        let Ok(abs) = paths.resolve_path(Path::new(rel_path)) else {
+        let abs = path_completion::normalize_path(&paths.root().join(rel_path));
+        if !abs.starts_with(paths.root()) {
             return false;
-        };
+        }
         self.shell
             .workspace()
             .buffers()

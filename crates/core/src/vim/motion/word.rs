@@ -8,7 +8,10 @@ fn is_word_char(c: char) -> bool {
 
 pub(super) fn word_continuation(buffer: &Buffer, position: usize, c: char, category: u8) -> bool {
     char_category(c) == category
-        || (category != 0 && !c.is_whitespace() && snap_grapheme(buffer, position) != position)
+        || (category != 0
+            && c.is_ascii()
+            && !c.is_whitespace()
+            && snap_grapheme(buffer, position) != position)
 }
 
 pub(super) fn char_category(c: char) -> u8 {

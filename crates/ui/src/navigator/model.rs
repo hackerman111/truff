@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use truff_core::commands::CommandId;
 use truff_core::text::BufferId;
 
@@ -313,7 +315,7 @@ impl NavigatorState {
 
     /// Recomputes filtered indices based on search query.
     pub fn recompute_filter(&mut self) {
-        let q = self.query.trim().to_lowercase();
+        let q = lowercase(self.query.trim());
         if q.is_empty() {
             self.filtered_indices = (0..self.items.len()).collect();
         } else {
@@ -322,26 +324,24 @@ impl NavigatorState {
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, item)| {
-                    let title_lower = item.title.to_lowercase();
-                    let subtitle_lower = item.subtitle.as_deref().unwrap_or("").to_lowercase();
-                    let category_lower = item.category.as_deref().unwrap_or("").to_lowercase();
-
-                    let mut score = 0;
-                    if title_lower == q {
-                        score += 200;
-                    } else if title_lower.starts_with(&q) {
-                        score += 100;
-                    } else if title_lower.contains(&q) {
-                        score += 50;
-                    } else if subtitle_lower.contains(&q) {
-                        score += 25;
-                    } else if category_lower.contains(&q) {
-                        score += 15;
-                    } else if is_subsequence(&q, &title_lower) {
-                        score += 10;
+                    let title_lower = lowercase(&item.title);
+                    let score = if title_lower == q {
+                        200
+                    } else if title_lower.starts_with(q.as_ref()) {
+                        100
+                    } else if title_lower.contains(q.as_ref()) {
+                        50
+                    } else if lowercase(item.subtitle.as_deref().unwrap_or("")).contains(q.as_ref())
+                    {
+                        25
+                    } else if lowercase(item.category.as_deref().unwrap_or("")).contains(q.as_ref())
+                    {
+                        15
+                    } else if is_subsequence(q.as_ref(), title_lower.as_ref()) {
+                        10
                     } else {
                         return None;
-                    }
+                    };
 
                     Some((idx, score))
                 })
@@ -465,124 +465,6 @@ impl NavigatorState {
                 id: id.clone(),
                 data: data.clone(),
             },
-        }
-    }
-
-    /// Returns quick actions displayed in the bottom footer.
-    pub fn quick_actions(&self) -> Vec<QuickAction> {
-        match self.mode {
-            NavigatorMode::Files => vec![
-                QuickAction {
-                    key: "↵".to_string(),
-                    label: "Открыть".to_string(),
-                    description: "Открыть выбранную заметку".to_string(),
-                    action: self.primary_action(),
-                },
-                QuickAction {
-                    key: "a".to_string(),
-                    label: "Создать".to_string(),
-                    description: "Создать новую заметку".to_string(),
-                    action: NavigatorAction::CreateFile {
-                        parent_dir: self.current_parent_dir(),
-                    },
-                },
-                QuickAction {
-                    key: "r".to_string(),
-                    label: "Переименовать".to_string(),
-                    description: "Переименовать заметку или папку".to_string(),
-                    action: self
-                        .current_selected_path()
-                        .map_or(NavigatorAction::None, |p| NavigatorAction::RenameFile {
-                            path: p,
-                        }),
-                },
-                QuickAction {
-                    key: "d".to_string(),
-                    label: "Удалить".to_string(),
-                    description: "Удалить в корзину".to_string(),
-                    action: self
-                        .current_selected_path()
-                        .map_or(NavigatorAction::None, |p| NavigatorAction::DeleteFile {
-                            path: p,
-                        }),
-                },
-                QuickAction {
-                    key: "/".to_string(),
-                    label: "Поиск".to_string(),
-                    description: "Режим текстового поиска".to_string(),
-                    action: NavigatorAction::None,
-                },
-                QuickAction {
-                    key: "?".to_string(),
-                    label: "Все действия".to_string(),
-                    description: "Показать полное меню действий".to_string(),
-                    action: NavigatorAction::None,
-                },
-            ],
-            NavigatorMode::Sessions => vec![
-                QuickAction {
-                    key: "↵".to_string(),
-                    label: "Перейти".to_string(),
-                    description: "Активировать вкладку".to_string(),
-                    action: self.primary_action(),
-                },
-                QuickAction {
-                    key: "d".to_string(),
-                    label: "Закрыть".to_string(),
-                    description: "Закрыть буфер".to_string(),
-                    action: self
-                        .current_selected_buffer()
-                        .map_or(NavigatorAction::None, |b| NavigatorAction::CloseBuffer {
-                            buffer_id: b,
-                        }),
-                },
-                QuickAction {
-                    key: "/".to_string(),
-                    label: "Поиск".to_string(),
-                    description: "Фильтр буферов".to_string(),
-                    action: NavigatorAction::None,
-                },
-                QuickAction {
-                    key: "?".to_string(),
-                    label: "Действия".to_string(),
-                    description: "Все операции со вкладками".to_string(),
-                    action: NavigatorAction::None,
-                },
-            ],
-            NavigatorMode::Commands => vec![
-                QuickAction {
-                    key: "↵".to_string(),
-                    label: "Выполнить".to_string(),
-                    description: "Запустить команду".to_string(),
-                    action: self.primary_action(),
-                },
-                QuickAction {
-                    key: "/".to_string(),
-                    label: "Поиск".to_string(),
-                    description: "Поиск команд".to_string(),
-                    action: NavigatorAction::None,
-                },
-                QuickAction {
-                    key: "?".to_string(),
-                    label: "Справка".to_string(),
-                    description: "Подробности команды".to_string(),
-                    action: NavigatorAction::None,
-                },
-            ],
-            _ => vec![
-                QuickAction {
-                    key: "↵".to_string(),
-                    label: "Выбрать".to_string(),
-                    description: "Выполнить переход".to_string(),
-                    action: self.primary_action(),
-                },
-                QuickAction {
-                    key: "/".to_string(),
-                    label: "Поиск".to_string(),
-                    description: "Фильтр".to_string(),
-                    action: NavigatorAction::None,
-                },
-            ],
         }
     }
 
@@ -888,4 +770,12 @@ fn is_subsequence(sub: &str, target: &str) -> bool {
         }
     }
     true
+}
+
+fn lowercase(value: &str) -> Cow<'_, str> {
+    if value.is_ascii() && !value.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        Cow::Borrowed(value)
+    } else {
+        Cow::Owned(value.to_lowercase())
+    }
 }

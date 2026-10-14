@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use tree_sitter::{InputEdit, Node, Parser, Point, Tree};
+use tree_sitter::{InputEdit, Node, Parser, Tree};
 
 /// An immutable snapshot of the syntax tree produced by Tree-sitter.
 #[derive(Debug, Clone)]
@@ -90,45 +90,38 @@ impl IncrementalSyntaxTree {
         self.tree = self.parser.parse(text, None);
     }
 
-    /// Applies an incremental edit and reparses the updated text.
-    pub fn edit_and_parse(
-        &mut self,
-        start_byte: usize,
-        old_len: usize,
-        new_len: usize,
-        new_text: &str,
-    ) -> SyntaxSnapshot {
-        let old_end_byte = start_byte + old_len;
-        let new_end_byte = start_byte + new_len;
+    /// Initializes the tree directly from borrowed Rope chunks.
+    pub fn init_rope(&mut self, rope: &crop::Rope) {
+        self.tree = None;
+        self.parse_rope(rope);
+    }
 
+    /// Applies an edit whose old points were captured before modifying the Rope.
+    /// Point columns are byte offsets from the start of their logical line.
+    pub fn edit_and_parse(&mut self, edit: InputEdit, rope: &crop::Rope) -> SyntaxSnapshot {
         if let Some(ref mut old_tree) = self.tree {
-            let start_position = byte_to_point(new_text, start_byte);
-            let old_end_position = byte_to_point(
-                new_text,
-                start_byte + old_len.min(new_text.len() - start_byte),
-            );
-            let new_end_position = byte_to_point(new_text, new_end_byte.min(new_text.len()));
-
-            let input_edit = InputEdit {
-                start_byte,
-                old_end_byte,
-                new_end_byte,
-                start_position,
-                old_end_position,
-                new_end_position,
-            };
-
-            old_tree.edit(&input_edit);
-            let new_tree = self
-                .parser
-                .parse(new_text, Some(old_tree))
-                .expect("Incremental reparse failed");
-            self.tree = Some(new_tree.clone());
-            SyntaxSnapshot::new(new_tree)
-        } else {
-            self.init(new_text);
-            self.snapshot()
+            old_tree.edit(&edit);
         }
+        self.parse_rope(rope);
+        self.snapshot()
+    }
+
+    fn parse_rope(&mut self, rope: &crop::Rope) {
+        self.tree = self.parser.parse_with_options(
+            &mut |offset, _| {
+                if offset >= rope.byte_len() {
+                    &[][..]
+                } else {
+                    rope.byte_slice(offset..)
+                        .chunks()
+                        .next()
+                        .unwrap_or("")
+                        .as_bytes()
+                }
+            },
+            self.tree.as_ref(),
+            None,
+        );
     }
 
     /// Returns a snapshot of the current syntax tree.
@@ -139,21 +132,4 @@ impl IncrementalSyntaxTree {
             .expect("IncrementalSyntaxTree has not been initialized with text");
         SyntaxSnapshot::new(tree)
     }
-}
-
-fn byte_to_point(text: &str, pos: usize) -> Point {
-    let mut row = 0;
-    let mut col = 0;
-    for (i, c) in text.char_indices() {
-        if i >= pos {
-            break;
-        }
-        if c == '\n' {
-            row += 1;
-            col = 0;
-        } else {
-            col += c.len_utf8();
-        }
-    }
-    Point { row, column: col }
 }

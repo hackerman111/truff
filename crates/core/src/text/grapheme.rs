@@ -56,26 +56,51 @@ fn boundary(rope: &Rope, pos: usize, forward: bool) -> Option<usize> {
     }
 }
 
-pub(super) fn count(rope: &Rope) -> usize {
-    let mut chunks = rope.chunks();
+pub(super) fn boundaries(rope: &Rope, pos: usize) -> impl Iterator<Item = usize> + '_ {
+    let valid = pos <= rope.byte_len() && rope.is_char_boundary(pos);
+    let mut start = if valid { pos } else { rope.byte_len() };
+    let mut chunks = rope.byte_slice(start..).chunks();
     let mut chunk = chunks.next().unwrap_or("");
-    let mut start = 0;
-    let mut count = 0;
-    let mut cursor = GraphemeCursor::new(0, rope.byte_len(), true);
-    loop {
-        match cursor.next_boundary(chunk, start) {
-            Ok(Some(_)) => count += 1,
-            Ok(None) => return count,
-            Err(GraphemeIncomplete::NextChunk) => {
-                start += chunk.len();
-                chunk = chunks
-                    .next()
-                    .expect("cursor requested an existing next Rope chunk");
+    let mut cursor = GraphemeCursor::new(start, rope.byte_len(), true);
+    let mut check_join = false;
+    std::iter::from_fn(move || {
+        loop {
+            if check_join {
+                match cursor.is_boundary(chunk, start) {
+                    Ok(boundary) => {
+                        check_join = false;
+                        if boundary {
+                            return Some(start);
+                        }
+                    }
+                    Err(GraphemeIncomplete::PreContext(end)) => {
+                        context(&mut cursor, rope, end);
+                        continue;
+                    }
+                    _ => unreachable!("join lies at the beginning of a nonempty Rope chunk"),
+                }
             }
-            Err(GraphemeIncomplete::PreContext(end)) => context(&mut cursor, rope, end),
-            Err(GraphemeIncomplete::PrevChunk | GraphemeIncomplete::InvalidOffset) => {
-                unreachable!("forward grapheme iterator stays inside its Rope chunk")
+            match cursor.next_boundary(chunk, start) {
+                Ok(boundary) => return boundary,
+                Err(GraphemeIncomplete::NextChunk) => {
+                    start += chunk.len();
+                    chunk = chunks
+                        .next()
+                        .expect("cursor requested an existing next Rope chunk");
+                    // Recompute the join context: carrying regional-indicator state
+                    // into provide_context would count the preceding indicator twice.
+                    cursor = GraphemeCursor::new(start, rope.byte_len(), true);
+                    check_join = true;
+                }
+                Err(GraphemeIncomplete::PreContext(end)) => context(&mut cursor, rope, end),
+                Err(GraphemeIncomplete::PrevChunk | GraphemeIncomplete::InvalidOffset) => {
+                    unreachable!("forward grapheme iterator stays inside its Rope chunk")
+                }
             }
         }
-    }
+    })
+}
+
+pub(super) fn count(rope: &Rope) -> usize {
+    boundaries(rope, 0).count()
 }

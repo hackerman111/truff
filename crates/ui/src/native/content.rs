@@ -4,21 +4,31 @@ use crate::app::Application;
 use crate::shell::Focus;
 use crate::theme::Theme;
 use eframe::egui;
+use truff_core::text::Buffer;
 
 pub(super) fn show(
     application: &mut Application,
     editor: &mut EditorWidget,
+    recent: &mut super::recent::RecentVaults,
     ui: &mut egui::Ui,
     theme: &Theme,
 ) -> bool {
     let mut open_vault = false;
+    for change in application.shell.take_buffer_changes() {
+        if let Some(buffer) = application.shell.editor_buffer() {
+            editor.apply_change(buffer, &change);
+        }
+    }
     egui::CentralPanel::default().show(ui, |ui| {
         let is_welcome_screen = application.vault_path().is_none()
-            && application.shell.editor_text().is_empty()
+            && application
+                .shell
+                .editor_buffer()
+                .is_none_or(Buffer::is_empty)
             && application.shell.mode() == truff_core::vim::Mode::Normal;
 
         if is_welcome_screen {
-            open_vault = show_welcome_screen(application, ui, theme);
+            open_vault = show_welcome_screen(application, recent, ui, theme);
         } else {
             let shell = &application.shell;
             let input = editor.show(
@@ -41,7 +51,12 @@ pub(super) fn show(
     open_vault
 }
 
-fn show_welcome_screen(application: &mut Application, ui: &mut egui::Ui, theme: &Theme) -> bool {
+fn show_welcome_screen(
+    application: &mut Application,
+    recent: &mut super::recent::RecentVaults,
+    ui: &mut egui::Ui,
+    theme: &Theme,
+) -> bool {
     let mut open_vault_dialog = false;
     let available_height = ui.available_height();
     let top_padding = (available_height * 0.12).clamp(24.0, 90.0);
@@ -83,13 +98,7 @@ fn show_welcome_screen(application: &mut Application, ui: &mut egui::Ui, theme: 
 
         ui.add_space(32.0);
 
-        let mut config = crate::app::global_config::GlobalConfig::load();
-        let existing_vaults: Vec<_> = config
-            .recent_vaults
-            .iter()
-            .filter(|p| p.is_dir())
-            .cloned()
-            .collect();
+        let existing_vaults = recent.paths();
 
         if !existing_vaults.is_empty() {
             ui.label(
@@ -115,7 +124,7 @@ fn show_welcome_screen(application: &mut Application, ui: &mut egui::Ui, theme: 
                 |ui| {
                     card_frame.show(ui, |ui| {
                         ui.set_width(card_width - 28.0);
-                        for path in &existing_vaults {
+                        for path in existing_vaults {
                             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("vault");
                             let path_str = path.display().to_string();
 
@@ -174,8 +183,7 @@ fn show_welcome_screen(application: &mut Application, ui: &mut egui::Ui, theme: 
             );
 
             if let Some(to_remove) = remove_path {
-                config.remove_recent_vault(&to_remove);
-                let _ = config.save();
+                recent.remove(&to_remove);
             }
         }
     });

@@ -1,19 +1,52 @@
 use super::{CommandContext, CommandId, CommandSpec, RegistryError};
+use std::sync::Arc;
+
+#[derive(Debug)]
+struct RegistryData {
+    specs: Vec<CommandSpec>,
+    ids: Vec<usize>,
+    search: Vec<SearchFields>,
+}
+
+#[derive(Debug)]
+struct SearchFields {
+    title: String,
+    description: String,
+    id: String,
+    group: String,
+}
 
 /// Command lookup shared by keymaps, which-key, pickers and buttons.
 #[derive(Debug, Clone)]
 pub struct CommandRegistry {
-    pub(super) specs: Vec<CommandSpec>,
+    data: Arc<RegistryData>,
 }
 
 impl CommandRegistry {
+    pub(super) fn from_specs(specs: Vec<CommandSpec>) -> Self {
+        let mut ids: Vec<_> = (0..specs.len()).collect();
+        ids.sort_by(|&a, &b| specs[a].id.cmp(&specs[b].id));
+        let search = specs
+            .iter()
+            .map(|spec| SearchFields {
+                title: spec.title.to_lowercase(),
+                description: spec.description.to_lowercase(),
+                id: spec.id.as_str().to_lowercase(),
+                group: spec.group.to_lowercase(),
+            })
+            .collect();
+        Self {
+            data: Arc::new(RegistryData { specs, ids, search }),
+        }
+    }
+
     pub fn specs(&self) -> &[CommandSpec] {
-        &self.specs
+        &self.data.specs
     }
     /// Returns specs grouped by their category.
     pub fn by_category(&self) -> std::collections::BTreeMap<&str, Vec<&CommandSpec>> {
         let mut grouped = std::collections::BTreeMap::<&str, Vec<&CommandSpec>>::new();
-        for spec in &self.specs {
+        for spec in &self.data.specs {
             grouped.entry(&spec.group).or_default().push(spec);
         }
         grouped
@@ -22,24 +55,19 @@ impl CommandRegistry {
     pub fn search(&self, query: &str) -> Vec<&CommandSpec> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
-            return self.specs.iter().collect();
+            return self.data.specs.iter().collect();
         }
         let mut scored = Vec::new();
-        for spec in &self.specs {
-            let title = spec.title.to_lowercase();
-            let desc = spec.description.to_lowercase();
-            let id = spec.id.as_str().to_lowercase();
-            let group = spec.group.to_lowercase();
-
-            let score = if title == q || id == q {
+        for (spec, fields) in self.data.specs.iter().zip(&self.data.search) {
+            let score = if fields.title == q || fields.id == q {
                 100
-            } else if title.starts_with(&q) {
+            } else if fields.title.starts_with(&q) {
                 80
-            } else if title.contains(&q) {
+            } else if fields.title.contains(&q) {
                 60
-            } else if desc.contains(&q) {
+            } else if fields.description.contains(&q) {
                 40
-            } else if group.contains(&q) || id.contains(&q) {
+            } else if fields.group.contains(&q) || fields.id.contains(&q) {
                 20
             } else {
                 0
@@ -53,10 +81,11 @@ impl CommandRegistry {
         scored.into_iter().map(|(_, spec)| spec).collect()
     }
     pub fn get(&self, id: &CommandId) -> Result<&CommandSpec, RegistryError> {
-        self.specs
-            .iter()
-            .find(|s| &s.id == id)
-            .ok_or_else(|| RegistryError::UnknownCommand(id.clone()))
+        self.data
+            .ids
+            .binary_search_by(|&index| self.data.specs[index].id.cmp(id))
+            .map(|position| &self.data.specs[self.data.ids[position]])
+            .map_err(|_| RegistryError::UnknownCommand(id.clone()))
     }
     pub fn require(
         &self,

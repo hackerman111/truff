@@ -29,6 +29,7 @@ pub(super) fn process_job(
                 base_fingerprint,
                 ..
             } => {
+                let content = content.to_string();
                 let path = paths.resolve_path(&path)?;
                 if let Some(base) = &base_fingerprint {
                     let current = files::compute_file_fingerprint(&path).unwrap_or_default();
@@ -65,6 +66,7 @@ pub(super) fn process_job(
             }
             StoreJob::OverwriteFile { path, content, .. }
             | StoreJob::SaveAsFile { path, content, .. } => {
+                let content = content.to_string();
                 // Distinguish the explicit replacement command from create-only save-as.
                 let path = paths.resolve_path(&path)?;
                 let fingerprint = if save_as {
@@ -127,6 +129,7 @@ pub(super) fn process_job(
                 base_fingerprint,
                 ..
             } => {
+                let content = content.to_string();
                 let resolved = paths.resolve_path(&path)?;
                 let relative = paths.relative_path(&resolved)?;
                 recovery.write_snapshot(

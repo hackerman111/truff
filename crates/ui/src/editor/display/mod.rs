@@ -33,14 +33,19 @@ pub struct DisplayMap {
 impl DisplayMap {
     /// Creates a new `DisplayMap` for the given text and projection mode.
     pub fn new(text: &str, mode: ProjectionMode) -> Self {
+        Self::from_owned(text.to_owned(), mode)
+    }
+
+    pub(crate) fn from_owned(text: String, mode: ProjectionMode) -> Self {
+        let colors = truff_core::markdown::style::color_spans(&text);
         let mut map = Self {
-            source_text: text.to_string(),
+            source_text: text,
             mode,
             cursor: BytePos::ZERO,
             selection: None,
             chunks: Vec::new(),
             visual_text: String::new(),
-            colors: truff_core::markdown::style::color_spans(text),
+            colors,
             markers: Vec::new(),
         };
         map.scan_markers();

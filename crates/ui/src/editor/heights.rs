@@ -106,6 +106,27 @@ impl HeightIndex {
         self.rebuild_sums();
     }
 
+    /// Replaces edited source rows, retaining measured heights of unchanged rows.
+    pub(crate) fn replace_blocks(&mut self, old: Range<usize>, count: usize) {
+        if old.len() == count && count <= (self.blocks.len() / 16).max(1) {
+            for index in old {
+                self.update_block_height(index, self.default_line_height, None);
+                self.blocks[index].is_measured = false;
+            }
+            return;
+        }
+        let replacement = std::iter::repeat_with(|| BlockInfo {
+            source_range: 0..0,
+            height: self.default_line_height,
+            is_measured: false,
+            line_count: 1,
+            revision: 0,
+        })
+        .take(count);
+        self.blocks.splice(old, replacement);
+        self.rebuild_sums();
+    }
+
     fn rebuild_sums(&mut self) {
         self.sums.clear();
         self.sums.resize(self.blocks.len() + 1, 0.0);

@@ -102,9 +102,19 @@ impl WatchState {
                     .watched
                     .remove(&key.buffer_id)
                     .filter(|file| file.path == path && file.key.epoch == key.epoch);
+                let needs_check = previous
+                    .as_ref()
+                    .is_none_or(|file| base.as_ref().is_some_and(|base| *base != file.fingerprint));
                 let fingerprint = base
                     .or_else(|| previous.map(|file| file.fingerprint))
                     .unwrap_or_else(|| files::compute_file_fingerprint(&path).unwrap_or_default());
+                if needs_check && let Ok(mut pending) = self.dirty.lock() {
+                    if pending.paths.len() < truff_core::workspace::buffers::DEFAULT_MAX_BUFFERS {
+                        pending.paths.insert(path.clone());
+                    } else {
+                        pending.all = true;
+                    }
+                }
                 next.insert(
                     key.buffer_id,
                     WatchedFile {
@@ -115,9 +125,6 @@ impl WatchState {
                 );
             }
             self.watched = next;
-            if let Ok(mut pending) = self.dirty.lock() {
-                pending.all = true;
-            }
         }
     }
     pub(super) fn reconcile(
@@ -173,3 +180,7 @@ impl WatchState {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "watch_tests.rs"]
+mod tests;

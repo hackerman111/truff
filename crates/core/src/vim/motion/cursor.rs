@@ -16,67 +16,74 @@ pub fn eval_motion(
 ) -> (BytePos, Option<(FindKind, char)>) {
     let mut current = pos.get();
     let total_len = buffer.byte_len();
-    let mut new_find = last_find;
+    let new_find = last_find;
 
     if total_len == 0 {
         return (BytePos::ZERO, new_find);
     }
 
+    if let Some(FindMotion { target, find }) = eval_find(buffer, current, motion, count, last_find)
+    {
+        return (
+            BytePos::new(snap_grapheme(buffer, target.unwrap_or(current))),
+            find,
+        );
+    }
+
     match motion {
         Motion::Left => {
+            let line_start = buffer.byte_of_line(buffer.line_of_byte(current));
             for _ in 0..count {
-                if let Some(prev) = buffer.grapheme_prev(BytePos::new(current)) {
-                    let line_start = buffer.byte_of_line(buffer.line_of_byte(current));
-                    if prev.get() >= line_start {
-                        current = prev.get();
-                    }
+                let Some(prev) = buffer.grapheme_prev(BytePos::new(current)) else {
+                    break;
+                };
+                if prev.get() < line_start {
+                    break;
                 }
+                current = prev.get();
             }
         }
         Motion::Right => {
+            let line_idx = buffer.line_of_byte(current);
+            let next_line_start = if line_idx + 1 < buffer.line_len() {
+                buffer.byte_of_line(line_idx + 1)
+            } else {
+                total_len
+            };
             for _ in 0..count {
-                if let Some(next) = buffer.grapheme_next(BytePos::new(current)) {
-                    let line_idx = buffer.line_of_byte(current);
-                    let next_line_start = if line_idx + 1 < buffer.line_len() {
-                        buffer.byte_of_line(line_idx + 1)
-                    } else {
-                        total_len
-                    };
-                    // In normal mode don't move past end of line
-                    let first = buffer.slice(current..next_line_start).chars().next();
-                    if matches!(first, Some('\n' | '\r')) {
-                        break;
-                    }
-                    if next.get() < next_line_start {
-                        current = next.get();
-                    }
+                let Some(next) = buffer.grapheme_next(BytePos::new(current)) else {
+                    break;
+                };
+                // In normal mode don't move past end of line
+                let first = buffer.slice(current..next_line_start).chars().next();
+                if matches!(first, Some('\n' | '\r')) || next.get() >= next_line_start {
+                    break;
                 }
+                current = next.get();
             }
         }
-        Motion::Up | Motion::ScreenUp => {
+        Motion::Up | Motion::ScreenUp | Motion::Down | Motion::ScreenDown => {
             let line_idx = buffer.line_of_byte(current);
-            let target_line = line_idx.saturating_sub(count);
-            let col = current - buffer.byte_of_line(line_idx);
-            let target_start = buffer.byte_of_line(target_line);
-            let target_end = if target_line + 1 < buffer.line_len() {
-                buffer.byte_of_line(target_line + 1).saturating_sub(1)
+            let target_line = if matches!(motion, Motion::Up | Motion::ScreenUp) {
+                line_idx.saturating_sub(count)
             } else {
-                total_len
+                line_idx
+                    .saturating_add(count)
+                    .min(buffer.line_len().saturating_sub(1))
             };
-            current = (target_start + col).min(target_end);
-        }
-        Motion::Down | Motion::ScreenDown => {
-            let line_idx = buffer.line_of_byte(current);
-            let target_line =
-                (line_idx.saturating_add(count)).min(buffer.line_len().saturating_sub(1));
-            let col = current - buffer.byte_of_line(line_idx);
+            let col = buffer
+                .grapheme_boundaries_from(BytePos::new(buffer.byte_of_line(line_idx)))
+                .take_while(|boundary| boundary.get() <= current)
+                .count();
             let target_start = buffer.byte_of_line(target_line);
-            let target_end = if target_line + 1 < buffer.line_len() {
-                buffer.byte_of_line(target_line + 1).saturating_sub(1)
-            } else {
-                total_len
-            };
-            current = (target_start + col).min(target_end);
+            let target_end = line_content_end(buffer, target_line);
+            current = buffer
+                .grapheme_boundaries_from(BytePos::new(target_start))
+                .take(col)
+                .map(BytePos::get)
+                .take_while(|&end| end <= target_end)
+                .last()
+                .unwrap_or(target_start);
         }
         Motion::LineStart => {
             let line_idx = buffer.line_of_byte(current);
@@ -180,84 +187,12 @@ pub fn eval_motion(
                 }
             }
         }
-        Motion::FindCharForward(c) => {
-            new_find = Some((FindKind::FindForward, *c));
-            if let Some(target) = find_char_on_line(buffer, current, *c, true, false, count) {
-                current = target;
-            }
-        }
-        Motion::FindCharBackward(c) => {
-            new_find = Some((FindKind::FindBackward, *c));
-            if let Some(target) = find_char_on_line(buffer, current, *c, false, false, count) {
-                current = target;
-            }
-        }
-        Motion::TillCharForward(c) => {
-            new_find = Some((FindKind::TillForward, *c));
-            if let Some(target) = find_char_on_line(buffer, current, *c, true, true, count) {
-                current = target;
-            }
-        }
-        Motion::TillCharBackward(c) => {
-            new_find = Some((FindKind::TillBackward, *c));
-            if let Some(target) = find_char_on_line(buffer, current, *c, false, true, count) {
-                current = target;
-            }
-        }
-        Motion::RepeatFind => {
-            if let Some((kind, c)) = last_find {
-                match kind {
-                    FindKind::FindForward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, true, false, count) {
-                            current = t;
-                        }
-                    }
-                    FindKind::FindBackward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, false, false, count)
-                        {
-                            current = t;
-                        }
-                    }
-                    FindKind::TillForward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, true, true, count) {
-                            current = t;
-                        }
-                    }
-                    FindKind::TillBackward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, false, true, count) {
-                            current = t;
-                        }
-                    }
-                }
-            }
-        }
-        Motion::ReverseRepeatFind => {
-            if let Some((kind, c)) = last_find {
-                match kind {
-                    FindKind::FindForward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, false, false, count)
-                        {
-                            current = t;
-                        }
-                    }
-                    FindKind::FindBackward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, true, false, count) {
-                            current = t;
-                        }
-                    }
-                    FindKind::TillForward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, false, true, count) {
-                            current = t;
-                        }
-                    }
-                    FindKind::TillBackward => {
-                        if let Some(t) = find_char_on_line(buffer, current, c, true, true, count) {
-                            current = t;
-                        }
-                    }
-                }
-            }
-        }
+        Motion::FindCharForward(_)
+        | Motion::FindCharBackward(_)
+        | Motion::TillCharForward(_)
+        | Motion::TillCharBackward(_)
+        | Motion::RepeatFind
+        | Motion::ReverseRepeatFind => unreachable!("find motions resolved above"),
         Motion::CurrentLine => {
             let line_idx = buffer.line_of_byte(current);
             current = buffer.byte_of_line(line_idx);
@@ -288,31 +223,16 @@ pub fn eval_operator_motion_range(
         return (line_start..end, true, last_find);
     }
 
-    let (dest, new_find) = eval_motion(buffer, pos, motion, count, last_find);
-    let find = match motion {
-        Motion::FindCharForward(c) => Some((*c, true, false)),
-        Motion::FindCharBackward(c) => Some((*c, false, false)),
-        Motion::TillCharForward(c) => Some((*c, true, true)),
-        Motion::TillCharBackward(c) => Some((*c, false, true)),
-        Motion::RepeatFind | Motion::ReverseRepeatFind => last_find.map(|(kind, c)| {
-            let forward = matches!(kind, FindKind::FindForward | FindKind::TillForward);
-            (
-                c,
-                if *motion == Motion::ReverseRepeatFind {
-                    !forward
-                } else {
-                    forward
-                },
-                matches!(kind, FindKind::TillForward | FindKind::TillBackward),
-            )
-        }),
-        _ => None,
-    };
-    if let Some((c, forward, till)) = find
-        && find_char_on_line(buffer, pos.get(), c, forward, till, count).is_none()
+    let (dest, new_find) = if let Some(FindMotion { target, find }) =
+        eval_find(buffer, pos.get(), motion, count, last_find)
     {
-        return (pos.get()..pos.get(), false, new_find);
-    }
+        let Some(target) = target else {
+            return (pos.get()..pos.get(), false, find);
+        };
+        (BytePos::new(snap_grapheme(buffer, target)), find)
+    } else {
+        eval_motion(buffer, pos, motion, count, last_find)
+    };
     if matches!(
         motion,
         Motion::Up | Motion::Down | Motion::FirstLine | Motion::LastLine | Motion::Line(_)
@@ -346,6 +266,43 @@ pub fn eval_operator_motion_range(
     }
 
     (start..end, false, new_find)
+}
+
+struct FindMotion {
+    target: Option<usize>,
+    find: Option<(FindKind, char)>,
+}
+
+// None denotes a non-find motion; a missing target still retains find state.
+fn eval_find(
+    buffer: &Buffer,
+    pos: usize,
+    motion: &Motion,
+    count: usize,
+    last: Option<(FindKind, char)>,
+) -> Option<FindMotion> {
+    let explicit = match motion {
+        Motion::FindCharForward(c) => Some((FindKind::FindForward, *c)),
+        Motion::FindCharBackward(c) => Some((FindKind::FindBackward, *c)),
+        Motion::TillCharForward(c) => Some((FindKind::TillForward, *c)),
+        Motion::TillCharBackward(c) => Some((FindKind::TillBackward, *c)),
+        Motion::RepeatFind | Motion::ReverseRepeatFind => None,
+        _ => return None,
+    };
+    let find = explicit.or(last);
+    let Some((kind, c)) = find else {
+        return Some(FindMotion {
+            target: None,
+            find: last,
+        });
+    };
+    let forward = matches!(kind, FindKind::FindForward | FindKind::TillForward)
+        ^ (*motion == Motion::ReverseRepeatFind);
+    let till = matches!(kind, FindKind::TillForward | FindKind::TillBackward);
+    Some(FindMotion {
+        target: find_char_on_line(buffer, pos, c, forward, till, count),
+        find,
+    })
 }
 
 /// End of content before LF/CRLF, without copying a logical line.

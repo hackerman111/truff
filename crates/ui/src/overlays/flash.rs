@@ -103,31 +103,30 @@ impl FlashOverlay {
 
     /// Generates Flash targets for words strictly within the visible text.
     pub fn generate_targets(visible_text: &str, source_offset: usize) -> Vec<FlashTarget> {
+        Self::label_candidates(Self::word_ranges(visible_text, source_offset).map(|range| {
+            let text =
+                visible_text[range.start - source_offset..range.end - source_offset].to_owned();
+            (range, text)
+        }))
+    }
+
+    pub(crate) fn word_ranges(
+        visible_text: &str,
+        source_offset: usize,
+    ) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
         use unicode_segmentation::UnicodeSegmentation;
-
-        let mut candidates = Vec::new();
-
-        // Scan word boundaries using UnicodeSegmentation
-        for (idx, word) in visible_text.split_word_bound_indices() {
-            let trimmed = word.trim();
-            if !trimmed.is_empty() && trimmed.chars().any(|c| c.is_alphanumeric()) {
-                let start = source_offset + idx;
-                let end = start + word.len();
-                candidates.push((start..end, word.to_string()));
-                if candidates.len() == 100 {
-                    break;
-                }
-            }
-        }
-
-        Self::label_candidates(candidates)
+        visible_text
+            .split_word_bound_indices()
+            .filter(|(_, word)| word.trim().chars().any(char::is_alphanumeric))
+            .take(100)
+            .map(move |(offset, word)| source_offset + offset..source_offset + offset + word.len())
     }
 
     pub fn activate_candidates(
         &mut self,
         candidates: impl IntoIterator<Item = (std::ops::Range<usize>, String)>,
     ) {
-        self.targets = Self::label_candidates(candidates.into_iter().take(100).collect());
+        self.targets = Self::label_candidates(candidates);
         self.query.clear();
         self.active = !self.targets.is_empty();
     }
@@ -136,28 +135,31 @@ impl FlashOverlay {
     pub fn activate_ranges(&mut self, ranges: impl IntoIterator<Item = std::ops::Range<usize>>) {
         self.activate_candidates(ranges.into_iter().map(|r| (r, String::new())));
     }
-    fn label_candidates(candidates: Vec<(std::ops::Range<usize>, String)>) -> Vec<FlashTarget> {
+    fn label_candidates(
+        candidates: impl IntoIterator<Item = (std::ops::Range<usize>, String)>,
+    ) -> Vec<FlashTarget> {
         let alphabet = Self::HOME_ROW_LETTERS;
-        let double = candidates.len() > alphabet.len();
-        candidates
+        let mut targets: Vec<_> = candidates
             .into_iter()
-            .enumerate()
-            .map(|(i, (range, text))| {
-                let label = if double {
-                    format!(
-                        "{}{}",
-                        alphabet[i / alphabet.len()],
-                        alphabet[i % alphabet.len()]
-                    )
-                } else {
-                    alphabet[i].to_string()
-                };
-                FlashTarget {
-                    label,
-                    source_range: range,
-                    text,
-                }
+            .take(100)
+            .map(|(source_range, text)| FlashTarget {
+                label: String::new(),
+                source_range,
+                text,
             })
-            .collect()
+            .collect();
+        let double = targets.len() > alphabet.len();
+        for (i, target) in targets.iter_mut().enumerate() {
+            target.label = if double {
+                format!(
+                    "{}{}",
+                    alphabet[i / alphabet.len()],
+                    alphabet[i % alphabet.len()]
+                )
+            } else {
+                alphabet[i].to_string()
+            };
+        }
+        targets
     }
 }

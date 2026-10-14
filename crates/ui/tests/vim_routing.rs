@@ -69,7 +69,7 @@ fn inactive_views_and_jump_history_rebase_for_edits_and_undo() {
     let changes = shell.take_buffer_changes();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].buffer_id, id);
-    assert!(changes[0].invalidate_suffix);
+    assert!(!changes[0].invalidate_suffix);
 }
 #[test]
 fn flash_pending_operator_uses_source_target_once() {

@@ -125,5 +125,6 @@ pub(super) fn apply_theme(ui: &mut egui::Ui, theme: &crate::theme::Theme) {
     visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
     visuals.selection.bg_fill = color(theme.selection);
     visuals.selection.stroke = egui::Stroke::new(1.0, color(theme.accent));
+    ui.ctx().set_visuals(visuals.clone());
     *ui.visuals_mut() = visuals;
 }

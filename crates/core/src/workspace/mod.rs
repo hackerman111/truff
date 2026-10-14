@@ -162,6 +162,24 @@ impl Workspace {
     pub fn close_buffer_force(&mut self, buffer_id: BufferId) -> Result<(), AppError> {
         self.buffers.close_force(buffer_id)
     }
+
+    /// Releases clean text and undo history while retaining its identity and disk metadata.
+    /// The caller must first finish storage jobs and delete recovery snapshots for this buffer.
+    pub fn unload_buffer(&mut self, buffer_id: BufferId) -> Result<bool, AppError> {
+        if self
+            .views
+            .values()
+            .any(|view| view.buffer_id() == buffer_id)
+        {
+            return Ok(false);
+        }
+        let unloaded = self.buffers.unload_clean(buffer_id)?;
+        if unloaded {
+            self.buffer_changes
+                .retain(|change| change.buffer_id != buffer_id);
+        }
+        Ok(unloaded)
+    }
 }
 impl Default for Workspace {
     fn default() -> Self {

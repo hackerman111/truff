@@ -2,6 +2,19 @@ use super::super::{editor::color, icons, widgets};
 use crate::app::Application;
 use crate::theme::Theme;
 use eframe::egui;
+use std::time::{Duration, Instant};
+
+struct DirectoryCompletion {
+    path: String,
+    suggestions: Vec<String>,
+    updated_at: Instant,
+}
+
+impl DirectoryCompletion {
+    fn needs_refresh(&self, path: &str, now: Instant) -> bool {
+        self.path != path || now.duration_since(self.updated_at) >= Duration::from_millis(500)
+    }
+}
 
 pub struct VaultDialog {
     pub open: bool,
@@ -9,6 +22,8 @@ pub struct VaultDialog {
     pub initial_note_name: String,
     pub create_starter_note: bool,
     pub error: Option<String>,
+    completion: Option<DirectoryCompletion>,
+    was_open: bool,
 }
 impl Default for VaultDialog {
     fn default() -> Self {
@@ -18,6 +33,8 @@ impl Default for VaultDialog {
             initial_note_name: "Welcome.md".into(),
             create_starter_note: true,
             error: None,
+            completion: None,
+            was_open: false,
         }
     }
 }
@@ -28,6 +45,17 @@ impl VaultDialog {
         context: &egui::Context,
         theme: &Theme,
     ) {
+        if !self.open {
+            self.completion = None;
+            self.was_open = false;
+            return;
+        }
+        if !self.was_open {
+            self.completion = None;
+            self.was_open = true;
+        }
+        context.request_repaint_after(Duration::from_millis(500));
+
         if self.open {
             let mut close_dialog = false;
             let mut submit_creation = false;
@@ -110,9 +138,27 @@ impl VaultDialog {
                         .color(color(theme.text_muted)),
                     );
 
-                    let suggestions =
-                        crate::app::path_completion::complete_directory_path(&self.path);
-                    if !suggestions.is_empty() {
+                    let now = Instant::now();
+                    if self
+                        .completion
+                        .as_ref()
+                        .is_none_or(|cache| cache.needs_refresh(&self.path, now))
+                    {
+                        self.completion = Some(DirectoryCompletion {
+                            path: self.path.clone(),
+                            suggestions: crate::app::path_completion::complete_directory_path(
+                                &self.path,
+                            ),
+                            updated_at: now,
+                        });
+                    }
+                    let mut selected_path = None;
+                    if let Some(suggestions) = self
+                        .completion
+                        .as_ref()
+                        .map(|cache| cache.suggestions.as_slice())
+                        && !suggestions.is_empty()
+                    {
                         ui.add_space(8.0);
                         ui.label(
                             egui::RichText::new("Подсказки:")
@@ -122,10 +168,13 @@ impl VaultDialog {
                         ui.horizontal_wrapped(|ui| {
                             for suggestion in suggestions.iter().take(6) {
                                 if ui.small_button(suggestion).clicked() {
-                                    self.path = suggestion.clone();
+                                    selected_path = Some(suggestion.clone());
                                 }
                             }
                         });
+                    }
+                    if let Some(path) = selected_path {
+                        self.path = path;
                     }
 
                     ui.add_space(10.0);
@@ -187,7 +236,28 @@ impl VaultDialog {
 
             if close_dialog {
                 self.open = false;
+                self.completion = None;
+                self.was_open = false;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DirectoryCompletion;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn completion_cache_expires_on_path_change_or_after_half_second() {
+        let now = Instant::now();
+        let cache = DirectoryCompletion {
+            path: "~/vault".into(),
+            suggestions: vec![],
+            updated_at: now,
+        };
+        assert!(!cache.needs_refresh("~/vault", now + Duration::from_millis(499)));
+        assert!(cache.needs_refresh("~/vault", now + Duration::from_millis(500)));
+        assert!(cache.needs_refresh("~/other", now));
     }
 }

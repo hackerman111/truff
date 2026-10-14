@@ -1,9 +1,17 @@
 use std::borrow::Cow;
+use std::sync::OnceLock;
 
 use super::{CommandContext, CommandId, CommandRegistry, CommandSpec};
 
 impl Default for CommandRegistry {
     fn default() -> Self {
+        static DEFAULT: OnceLock<CommandRegistry> = OnceLock::new();
+        DEFAULT.get_or_init(Self::build_default).clone()
+    }
+}
+
+impl CommandRegistry {
+    fn build_default() -> Self {
         let specs = vec![
             // Universal Navigator Panels (§3.2)
             cmd(
@@ -567,7 +575,7 @@ impl Default for CommandRegistry {
             ),
         ];
 
-        Self { specs }
+        Self::from_specs(specs)
     }
 }
 

@@ -162,16 +162,19 @@ impl RowModel {
                 self.selected_visible_idx = count.saturating_sub(1);
             }
             Move::Parent => {
-                if let Some(row) = self.selected_row().cloned() {
-                    if row.is_folder && !row.is_collapsed {
-                        self.collapse(row.id);
-                    } else if row.depth > 0 {
+                let row = self
+                    .selected_row()
+                    .map(|r| (r.id, r.is_folder, r.is_collapsed, r.depth));
+                if let Some((id, is_folder, is_collapsed, depth)) = row {
+                    if is_folder && !is_collapsed {
+                        self.collapse(id);
+                    } else if depth > 0 {
                         // Find ancestor with depth - 1
                         let mut curr = self.selected_visible_idx;
                         while curr > 0 {
                             curr -= 1;
                             if let Some(ancestor) = self.get_visible_row(curr)
-                                && ancestor.depth < row.depth
+                                && ancestor.depth < depth
                             {
                                 self.selected_visible_idx = curr;
                                 break;
@@ -181,13 +184,13 @@ impl RowModel {
                 }
             }
             Move::Child => {
-                if let Some(row) = self.selected_row().cloned() {
-                    if row.is_folder && row.is_collapsed {
-                        self.expand(row.id);
-                    } else if row.is_folder
-                        && !row.is_collapsed
-                        && self.selected_visible_idx + 1 < count
-                    {
+                let row = self
+                    .selected_row()
+                    .map(|r| (r.id, r.is_folder, r.is_collapsed));
+                if let Some((id, is_folder, is_collapsed)) = row {
+                    if is_folder && is_collapsed {
+                        self.expand(id);
+                    } else if is_folder && !is_collapsed && self.selected_visible_idx + 1 < count {
                         self.selected_visible_idx += 1;
                     }
                 }

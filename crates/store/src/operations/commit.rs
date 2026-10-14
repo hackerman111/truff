@@ -71,22 +71,17 @@ impl FileOpPlan {
 
                 // Rewrite affected files on disk
                 for rewrite in &self.rewrites {
-                    let abs_target = vault.resolve_path(&rewrite.rel_path)?;
+                    let target = if rewrite.rel_path == *from {
+                        to
+                    } else {
+                        &rewrite.rel_path
+                    };
+                    let abs_target = vault.resolve_path(target)?;
                     if !abs_target.exists() {
                         continue;
                     }
                     let content = fs::read_to_string(&abs_target)?;
-                    let mut updated = content;
-
-                    // Sort replacements in reverse order of byte start to avoid index drift
-                    let mut sorted = rewrite.replacements.clone();
-                    sorted.sort_by_key(|b| std::cmp::Reverse(b.0));
-
-                    for (start, end, repl) in sorted {
-                        if start <= updated.len() && end <= updated.len() && start <= end {
-                            updated.replace_range(start..end, &repl);
-                        }
-                    }
+                    let updated = apply_replacements(&content, &rewrite.replacements)?;
 
                     files::atomic_write_file(&abs_target, &updated)?;
                 }
@@ -102,5 +97,68 @@ impl FileOpPlan {
         }
 
         Ok(())
+    }
+}
+
+fn apply_replacements(
+    content: &str,
+    replacements: &[(usize, usize, String)],
+) -> Result<String, FileOpError> {
+    let mut sorted: Vec<_> = replacements.iter().collect();
+    sorted.sort_by_key(|replacement| replacement.0);
+    // Repeated insertions at one offset retain the order of reverse application.
+    for group in sorted.chunk_by_mut(|a, b| a.0 == b.0) {
+        group.reverse();
+    }
+    let invalid = || FileOpError::InvalidOperation("invalid or overlapping rewrite ranges".into());
+    let mut capacity = content.len();
+    let mut previous_end = 0;
+    for &&(start, end, ref text) in &sorted {
+        if start < previous_end
+            || start > end
+            || !content.is_char_boundary(start)
+            || !content.is_char_boundary(end)
+        {
+            return Err(invalid());
+        }
+        capacity = capacity
+            .checked_sub(end - start)
+            .and_then(|n| n.checked_add(text.len()))
+            .ok_or_else(invalid)?;
+        previous_end = end;
+    }
+    let mut updated = String::with_capacity(capacity);
+    let mut copied = 0;
+    for (start, end, text) in sorted {
+        updated.push_str(&content[copied..*start]);
+        updated.push_str(text);
+        copied = *end;
+    }
+    updated.push_str(&content[copied..]);
+    Ok(updated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_replacements;
+
+    #[test]
+    fn replacements_use_original_byte_ranges_and_validate_unicode_and_overlap() {
+        let changes = vec![(8, 9, "long".into()), (0, 2, "αβ".into())];
+        assert_eq!(
+            apply_replacements("é text x!", &changes).unwrap(),
+            "αβ text long!"
+        );
+        assert_eq!(
+            apply_replacements("ab", &[(1, 1, "x".into()), (1, 1, "y".into())]).unwrap(),
+            "ayxb"
+        );
+        for changes in [
+            vec![(1, 2, "x".into())],
+            vec![(0, 4, "x".into()), (3, 4, "y".into())],
+            vec![(0, 99, "x".into())],
+        ] {
+            assert!(apply_replacements("é text x!", &changes).is_err());
+        }
     }
 }

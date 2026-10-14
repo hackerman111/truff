@@ -1,4 +1,5 @@
 //! Rope-backed viewport rendering. Retained text and glyphs are bounded by the viewport.
+mod invalidation;
 mod navigation;
 mod paragraph;
 mod viewport;
@@ -20,11 +21,13 @@ pub struct EditorWidget {
     scroll: f32,
     horizontal: f32,
     visible: Range<usize>,
+    painted_lines: Range<usize>,
     cursor_rect: Option<Rect>,
     last_cursor: Option<(truff_core::workspace::ViewId, usize)>,
     builds: usize,
     heights: HeightIndex,
     buffer_id: Option<truff_core::text::BufferId>,
+    revision: Option<u64>,
 }
 
 pub fn color(value: Color) -> Color32 {
@@ -47,8 +50,8 @@ impl EditorWidget {
     }
     pub fn visible_source_windows(&self) -> Vec<Range<usize>> {
         self.cache
-            .values()
-            .map(|entry| entry.range.clone())
+            .range(self.painted_lines.clone())
+            .map(|(_, entry)| entry.range.clone())
             .collect()
     }
     pub fn cached_paragraph_count(&self) -> usize {

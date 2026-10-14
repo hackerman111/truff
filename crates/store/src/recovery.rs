@@ -53,15 +53,21 @@ pub struct RecoveredSnapshot {
 /// Manages crash-recovery snapshots stored under `.truff/recovery/`.
 pub struct RecoveryManager {
     recovery_dir: PathBuf,
+    vault_root: Option<PathBuf>,
     max_storage_bytes: usize,
 }
 
 impl RecoveryManager {
     /// Creates a new `RecoveryManager` for a vault root directory.
     pub fn new(vault_dir: PathBuf, max_storage_bytes: usize) -> Self {
-        let recovery_dir = vault_dir.join(".truff/recovery");
+        let vault_root = vault_dir.canonicalize().ok();
+        let recovery_dir = vault_root
+            .as_ref()
+            .unwrap_or(&vault_dir)
+            .join(".truff/recovery");
         Self {
             recovery_dir,
+            vault_root,
             max_storage_bytes,
         }
     }
@@ -78,6 +84,9 @@ impl RecoveryManager {
                     io::ErrorKind::InvalidInput,
                     "symlink recovery directory",
                 ));
+            }
+            if self.vault_root.as_deref() == Some(path) {
+                break;
             }
         }
         Ok(())
@@ -110,7 +119,8 @@ impl RecoveryManager {
         fs::create_dir_all(&self.recovery_dir)?;
         #[cfg(unix)]
         {
-            // Recovery directory creation must survive as well as the snapshot entry.
+            // Existing paths can follow a failed creation sync. Retrying the
+            // parents preserves durability without caching directory identities.
             let internal = self
                 .recovery_dir
                 .parent()
@@ -219,8 +229,10 @@ impl RecoveryManager {
         valid.retain(|(path, _)| path != &target_path);
         valid.push((target_path.clone(), key));
         valid.sort_by_key(|(_, key)| (key.epoch, key.revision));
+        let mut removed = false;
         while valid.len() > 2 {
             fs::remove_file(valid.remove(0).0)?;
+            removed = true;
         }
         // Invalid remnants cannot serve as the previous copy and must not consume the budget.
         let prefix = format!("{}_r", key.buffer_id.0);
@@ -233,10 +245,15 @@ impl RecoveryManager {
                 && !valid.iter().any(|(path, _)| *path == entry.path())
             {
                 fs::remove_file(entry.path())?;
+                removed = true;
             }
         }
         #[cfg(unix)]
-        File::open(&self.recovery_dir)?.sync_all()?;
+        if removed {
+            // The rename is already durable. A second directory sync is needed
+            // only when cleanup subsequently changed directory entries.
+            File::open(&self.recovery_dir)?.sync_all()?;
+        }
         Ok(target_path)
     }
 

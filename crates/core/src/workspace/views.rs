@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -37,7 +38,7 @@ impl fmt::Display for ViewId {
 /// Bounded jump list maintaining cursor locations for `<C-o>` / `<C-i>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JumpHistory {
-    entries: Vec<(BytePos, BytePos)>,
+    entries: VecDeque<(BytePos, BytePos)>,
     index: usize,
     max_entries: usize,
 }
@@ -46,7 +47,7 @@ impl JumpHistory {
     /// Creates a new empty jump history with default capacity.
     pub fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            entries: VecDeque::new(),
             index: 0,
             max_entries: DEFAULT_MAX_JUMP_ENTRIES,
         }
@@ -60,7 +61,7 @@ impl JumpHistory {
         }
 
         // Avoid duplicate consecutive jumps
-        if let Some(&(last_anchor, last_head)) = self.entries.last()
+        if let Some(&(last_anchor, last_head)) = self.entries.back()
             && last_anchor == anchor
             && last_head == head
         {
@@ -68,12 +69,12 @@ impl JumpHistory {
         }
 
         if self.entries.len() >= self.max_entries {
-            self.entries.remove(0);
+            self.entries.pop_front();
         } else {
             self.index += 1;
         }
 
-        self.entries.push((anchor, head));
+        self.entries.push_back((anchor, head));
         self.index = self.entries.len();
     }
 

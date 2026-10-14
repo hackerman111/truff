@@ -39,7 +39,7 @@ pub fn query_backlinks(
     let mut all_occurrences = Vec::new();
 
     // 1. Fetch disk links where source is NOT in dirty_overlays
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT l.source_file_id, f.relative_path, l.occurrence_ordinal,
                 l.byte_start, l.byte_end, l.raw_target, l.raw_heading,
                 l.raw_label, l.is_wiki, l.resolved_anchor
@@ -153,9 +153,9 @@ pub fn query_backlinks(
 
     let total_matches = all_occurrences.len();
     let capped_page_size = page_size.max(1);
-    let start = page * capped_page_size;
+    let start = page.saturating_mul(capped_page_size);
     let occurrences = if start < total_matches {
-        let end = (start + capped_page_size).min(total_matches);
+        let end = start.saturating_add(capped_page_size).min(total_matches);
         all_occurrences[start..end].to_vec()
     } else {
         Vec::new()

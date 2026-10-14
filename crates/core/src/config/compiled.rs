@@ -7,8 +7,23 @@ use super::{KeyBinding, KeyHint, KeymapConfig, KeymapError};
 #[derive(Debug, Clone)]
 pub struct CompiledKeymap {
     prefixes: std::collections::BTreeMap<Mode, std::collections::BTreeMap<Vec<Key>, Vec<usize>>>,
-    bindings: Vec<KeyBinding>,
-    registry: CommandRegistry,
+    bindings: Vec<CompiledBinding>,
+}
+
+#[derive(Debug, Clone)]
+struct CompiledBinding {
+    binding: KeyBinding,
+    available: [bool; 3],
+}
+
+impl CompiledBinding {
+    fn available_in(&self, context: CommandContext) -> bool {
+        self.available[match context {
+            CommandContext::Editor => 0,
+            CommandContext::Rows => 1,
+            CommandContext::Global => 2,
+        }]
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindingLookup {
@@ -20,6 +35,27 @@ pub enum BindingLookup {
 impl KeymapConfig {
     pub fn compile(&self) -> Result<CompiledKeymap, KeymapError> {
         self.validate()?;
+        let registry = CommandRegistry::default();
+        // Contexts cannot change inside a compiled keymap. Resolve them once
+        // instead of looking up every candidate command during key input.
+        let bindings = self
+            .bindings
+            .iter()
+            .map(|binding| {
+                let spec = registry
+                    .get(&binding.command)
+                    .map_err(KeymapError::Registry)?;
+                let global = spec.contexts.contains(&CommandContext::Global);
+                Ok(CompiledBinding {
+                    binding: binding.clone(),
+                    available: [
+                        global || spec.contexts.contains(&CommandContext::Editor),
+                        global || spec.contexts.contains(&CommandContext::Rows),
+                        global,
+                    ],
+                })
+            })
+            .collect::<Result<Vec<_>, KeymapError>>()?;
         let mut prefixes = std::collections::BTreeMap::<
             Mode,
             std::collections::BTreeMap<Vec<Key>, Vec<usize>>,
@@ -34,11 +70,17 @@ impl KeymapConfig {
                     .push(idx);
             }
         }
-        Ok(CompiledKeymap {
-            prefixes,
-            bindings: self.bindings.clone(),
-            registry: CommandRegistry::default(),
-        })
+        for mode_prefixes in prefixes.values_mut() {
+            for (prefix, candidates) in mode_prefixes {
+                // Validation excludes complete/prefix collisions, so this
+                // order preserves lookup. Original indices break ties so hints
+                // still select the first eligible binding for each next key.
+                candidates.sort_unstable_by_key(|&idx| {
+                    (self.bindings[idx].keys.get(prefix.len()).copied(), idx)
+                });
+            }
+        }
+        Ok(CompiledKeymap { prefixes, bindings })
     }
 }
 
@@ -52,8 +94,9 @@ impl CompiledKeymap {
             return BindingLookup::Missing;
         };
         for &idx in bindings {
-            let binding = &self.bindings[idx];
-            if self.registry.require(&binding.command, context).is_ok() {
+            let compiled = &self.bindings[idx];
+            if compiled.available_in(context) {
+                let binding = &compiled.binding;
                 if binding.keys.len() == keys.len() {
                     return BindingLookup::Complete(binding.command.clone());
                 }
@@ -70,20 +113,22 @@ impl CompiledKeymap {
         else {
             return Vec::new();
         };
-        let mut hints = std::collections::BTreeMap::new();
+        let mut hints = Vec::<KeyHint>::new();
         for &idx in bindings {
-            let binding = &self.bindings[idx];
-            if binding.keys.len() > prefix.len()
-                && self.registry.require(&binding.command, context).is_ok()
-            {
-                let key = binding.keys[prefix.len()];
-                hints.entry(key).or_insert_with(|| KeyHint {
-                    key,
-                    description: binding.description.clone(),
-                    is_prefix: binding.keys.len() > prefix.len() + 1,
-                });
+            let compiled = &self.bindings[idx];
+            let binding = &compiled.binding;
+            let Some(&key) = binding.keys.get(prefix.len()) else {
+                continue;
+            };
+            if hints.last().is_some_and(|hint| hint.key == key) || !compiled.available_in(context) {
+                continue;
             }
+            hints.push(KeyHint {
+                key,
+                description: binding.description.clone(),
+                is_prefix: binding.keys.len() > prefix.len() + 1,
+            });
         }
-        hints.into_values().collect()
+        hints
     }
 }

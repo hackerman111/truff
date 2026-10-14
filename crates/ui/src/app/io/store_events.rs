@@ -34,11 +34,18 @@ impl Application {
             event,
             StoreEvent::SaveAck { .. } | StoreEvent::SavedAs { .. }
         );
+        let recovery_ack = matches!(event, StoreEvent::RecoveryAck { .. });
         let failed = matches!(
             event,
             StoreEvent::SaveFailed { .. } | StoreEvent::Conflict { .. }
         );
-        self.pending_recovery.remove(&key);
+        if recovery_ack || matches!(event, StoreEvent::SaveFailed { .. }) {
+            self.pending_recovery.remove(&key);
+        }
+        if failed {
+            // Keep the resident copy if recovery cleanup could not be confirmed.
+            self.closed_buffers.remove(&key.buffer_id);
+        }
         if loaded || failed {
             self.pending_loads.remove(&key.buffer_id);
         }
@@ -55,6 +62,9 @@ impl Application {
                 self.status = error.to_string();
                 return;
             }
+        }
+        if recovery_ack && let Some(ready) = self.closed_buffers.get_mut(&key.buffer_id) {
+            *ready = Some(key);
         }
         if loaded {
             if reloaded {
@@ -128,5 +138,40 @@ impl Application {
         } else if failed {
             self.close_after_save.remove(&key.buffer_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_ack_does_not_release_a_pending_recovery_key() {
+        let mut app = Application::new();
+        let id = app
+            .shell
+            .workspace_mut()
+            .open_buffer_from_text("note.md".into(), "saved text")
+            .unwrap();
+        let key = app
+            .shell
+            .workspace()
+            .buffers()
+            .get_snapshot_key(id)
+            .unwrap();
+        app.pending_recovery.insert(key);
+        app.closed_buffers.insert(id, None);
+
+        app.accept_store(StoreEvent::SaveAck {
+            key,
+            fingerprint: "saved-fingerprint".into(),
+        });
+        assert!(app.pending_recovery.contains(&key));
+        assert_eq!(app.closed_buffers.get(&id), Some(&None));
+        assert!(app.recovery_deadline.is_some());
+
+        app.accept_store(StoreEvent::RecoveryAck { key });
+        assert!(!app.pending_recovery.contains(&key));
+        assert_eq!(app.closed_buffers.get(&id), Some(&Some(key)));
     }
 }

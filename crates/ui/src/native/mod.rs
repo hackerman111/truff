@@ -6,7 +6,9 @@ mod editor;
 mod events;
 mod hints;
 pub mod icons;
+mod outline;
 mod paint;
+mod recent;
 mod sidebar;
 mod status;
 mod tabs;
@@ -53,6 +55,8 @@ pub struct NativeApp {
     pub navigator: crate::navigator::NavigatorState,
     hints_tick: Instant,
     last_typography: crate::app::global_config::TypographyConfig,
+    last_theme: Option<crate::theme::Theme>,
+    recent_vaults: recent::RecentVaults,
 }
 
 impl NativeApp {
@@ -68,6 +72,8 @@ impl NativeApp {
             dialogs: creation::CreationDialogs::default(),
             navigator: crate::navigator::NavigatorState::default(),
             last_typography,
+            last_theme: None,
+            recent_vaults: recent::RecentVaults::default(),
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -86,12 +92,31 @@ impl NativeApp {
         );
         self.hints_tick = now;
         let theme = self.application.shell.theme().clone();
-        paint::apply_theme(ui, &theme);
+        if self.last_theme.as_ref() != Some(&theme) {
+            paint::apply_theme(ui, &theme);
+            self.last_theme = Some(theme.clone());
+        }
         tabs::show(&mut self.application, ui, &theme);
         status::show(&self.application, ui, &theme);
-        sidebar::show(&mut self.application, &mut self.dialogs, ui, &theme);
+        if self.application.vault_path().is_none() {
+            self.recent_vaults.refresh();
+            context.request_repaint_after(recent::RecentVaults::INTERVAL);
+        }
+        sidebar::show(
+            &mut self.application,
+            &mut self.dialogs,
+            &mut self.recent_vaults,
+            ui,
+            &theme,
+        );
         backlinks::show(&mut self.application, ui, &theme);
-        let open_vault = content::show(&mut self.application, &mut self.editor, ui, &theme);
+        let open_vault = content::show(
+            &mut self.application,
+            &mut self.editor,
+            &mut self.recent_vaults,
+            ui,
+            &theme,
+        );
         if open_vault {
             self.dialogs.vault.open = true;
         }
@@ -241,25 +266,12 @@ impl NativeApp {
                     .active_relative_path()
                     .unwrap_or_else(|| "Документ".to_string());
                 let title = format!("Outline / {note_name}");
-                let mut items = Vec::new();
-                if let Some(buf) = self.application.shell.editor_buffer() {
-                    let text = buf.as_str();
-                    for (line_idx, line) in text.lines().enumerate() {
-                        let trimmed = line.trim_start();
-                        if trimmed.starts_with('#') {
-                            let level = trimmed.chars().take_while(|&c| c == '#').count();
-                            let heading_text = trimmed[level..].trim().to_string();
-                            if !heading_text.is_empty() && level <= 6 {
-                                items.push(NavigatorItem::new_heading(
-                                    line_idx as u64 + 1,
-                                    line_idx + 1,
-                                    level,
-                                    heading_text,
-                                ));
-                            }
-                        }
-                    }
-                }
+                let items = self
+                    .application
+                    .shell
+                    .editor_buffer()
+                    .map(outline::items)
+                    .unwrap_or_default();
                 (title, items)
             }
             NavigatorMode::Links => {

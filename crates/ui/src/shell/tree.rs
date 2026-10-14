@@ -1,14 +1,14 @@
 use truff_core::navigation::{RowId, RowItem};
 
 #[derive(Debug)]
-struct TreeNode {
-    name: String,
-    full_path: Option<String>,
-    children: Vec<TreeNode>,
+struct TreeNode<'a> {
+    name: &'a str,
+    full_path: Option<&'a str>,
+    children: Vec<TreeNode<'a>>,
 }
 
-impl TreeNode {
-    fn new_dir(name: String) -> Self {
+impl<'a> TreeNode<'a> {
+    fn new_dir(name: &'a str) -> Self {
         Self {
             name,
             full_path: None,
@@ -16,7 +16,7 @@ impl TreeNode {
         }
     }
 
-    fn new_file(name: String, full_path: String) -> Self {
+    fn new_file(name: &'a str, full_path: &'a str) -> Self {
         Self {
             name,
             full_path: Some(full_path),
@@ -24,15 +24,12 @@ impl TreeNode {
         }
     }
 
-    fn insert(&mut self, parts: &[&str], full_path: &str) {
+    fn insert(&mut self, parts: &[&'a str], full_path: &'a str) {
         if parts.is_empty() {
             return;
         }
         if parts.len() == 1 {
-            self.children.push(TreeNode::new_file(
-                parts[0].to_string(),
-                full_path.to_string(),
-            ));
+            self.children.push(TreeNode::new_file(parts[0], full_path));
         } else {
             let dir_name = parts[0];
             if let Some(pos) = self
@@ -42,7 +39,7 @@ impl TreeNode {
             {
                 self.children[pos].insert(&parts[1..], full_path);
             } else {
-                let mut dir_node = TreeNode::new_dir(dir_name.to_string());
+                let mut dir_node = TreeNode::new_dir(dir_name);
                 dir_node.insert(&parts[1..], full_path);
                 self.children.push(dir_node);
             }
@@ -56,7 +53,7 @@ impl TreeNode {
             match (a_is_dir, b_is_dir) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.cmp(&b.name),
+                _ => a.name.cmp(b.name),
             }
         });
         for child in &mut self.children {
@@ -71,11 +68,11 @@ impl TreeNode {
             let is_folder = child.full_path.is_none();
             items.push(RowItem {
                 id,
-                title: child.name.clone(),
+                title: child.name.to_owned(),
                 depth,
                 is_folder,
                 is_collapsed: is_folder,
-                data: child.full_path.clone(),
+                data: child.full_path.map(str::to_owned),
             });
             if is_folder {
                 child.flatten(depth + 1, next_id, items);
@@ -85,7 +82,7 @@ impl TreeNode {
 }
 
 pub(super) fn build_tree_items(files: &[String]) -> Vec<RowItem> {
-    let mut root = TreeNode::new_dir(String::new());
+    let mut root = TreeNode::new_dir("");
     for file in files {
         let parts: Vec<&str> = file.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
         root.insert(&parts, file);

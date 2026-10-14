@@ -18,6 +18,7 @@ impl Application {
             store.set_event_waker(callback.clone());
         }
         self.watched_generation = None;
+        self.closed_buffers.clear();
         let paths = store.paths().clone();
         let catalog = CatalogWorker::start(paths.clone())?;
         if let Some(callback) = &self.storage_waker {

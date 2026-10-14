@@ -29,14 +29,14 @@ pub fn run_workers_shutdown(runs: usize) -> Vec<PerfSample> {
                 StoreJob::SaveFile {
                     key,
                     path: file_abs,
-                    content,
+                    content: content.as_str().into(),
                     base_fingerprint: None,
                 }
             } else {
                 StoreJob::WriteRecoverySnapshot {
                     key,
                     path: file_abs,
-                    content,
+                    content: content.as_str().into(),
                     base_fingerprint: None,
                 }
             };

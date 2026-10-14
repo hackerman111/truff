@@ -1,7 +1,8 @@
 use super::{AffectedFileRewrite, FileOpError, FileOpPlan};
+use crate::files::compute_fingerprint;
 use crate::index::{FileId, IndexDatabase, Resolution, Target};
 use crate::vault::VaultPaths;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -18,130 +19,126 @@ impl FileOpPlan {
         db: &IndexDatabase,
     ) -> Result<(), FileOpError> {
         self.rewrites.clear();
-
-        // 1. Find from_id in files table
-        let from_str = from.to_string_lossy();
-        let from_id_opt: Option<i64> = db
+        let from_id: Option<i64> = db
             .connection()
-            .query_row(
-                "SELECT id FROM files WHERE relative_path = ?1",
-                params![from_str],
-                |row| row.get(0),
-            )
-            .ok();
-
-        let Some(from_id) = from_id_opt.map(FileId) else {
+            .prepare_cached("SELECT id FROM files WHERE relative_path = ?1")?
+            .query_row([from.to_string_lossy()], |r| r.get(0))
+            .optional()?;
+        let Some(from_id) = from_id.map(FileId) else {
             return Ok(());
         };
-
-        // 2. Query all files that might contain links to from_id
         let backlinks = db
             .get_backlinks(from_id, None, 0, usize::MAX)
             .map_err(|e| FileOpError::InvalidOperation(e.to_string()))?;
-
-        // Group backlinks by source file path
-        let mut affected_files: Vec<PathBuf> = Vec::new();
-        for occ in &backlinks.occurrences {
-            let path = PathBuf::from(&occ.source_path);
-            if !affected_files.contains(&path) {
-                affected_files.push(path);
+        // Backlinks are already ordered by source path and occurrence ordinal.
+        for occurrence in &backlinks.occurrences {
+            if dirty_buffers
+                .iter()
+                .any(|path| path == Path::new(&occurrence.source_path))
+            {
+                return Err(FileOpError::DirtyBufferBlocked(
+                    occurrence.source_path.clone().into(),
+                ));
             }
         }
-
-        // 3. Check dirty buffers: if ANY affected file has unsaved edits, block!
-        for affected in &affected_files {
-            if dirty_buffers.iter().any(|d| d == affected) {
-                return Err(FileOpError::DirtyBufferBlocked(affected.clone()));
-            }
-        }
-
-        // 4. Compute replacement text for each affected file
         let new_stem = to
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or_else(|| to.to_str().unwrap_or(""));
-
-        for affected in affected_files {
+        for group in backlinks
+            .occurrences
+            .chunk_by(|a, b| a.source_file_id == b.source_file_id)
+        {
+            let first = &group[0];
+            let affected = PathBuf::from(&first.source_path);
             let abs_path = vault.resolve_path(&affected)?;
-            if !abs_path.exists() {
-                continue;
-            }
             let content = match fs::read_to_string(&abs_path) {
-                Ok(c) => c,
+                Ok(content) => content,
                 Err(_) => continue,
             };
-
-            let facts = match MarkdownFacts::extract(&content) {
-                Ok(f) => f,
-                Err(_) => continue,
-            };
-
-            let resolver = db.resolver();
-            let mut file_replacements = Vec::new();
-
-            // Find source FileId for resolver context
-            let source_id_opt: Option<i64> = db
+            let fingerprint: String = db
                 .connection()
-                .query_row(
-                    "SELECT id FROM files WHERE relative_path = ?1",
-                    params![affected.to_string_lossy()],
-                    |row| row.get(0),
-                )
-                .ok();
-            let source_id = source_id_opt.map(FileId).unwrap_or(FileId(0));
-
-            for link in &facts.links {
-                let target = Target::Note {
-                    path_or_name: link.target.clone(),
-                    heading_or_block: link.heading.clone(),
-                    alias: link.label.clone(),
+                .prepare_cached("SELECT fingerprint FROM files WHERE id = ?1")?
+                .query_row(params![first.source_file_id.0], |r| r.get(0))?;
+            let mut replacements = Vec::with_capacity(group.len());
+            if compute_fingerprint(content.as_bytes()) == fingerprint {
+                for occurrence in group {
+                    replacements.push((
+                        occurrence.range.start,
+                        occurrence.range.end,
+                        replacement(
+                            to,
+                            new_stem,
+                            occurrence.is_wiki,
+                            occurrence.heading.as_deref(),
+                            occurrence.label.as_deref(),
+                        ),
+                    ));
+                }
+            } else {
+                // External edits can invalidate indexed byte ranges. Preserve the
+                // existing reparse/resolve behavior for a stale source document.
+                let Ok(facts) = MarkdownFacts::extract(&content) else {
+                    continue;
                 };
-
-                // Check if target resolves to the renamed file
-                match resolver.resolve(source_id, &target) {
-                    Resolution::Found(target_id, _) if target_id == from_id => {
-                        // Reconstruct link with new target name, preserving alias/heading and wiki format
-                        let replacement_text = if link.is_wiki {
-                            let mut inner = new_stem.to_string();
-                            if let Some(ref h) = link.heading {
-                                inner.push('#');
-                                inner.push_str(h);
-                            }
-                            if let Some(ref lbl) = link.label {
-                                inner.push('|');
-                                inner.push_str(lbl);
-                            }
-                            format!("[[{inner}]]")
-                        } else {
-                            let label = link.label.as_deref().unwrap_or("");
-                            let mut target_url = to.to_string_lossy().to_string();
-                            if let Some(ref h) = link.heading {
-                                target_url.push('#');
-                                target_url.push_str(h);
-                            }
-                            format!("[{label}]({target_url})")
-                        };
-
-                        file_replacements.push((
+                let resolver = db.resolver();
+                for link in facts.links {
+                    let target = Target::Note {
+                        path_or_name: link.target,
+                        heading_or_block: link.heading.clone(),
+                        alias: None,
+                    };
+                    if matches!(resolver.resolve(first.source_file_id, &target), Resolution::Found(id, _) if id == from_id)
+                    {
+                        replacements.push((
                             link.range.start,
                             link.range.end,
-                            replacement_text,
+                            replacement(
+                                to,
+                                new_stem,
+                                link.is_wiki,
+                                link.heading.as_deref(),
+                                link.label.as_deref(),
+                            ),
                         ));
-                    }
-                    _ => {
-                        // Ambiguous or other targets are untouched
                     }
                 }
             }
-
-            if !file_replacements.is_empty() {
+            if !replacements.is_empty() {
                 self.rewrites.push(AffectedFileRewrite {
                     rel_path: affected,
-                    replacements: file_replacements,
+                    replacements,
                 });
             }
         }
-
         Ok(())
+    }
+}
+
+fn replacement(
+    to: &Path,
+    new_stem: &str,
+    is_wiki: bool,
+    heading: Option<&str>,
+    label: Option<&str>,
+) -> String {
+    if is_wiki {
+        let mut inner = new_stem.to_string();
+        if let Some(heading) = heading {
+            inner.push('#');
+            inner.push_str(heading);
+        }
+        if let Some(label) = label {
+            inner.push('|');
+            inner.push_str(label);
+        }
+        format!("[[{inner}]]")
+    } else {
+        let mut target = to.to_string_lossy().into_owned();
+        if let Some(heading) = heading {
+            target.push('#');
+            target.push_str(heading);
+        }
+        format!("[{}]({target})", label.unwrap_or(""))
     }
 }

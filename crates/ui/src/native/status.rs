@@ -22,7 +22,19 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
             } else {
                 ui.horizontal(|ui| {
                     let mode = application.shell.mode();
-                    let mode_str = mode.to_string();
+                    let mode_str = match mode {
+                        truff_core::vim::Mode::Normal => "NORMAL",
+                        truff_core::vim::Mode::Insert => "INSERT",
+                        truff_core::vim::Mode::VisualChar => "VISUAL",
+                        truff_core::vim::Mode::VisualLine => "V-LINE",
+                    };
+                    let focus_str = match application.shell.focus() {
+                        crate::shell::Focus::Sidebar => "Sidebar",
+                        crate::shell::Focus::Editor => "Editor",
+                        crate::shell::Focus::RightPanel => "RightPanel",
+                        crate::shell::Focus::Navigator => "Navigator",
+                        crate::shell::Focus::CommandBar => "CommandBar",
+                    };
                     let (pill_bg, pill_fg) = match mode {
                         truff_core::vim::Mode::Insert => {
                             (color(theme.accent), color(theme.bg_primary))
@@ -46,7 +58,7 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                         });
                     ui.add_space(4.0);
                     ui.label(
-                        egui::RichText::new(format!("{:?}", application.shell.focus()))
+                        egui::RichText::new(focus_str)
                             .size(11.5)
                             .color(color(theme.text_muted)),
                     );
@@ -69,8 +81,9 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                             && let Some(buffer) = application.shell.editor_buffer()
                         {
                             let head = view.head().get().min(buffer.byte_len());
-                            let line = buffer.line_of_byte(head) + 1;
-                            let line_start = buffer.byte_of_line(buffer.line_of_byte(head));
+                            let line_index = buffer.line_of_byte(head);
+                            let line = line_index + 1;
+                            let line_start = buffer.byte_of_line(line_index);
                             let col = head.saturating_sub(line_start) + 1;
                             format!("Ln {line}, Col {col}")
                         } else {

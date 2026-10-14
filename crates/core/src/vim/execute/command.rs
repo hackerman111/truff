@@ -4,7 +4,10 @@ use super::{InputContext, InputResult, VimState, surrounding_char_range};
 use crate::config::LimitsConfig;
 use crate::navigation::Move;
 use crate::text::{BytePos, Transaction};
-use crate::vim::motion::{Motion, eval_motion, eval_operator_motion_range, eval_text_object_range};
+use crate::vim::motion::{
+    Motion, TextObjectTarget, eval_delimited_object_range, eval_motion, eval_operator_motion_range,
+    eval_text_object_range,
+};
 use crate::vim::{Command, Mode, Operator};
 
 impl VimState {
@@ -202,13 +205,11 @@ impl VimState {
                         (r, l)
                     } else {
                         let start = view.head();
-                        let mut end = start;
-                        for _ in 0..graphemes {
-                            let Some(next) = buffer.grapheme_next(end) else {
-                                break;
-                            };
-                            end = next;
-                        }
+                        let end = buffer
+                            .grapheme_boundaries_from(start)
+                            .take(graphemes)
+                            .last()
+                            .unwrap_or(start);
                         (start.get()..end.get(), false)
                     };
                     self.operator(op, range, linewise, buffer, view)
@@ -260,6 +261,18 @@ impl VimState {
             }
             Command::OperatorTextObject { op, obj, count } => {
                 if let InputContext::Editor { buffer, view, .. } = ctx {
+                    if matches!(
+                        obj.target,
+                        TextObjectTarget::Parentheses
+                            | TextObjectTarget::Bracket
+                            | TextObjectTarget::Brace
+                            | TextObjectTarget::AngleBracket
+                    ) {
+                        return match eval_delimited_object_range(buffer, view.head(), obj, count) {
+                            Some(range) => self.operator(op, range, false, buffer, view),
+                            None => self.error("Text object target unavailable"),
+                        };
+                    }
                     let mut range = match self.text_object_range(buffer, view.head(), obj) {
                         Ok(range) => Some(range),
                         Err(e) => return self.error(e),
@@ -286,13 +299,11 @@ impl VimState {
             }
             Command::DeleteChar(count) => {
                 if let InputContext::Editor { buffer, view, .. } = ctx {
-                    let mut end = view.head();
-                    for _ in 0..count {
-                        let Some(next) = buffer.grapheme_next(end) else {
-                            break;
-                        };
-                        end = next;
-                    }
+                    let end = buffer
+                        .grapheme_boundaries_from(view.head())
+                        .take(count)
+                        .last()
+                        .unwrap_or(view.head());
                     self.operator(
                         Operator::Delete,
                         view.head().get()..end.get(),

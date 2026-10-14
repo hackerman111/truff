@@ -18,28 +18,28 @@ pub(super) struct Paragraph {
     typography: TypographyConfig,
 }
 
-#[derive(Clone)]
-pub(super) struct ParagraphStyle {
+#[derive(Clone, Copy)]
+pub(super) struct ParagraphStyle<'a> {
     pub(super) foreground: Color32,
     pub(super) pixels_per_point: f32,
     pub(super) width: f32,
     pub(super) projection: ProjectionMode,
-    pub(super) typography: TypographyConfig,
+    pub(super) typography: &'a TypographyConfig,
 }
 impl Paragraph {
     pub(super) fn new(
         range: Range<usize>,
-        source: &str,
+        source: String,
         painter: &Painter,
-        style: ParagraphStyle,
+        style: ParagraphStyle<'_>,
     ) -> Self {
-        let display = DisplayMap::new(source, style.projection);
+        let display = DisplayMap::from_owned(source, style.projection);
         let galley = super::super::paint::shape(
             painter,
             &display,
             style.foreground,
             style.width,
-            &style.typography,
+            style.typography,
         );
         Self {
             range,
@@ -49,14 +49,14 @@ impl Paragraph {
             color: style.foreground,
             pixels_per_point: style.pixels_per_point,
             width: style.width,
-            typography: style.typography,
+            typography: style.typography.clone(),
         }
     }
     /// Synchronizes view-dependent markers and reshapes only if the rendered paragraph changes.
     pub(super) fn refresh(
         &mut self,
         painter: &Painter,
-        style: ParagraphStyle,
+        style: ParagraphStyle<'_>,
         cursor: BytePos,
         selection: Option<(BytePos, BytePos)>,
     ) -> bool {
@@ -72,7 +72,7 @@ impl Paragraph {
             && self.color == style.foreground
             && self.pixels_per_point == style.pixels_per_point
             && self.width == style.width
-            && self.typography == style.typography
+            && &self.typography == style.typography
         {
             return false;
         }
@@ -81,12 +81,12 @@ impl Paragraph {
             &self.display,
             style.foreground,
             style.width,
-            &style.typography,
+            style.typography,
         );
         self.color = style.foreground;
         self.pixels_per_point = style.pixels_per_point;
         self.width = style.width;
-        self.typography = style.typography;
+        self.typography = style.typography.clone();
         true
     }
 }

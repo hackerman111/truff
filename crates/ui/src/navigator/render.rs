@@ -123,7 +123,6 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                             .color(to_color32(theme.text_muted)),
                     );
 
-                    let prev_query = state.query.clone();
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut state.query)
                             .hint_text(state.mode.search_placeholder())
@@ -137,7 +136,7 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                         state.search_mode = true;
                     }
 
-                    if state.query != prev_query {
+                    if response.changed() {
                         state.recompute_filter();
                     }
 
@@ -505,27 +504,28 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
                     let resp = pill_frame.show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(&quick.key)
+                                egui::RichText::new(quick.key)
                                     .size(11.0)
                                     .monospace()
                                     .strong()
                                     .color(to_color32(theme.accent_primary)),
                             );
                             ui.label(
-                                egui::RichText::new(&quick.label)
+                                egui::RichText::new(quick.label)
                                     .size(11.0)
                                     .color(to_color32(theme.text_secondary)),
                             );
                         });
                     });
 
-                    if resp.response.on_hover_text(&quick.description).clicked() {
-                        match quick.key.as_str() {
+                    if resp.response.on_hover_text(quick.description).clicked() {
+                        match quick.key {
                             "/" => state.search_mode = true,
                             "?" => state.actions_menu_open = !state.actions_menu_open,
                             _ => {
-                                if quick.action != NavigatorAction::None {
-                                    action = quick.action;
+                                let chosen = state.quick_action(quick.key);
+                                if chosen != NavigatorAction::None {
+                                    action = chosen;
                                     state.close();
                                 }
                             }
@@ -543,8 +543,13 @@ pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) 
 }
 
 fn handle_window_input(state: &mut NavigatorState, ui: &mut egui::Ui) -> Option<NavigatorAction> {
-    let input = ui.input(|i| i.clone());
+    ui.input(|input| handle_key_input(state, input))
+}
 
+fn handle_key_input(
+    state: &mut NavigatorState,
+    input: &egui::InputState,
+) -> Option<NavigatorAction> {
     if state.actions_menu_open {
         if input.key_pressed(egui::Key::Escape) {
             state.actions_menu_open = false;

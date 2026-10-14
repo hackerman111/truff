@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::mem::size_of;
+use std::sync::Arc;
 
 /// Kind of text selection stored in a register (Vim-style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -40,8 +41,8 @@ impl Register {
 /// Collection of named, unnamed, and clipboard registers.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Registers {
-    unnamed: Option<Register>,
-    named: HashMap<char, Register>,
+    unnamed: Option<Arc<Register>>,
+    named: HashMap<char, Arc<Register>>,
 }
 
 impl Registers {
@@ -52,6 +53,10 @@ impl Registers {
 
     /// Retrieves a register by name (`None` or `Some('"')` accesses the unnamed register).
     pub fn get(&self, name: Option<char>) -> Option<&Register> {
+        self.entry(name).map(Arc::as_ref)
+    }
+
+    fn entry(&self, name: Option<char>) -> Option<&Arc<Register>> {
         match name {
             None | Some('"') => self.unnamed.as_ref(),
             Some(c) => {
@@ -61,11 +66,16 @@ impl Registers {
         }
     }
 
+    pub(crate) fn get_shared(&self, name: Option<char>) -> Option<Arc<Register>> {
+        self.entry(name).cloned()
+    }
+
     /// Sets the value of a register.
     ///
     /// If `name` is uppercase (`'A'..='Z'`), appends to the corresponding lowercase register.
     /// In all cases, also updates the unnamed register.
     pub fn set(&mut self, name: Option<char>, value: Register) {
+        let value = Arc::new(value);
         match name {
             None | Some('"') => {
                 self.unnamed = Some(value);
@@ -73,8 +83,9 @@ impl Registers {
             Some(c) if c.is_ascii_uppercase() => {
                 let key = c.to_ascii_lowercase();
                 if let Some(existing) = self.named.get_mut(&key) {
-                    existing.text.push_str(&value.text);
-                    existing.kind = value.kind;
+                    let register = Arc::make_mut(existing);
+                    register.text.push_str(&value.text);
+                    register.kind = value.kind;
                     self.unnamed = Some(existing.clone());
                 } else {
                     self.named.insert(key, value.clone());

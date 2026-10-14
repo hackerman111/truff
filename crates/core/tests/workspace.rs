@@ -354,6 +354,24 @@ fn approved_reload_discards_only_the_revision_user_approved() {
         "external"
     );
     assert!(!workspace.buffers().get_buffer(id).unwrap().is_dirty());
+    workspace
+        .dispatch(Action::ApplyEdit {
+            view_id: view,
+            transaction: Transaction::insert(0, "after "),
+        })
+        .unwrap();
+    let changes = workspace.take_buffer_changes();
+    assert_eq!(changes.len(), 1);
+    assert!(
+        changes[0].invalidate_suffix,
+        "reload between edits invalidates the full cache"
+    );
+    assert_eq!(changes[0].old_range, 0..4);
+    assert_eq!(changes[0].new_range, 0..14);
+    assert_eq!(
+        changes[0].revision,
+        workspace.buffers().get_buffer(id).unwrap().revision()
+    );
     assert!(
         workspace
             .accept(StoreEvent::FileReloaded {

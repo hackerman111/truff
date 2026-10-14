@@ -89,6 +89,7 @@ pub struct BufferEntry {
     state: BufferState,
     buffer: Option<Buffer>,
     fingerprint: Option<String>,
+    revision_floor: u64,
 }
 
 impl BufferEntry {
@@ -105,6 +106,7 @@ impl BufferEntry {
             state,
             buffer,
             fingerprint: None,
+            revision_floor: 0,
         }
     }
 
@@ -152,6 +154,14 @@ impl BufferEntry {
     pub fn set_fingerprint(&mut self, fp: Option<String>) {
         self.fingerprint = fp;
     }
+
+    pub(crate) fn revision(&self) -> u64 {
+        self.buffer().map_or(self.revision_floor, Buffer::revision)
+    }
+
+    pub(crate) fn revision_floor(&self) -> u64 {
+        self.revision_floor
+    }
 }
 
 /// Registry managing all open/tracked buffers in a workspace.
@@ -186,6 +196,10 @@ impl BufferRegistry {
 
     /// Updates the current vault epoch.
     pub fn set_epoch(&mut self, epoch: VaultEpoch) {
+        if self.epoch != epoch {
+            self.closed_paths.clear();
+            self.replaced_by.clear();
+        }
         self.epoch = epoch;
         self.watch_generation = self.watch_generation.wrapping_add(1);
     }
@@ -235,7 +249,7 @@ impl BufferRegistry {
         self.watch_generation = self.watch_generation.wrapping_add(1);
         let id = BufferId::next();
         if let Some(old_id) = self.closed_paths.remove(&path) {
-            self.replaced_by.insert(old_id, id);
+            self.record_replacement(old_id, id);
         }
         self.path_to_id.insert(path.clone(), id);
         self.buffers
@@ -299,16 +313,45 @@ impl BufferRegistry {
         self.path_to_id.get(path).copied()
     }
 
-    /// Returns the snapshot key for an existing loaded buffer.
+    /// Returns the snapshot key, including the reserved revision of an unloaded buffer.
     pub fn get_snapshot_key(&self, id: BufferId) -> Option<SnapshotKey> {
         let entry = self.buffers.get(&id)?;
-        let rev = entry.buffer().map(|b| b.revision()).unwrap_or(0);
+        let rev = entry.revision();
         Some(SnapshotKey::new(self.epoch, id, rev))
+    }
+
+    pub(crate) fn unload_clean(&mut self, id: BufferId) -> Result<bool, AppError> {
+        let entry = self
+            .buffers
+            .get_mut(&id)
+            .ok_or(AppError::BufferNotFound(id))?;
+        let Some(buffer) = entry.buffer() else {
+            return Ok(false);
+        };
+        if entry.state != BufferState::Clean || buffer.is_dirty() || entry.path.is_none() {
+            return Ok(false);
+        }
+        let Some(revision) = buffer.revision().checked_add(1) else {
+            return Ok(false);
+        };
+        entry.revision_floor = revision;
+        entry.buffer = None;
+        entry.state = BufferState::Unloaded;
+        self.watch_generation = self.watch_generation.wrapping_add(1);
+        Ok(true)
     }
 
     /// Returns the replacement `BufferId` if a closed buffer was superseded by reopening.
     pub fn get_replacement_id(&self, old_id: BufferId) -> Option<BufferId> {
-        self.replaced_by.get(&old_id).copied()
+        let mut id = *self.replaced_by.get(&old_id)?;
+        for _ in 0..=self.replaced_by.len() {
+            if let Some(next) = self.replaced_by.get(&id) {
+                id = *next;
+            } else {
+                return self.buffers.contains_key(&id).then_some(id);
+            }
+        }
+        None
     }
 
     /// Opens or registers a buffer populated with initial text.
@@ -329,9 +372,9 @@ impl BufferRegistry {
 
         if let Some(ref p) = path {
             if let Some(old_id) = self.path_to_id.insert(p.clone(), id) {
-                self.replaced_by.insert(old_id, id);
+                self.record_replacement(old_id, id);
             } else if let Some(old_id) = self.closed_paths.remove(p) {
-                self.replaced_by.insert(old_id, id);
+                self.record_replacement(old_id, id);
             }
         }
 
@@ -346,10 +389,20 @@ impl BufferRegistry {
             .remove(&id)
             .ok_or(AppError::BufferNotFound(id))?;
         self.watch_generation = self.watch_generation.wrapping_add(1);
-        if let Some(p) = entry.path() {
+        if let Some(p) = entry.path()
+            && self.path_to_id.get(p) == Some(&id)
+        {
             self.closed_paths.insert(p.to_path_buf(), id);
-            if self.path_to_id.get(p) == Some(&id) {
-                self.path_to_id.remove(p);
+            self.path_to_id.remove(p);
+            if self.closed_paths.len() > self.max_buffers {
+                let oldest = self
+                    .closed_paths
+                    .iter()
+                    .min_by_key(|(_, id)| **id)
+                    .map(|(path, _)| path.clone());
+                if let Some(path) = oldest {
+                    self.closed_paths.remove(&path);
+                }
             }
         }
         Ok(())
@@ -369,6 +422,20 @@ impl BufferRegistry {
 
     /// Records that an old buffer was replaced by a newly opened buffer.
     pub fn record_replacement(&mut self, old_id: BufferId, new_id: BufferId) {
+        if old_id == new_id || self.get_replacement_id(new_id) == Some(old_id) {
+            return;
+        }
+        // Flatten retained aliases while their common destination changes.
+        for target in self.replaced_by.values_mut() {
+            if *target == old_id {
+                *target = new_id;
+            }
+        }
         self.replaced_by.insert(old_id, new_id);
+        if self.replaced_by.len() > self.max_buffers
+            && let Some(oldest) = self.replaced_by.keys().min().copied()
+        {
+            self.replaced_by.remove(&oldest);
+        }
     }
 }

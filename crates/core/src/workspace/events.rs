@@ -39,6 +39,19 @@ impl Workspace {
             }
             return Err(AppError::BufferNotFound(key.buffer_id));
         }
+        if self
+            .buffers
+            .get(key.buffer_id)
+            .is_some_and(|entry| key.revision < entry.revision_floor())
+        {
+            return Err(AppError::StaleSnapshotKey {
+                expected: self
+                    .buffers
+                    .get_snapshot_key(key.buffer_id)
+                    .ok_or(AppError::BufferNotFound(key.buffer_id))?,
+                actual: key,
+            });
+        }
 
         let discard = matches!(&event, StoreEvent::FileReloaded { .. });
         match event {
@@ -126,29 +139,28 @@ impl Workspace {
                     .buffers
                     .get_mut(key.buffer_id)
                     .ok_or(AppError::BufferNotFound(key.buffer_id))?;
-                if let Some(current) = entry.buffer() {
-                    if current.revision() != key.revision {
-                        return Err(AppError::StaleSnapshotKey {
-                            expected: SnapshotKey::new(
-                                self.epoch,
-                                key.buffer_id,
-                                current.revision(),
-                            ),
-                            actual: key,
-                        });
-                    }
-                    if current.is_dirty() && !discard {
-                        return Err(AppError::BufferDirty {
-                            buffer_id: key.buffer_id,
-                        });
-                    }
+                if entry.revision() != key.revision {
+                    return Err(AppError::StaleSnapshotKey {
+                        expected: SnapshotKey::new(self.epoch, key.buffer_id, entry.revision()),
+                        actual: key,
+                    });
                 }
+                if let Some(current) = entry.buffer()
+                    && current.is_dirty()
+                    && !discard
+                {
+                    return Err(AppError::BufferDirty {
+                        buffer_id: key.buffer_id,
+                    });
+                }
+                let old_len = entry.buffer().map_or(0, crate::text::Buffer::byte_len);
                 if let Some(buffer) = entry.buffer_mut() {
                     buffer.reload_from_text(&content)?;
                 } else {
-                    entry.set_buffer(Some(crate::text::Buffer::from_text(
+                    entry.set_buffer(Some(crate::text::Buffer::from_text_at_revision(
                         key.buffer_id,
                         &content,
+                        key.revision,
                     )?));
                 }
                 entry.set_state(BufferState::Clean);
@@ -157,25 +169,22 @@ impl Workspace {
                     buffer_id: key.buffer_id,
                     state: BufferState::Clean,
                 });
+                let buffer = entry
+                    .buffer()
+                    .ok_or(AppError::BufferNotFound(key.buffer_id))?;
                 for v in self.views.values_mut() {
                     if v.buffer_id() == key.buffer_id {
                         let snap = |pos: crate::text::BytePos| {
-                            use unicode_segmentation::UnicodeSegmentation;
-                            let offset = pos.get().min(content.len());
-                            crate::text::BytePos::new(if offset == content.len() {
-                                offset
-                            } else {
-                                content
-                                    .grapheme_indices(true)
-                                    .take_while(|(index, _)| *index <= offset)
-                                    .last()
-                                    .map_or(0, |(index, _)| index)
-                            })
+                            crate::text::BytePos::new(crate::vim::motion::snap_grapheme(
+                                buffer,
+                                pos.get(),
+                            ))
                         };
                         v.set_cursor(snap(v.anchor()), snap(v.head()));
                         effects.push(Effect::InvalidateView(v.id()));
                     }
                 }
+                self.notify_buffer_reload(key.buffer_id, old_len);
             }
             StoreEvent::ExternalChanged {
                 key,
@@ -187,7 +196,8 @@ impl Workspace {
                     .get_mut(key.buffer_id)
                     .ok_or(AppError::BufferNotFound(key.buffer_id))?;
                 // A queued watcher event cannot follow a rename or save-as to another path.
-                if entry.path() != Some(path.as_path())
+                if entry.buffer().is_none()
+                    || entry.path() != Some(path.as_path())
                     || entry.fingerprint() == Some(new_fingerprint.as_str())
                 {
                     return Ok(effects);

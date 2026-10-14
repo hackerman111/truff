@@ -3,11 +3,11 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use truff_core::markdown::facts::{DocFacts, MarkdownFacts};
+use truff_core::markdown::facts::MarkdownFacts;
 
 use crate::VaultPaths;
 use crate::files::{DEFAULT_MAX_FILE_BYTES, compute_fingerprint, read_file_with_limit};
-use crate::index::{FileId, IndexDatabase};
+use crate::index::{FileId, IndexDatabase, update};
 
 use super::{CatalogEvent, CatalogReplies};
 
@@ -42,6 +42,21 @@ fn enumerate(root: &Path) -> io::Result<Vec<String>> {
     Ok(files)
 }
 
+pub(super) fn affected_files(
+    paths: &VaultPaths,
+    path: &str,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let absolute = paths.resolve_path(Path::new(path))?;
+    if absolute.is_dir() {
+        Ok(enumerate(&absolute)?
+            .into_iter()
+            .map(|suffix| Path::new(path).join(suffix).to_string_lossy().into_owned())
+            .collect())
+    } else {
+        Ok(vec![path.to_owned()])
+    }
+}
+
 pub(super) fn rebuild(
     paths: &VaultPaths,
     db: &mut IndexDatabase,
@@ -49,42 +64,97 @@ pub(super) fn rebuild(
 ) -> Result<HashMap<String, FileId>, Box<dyn std::error::Error>> {
     let files = enumerate(paths.root())?;
     let _ = events.send(CatalogEvent::Files(files.clone()));
-    let old_ids: Vec<FileId> = db
-        .connection()
-        .prepare("SELECT id FROM files")?
-        .query_map([], |row| Ok(FileId(row.get(0)?)))?
-        .collect::<Result<_, _>>()?;
-    for id in old_ids {
-        db.remove_file(id)?;
+    let existing = indexed_paths(db)?;
+    let removed: Vec<_> = existing
+        .iter()
+        .filter(|(path, _)| files.binary_search(path).is_err())
+        .map(|(_, &id)| id)
+        .collect();
+    refresh(paths, db, events, &files, &removed)?;
+    Ok(indexed_paths(db)?)
+}
+
+pub(super) fn indexed_paths(db: &IndexDatabase) -> rusqlite::Result<HashMap<String, FileId>> {
+    db.connection()
+        .prepare_cached("SELECT relative_path, id FROM files")?
+        .query_map([], |row| Ok((row.get(0)?, FileId(row.get(1)?))))?
+        .collect()
+}
+
+/// Read only the selected files. A startup scan selects every path; file operations
+/// select their own affected paths. All SQL mutations belong to one transaction.
+pub(super) fn refresh(
+    paths: &VaultPaths,
+    db: &mut IndexDatabase,
+    events: &CatalogReplies,
+    changed: &[String],
+    removed: &[FileId],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut changed: Vec<_> = changed
+        .iter()
+        .filter(|path| {
+            Path::new(path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        })
+        .collect();
+    changed.sort_unstable();
+    changed.dedup();
+    db.clear_dirty_overlays();
+    let tx = db.connection_mut().transaction()?;
+    let mut next_id: i64 =
+        tx.query_row("SELECT coalesce(max(id), 0) FROM files", [], |r| r.get(0))?;
+    for &id in removed {
+        update::remove_document_in(&tx, id)?;
     }
-    let mut ids = HashMap::with_capacity(files.len());
-    // Register every target first so forward references resolve regardless of filename order.
-    for (index, path) in files.iter().enumerate() {
-        let id = FileId(index as i64 + 1);
-        db.index_file(id, path, path, "", 0, &DocFacts::default(), "")?;
-        ids.insert(path.clone(), id);
+    let mut updated = !removed.is_empty();
+    // Register all targets before indexing any facts, preserving IDs of existing files.
+    for &path in &changed {
+        let exists: bool = tx
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM files WHERE relative_path=?1)")?
+            .query_row([path], |r| r.get(0))?;
+        if !exists {
+            next_id = next_id.checked_add(1).ok_or("File ID limit reached")?;
+            update::register_document(&tx, FileId(next_id), path)?;
+            updated = true;
+        }
     }
-    for path in &files {
+    for &path in &changed {
         match read_file_with_limit(
             &paths.resolve_path(Path::new(path))?,
             DEFAULT_MAX_FILE_BYTES,
         ) {
             Ok(text) => {
-                let facts = MarkdownFacts::extract(&text)?;
-                db.index_file(
-                    ids[path],
+                let (id, fingerprint, generation): (i64, String, i64) = tx.prepare_cached(
+                    "SELECT id, fingerprint, index_generation FROM files WHERE relative_path=?1")?
+                    .query_row([path], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+                let actual = compute_fingerprint(text.as_bytes());
+                if actual == fingerprint {
+                    continue;
+                }
+                let generation = generation
+                    .checked_add(1)
+                    .ok_or("Index generation limit reached")?;
+                update::index_document_in(
+                    &tx,
+                    FileId(id),
                     path,
                     path,
-                    &compute_fingerprint(text.as_bytes()),
-                    1,
-                    &facts,
+                    &actual,
+                    generation as u64,
+                    &MarkdownFacts::extract(&text)?,
                     &text,
                 )?;
+                updated = true;
             }
             Err(error) => {
-                let _ = events.send(CatalogEvent::Error(format!("{}: {error}", path)));
+                let _ = events.send(CatalogEvent::Error(format!("{path}: {error}")));
             }
         }
     }
-    Ok(ids)
+    if updated {
+        update::refresh_resolutions(&tx)?;
+    }
+    tx.commit()?;
+    Ok(())
 }

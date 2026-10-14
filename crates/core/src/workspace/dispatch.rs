@@ -23,7 +23,10 @@ impl Workspace {
                 };
                 effects.push(Effect::InvalidateView(view_id));
                 if self.buffers.get_buffer(buf_id).is_none() {
-                    let key = SnapshotKey::new(self.epoch, buf_id, 0);
+                    let key = self
+                        .buffers
+                        .get_snapshot_key(buf_id)
+                        .ok_or(AppError::BufferNotFound(buf_id))?;
                     effects.push(Effect::SubmitStoreJob(StoreJob::LoadFile {
                         key,
                         path: path.clone(),
@@ -130,11 +133,8 @@ impl Workspace {
                     .path()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| PathBuf::from("untitled.md"));
-                let content = entry
-                    .buffer()
-                    .map(|b| b.rope().to_string())
-                    .unwrap_or_default();
-                let rev = entry.buffer().map(|b| b.revision()).unwrap_or(0);
+                let content = entry.buffer().map(|b| b.rope().clone()).unwrap_or_default();
+                let rev = entry.revision();
                 let key = SnapshotKey::new(self.epoch, buffer_id, rev);
                 let base_fingerprint = entry.fingerprint().map(str::to_string);
 
@@ -152,7 +152,7 @@ impl Workspace {
                     .ok_or(AppError::BufferNotFound(buffer_id))?;
                 let buffer = entry.buffer().ok_or(AppError::BufferNotFound(buffer_id))?;
                 let key = SnapshotKey::new(self.epoch, buffer_id, buffer.revision());
-                let content = buffer.as_str();
+                let content = buffer.rope().clone();
                 let job = match action {
                     Action::SaveBufferAs { path, .. } => {
                         if self.buffers.get_by_path(&path).is_some() {
@@ -198,7 +198,7 @@ impl Workspace {
                     .path()
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| PathBuf::from("untitled.md"));
-                let rev = entry.buffer().map(|b| b.revision()).unwrap_or(0);
+                let rev = entry.revision();
                 let key = SnapshotKey::new(self.epoch, buffer_id, rev);
                 effects.push(Effect::SubmitStoreJob(StoreJob::LoadFile { key, path }));
             }

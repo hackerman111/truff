@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Range;
 
 use super::edit::{Change, ChangeSet, EditError, SingleEdit, Transaction, UndoGroup};
@@ -95,11 +96,19 @@ impl Buffer {
 
     /// Replaces a clean resident document from disk, discarding undo but preserving revision order.
     pub(crate) fn reload_from_text(&mut self, text: &str) -> Result<(), EditError> {
-        let mut replacement = Self::from_text(self.id, text)?;
-        replacement.revision = self.revision + 1;
-        replacement.set_savepoint();
-        *self = replacement;
+        *self = Self::from_text_at_revision(self.id, text, self.revision + 1)?;
         Ok(())
+    }
+
+    pub(crate) fn from_text_at_revision(
+        id: BufferId,
+        text: &str,
+        revision: u64,
+    ) -> Result<Self, EditError> {
+        let mut buffer = Self::from_text(id, text)?;
+        buffer.revision = revision;
+        buffer.set_savepoint();
+        Ok(buffer)
     }
 
     /// Monotonically increasing revision number.
@@ -204,6 +213,12 @@ impl Buffer {
         super::grapheme::next(&self.rope, pos.get()).map(BytePos::new)
     }
 
+    /// Visits successive boundaries with one cursor across borrowed Rope chunks.
+    /// Invalid UTF-8 byte offsets produce an empty iterator.
+    pub fn grapheme_boundaries_from(&self, pos: BytePos) -> impl Iterator<Item = BytePos> + '_ {
+        super::grapheme::boundaries(&self.rope, pos.get()).map(BytePos::new)
+    }
+
     /// Moves to the preceding grapheme boundary across Rope chunk boundaries.
     /// Positions beyond EOF are clamped; invalid UTF-8 byte offsets return `None`.
     pub fn grapheme_prev(&self, pos: BytePos) -> Option<BytePos> {
@@ -215,8 +230,8 @@ impl Buffer {
         let mut normalized_edits = tx.edits;
         if self.line_ending == LineEnding::CrLf {
             for edit in &mut normalized_edits {
-                if edit.text.contains('\n') {
-                    edit.text = normalize_crlf(&edit.text);
+                if let Cow::Owned(normalized) = normalize_crlf(&edit.text) {
+                    edit.text = normalized;
                 }
             }
         }

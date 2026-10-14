@@ -27,23 +27,24 @@ impl EditorWidget {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, color(theme.bg_primary));
         self.cursor_rect = None;
+        self.painted_lines = 0..0;
+        self.visible = 0..0;
         let (Some(buffer), Some(view)) = (buffer, view) else {
             return None;
         };
         let (content_width, margin_x) = Self::calculate_column_metrics(rect.width());
         let cursor = view.head().get().min(buffer.byte_len());
         let cursor_line = buffer.line_of_byte(cursor);
-        let trailing_newline = buffer
-            .rope()
-            .chunks()
-            .next_back()
-            .is_some_and(|chunk| chunk.ends_with('\n'));
-        let lines = (buffer.line_len() + usize::from(trailing_newline)).max(1);
-        if self.buffer_id != Some(buffer.id()) || self.heights.block_count() != lines {
+        let lines = line_count(buffer);
+        if self.buffer_id != Some(buffer.id())
+            || self.heights.block_count() != lines
+            || self.revision != Some(buffer.revision())
+        {
             self.heights.init_uniform(lines);
             self.buffer_id = Some(buffer.id());
             self.cache.clear();
         }
+        self.revision = Some(buffer.revision());
         let identity = (view.id(), cursor);
         let cursor_changed = self.last_cursor != Some(identity);
         if cursor_changed {
@@ -77,8 +78,6 @@ impl EditorWidget {
             .0;
         let last = (self.heights.block_at_y(self.scroll + rect.height() * 2.0).0 + 1).min(lines);
         self.cache.retain(|line, _| *line >= first && *line < last);
-        self.visible =
-            line_start(buffer, first.min(lines - 1))..line_start(buffer, last.min(lines));
         let foreground = color(theme.text_primary);
         let selection = if mode == Mode::VisualChar {
             let start = view.anchor().get().min(cursor);
@@ -147,12 +146,12 @@ impl EditorWidget {
                 } else {
                     projection
                 },
-                typography: typography.clone(),
+                typography,
             };
             if changed {
                 self.cache.insert(
                     line,
-                    Paragraph::new(range.clone(), &slice.to_string(), &painter, style.clone()),
+                    Paragraph::new(range.clone(), slice.to_string(), &painter, style),
                 );
                 self.builds += 1;
             }
@@ -223,19 +222,31 @@ impl EditorWidget {
                     margin_x - if long { self.horizontal } else { 0.0 },
                     Self::TOP_MARGIN + self.heights.y_for_block(line) - self.scroll,
                 );
-            if let Some(caret) = entry.paint(
-                &painter,
-                origin,
-                &ParagraphView {
-                    theme,
-                    selection: selection.as_ref(),
-                    cursor: (line == cursor_line).then_some(cursor),
-                    mode,
-                    preedit,
-                    flash,
-                    content_width,
-                },
-            ) {
+            let intersects_viewport = origin.y < rect.bottom()
+                && origin.y + entry.galley.size().y.max(LINE_HEIGHT) > rect.top();
+            if intersects_viewport {
+                if self.painted_lines.is_empty() {
+                    self.painted_lines.start = line;
+                    self.visible.start = range.start;
+                }
+                self.painted_lines.end = line + 1;
+                self.visible.end = range.end;
+            }
+            if intersects_viewport
+                && let Some(caret) = entry.paint(
+                    &painter,
+                    origin,
+                    &ParagraphView {
+                        theme,
+                        selection: selection.as_ref(),
+                        cursor: (line == cursor_line).then_some(cursor),
+                        mode,
+                        preedit,
+                        flash,
+                        content_width,
+                    },
+                )
+            {
                 self.cursor_rect = Some(caret);
                 if cursor_changed {
                     let adjustment = if caret.bottom() > rect.bottom() {
@@ -251,7 +262,8 @@ impl EditorWidget {
                     }
                 }
             }
-            if (response.clicked() || response.dragged())
+            if intersects_viewport
+                && (response.clicked() || response.dragged())
                 && let Some(position) = response.interact_pointer_pos()
                 && position.y >= origin.y
                 && position.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
@@ -304,6 +316,15 @@ impl EditorWidget {
         }
         clicked
     }
+}
+
+pub(super) fn line_count(buffer: &Buffer) -> usize {
+    let trailing = buffer
+        .rope()
+        .chunks()
+        .next_back()
+        .is_some_and(|chunk| chunk.ends_with('\n'));
+    (buffer.line_len() + usize::from(trailing)).max(1)
 }
 
 fn line_start(buffer: &Buffer, line: usize) -> usize {

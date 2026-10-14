@@ -116,7 +116,25 @@ fn incremental_equals_fresh() {
     edited_text.replace_range(edit_start..edit_start + old_len, replacement);
 
     // Incremental update
-    let incremental_snapshot = tree.edit_and_parse(edit_start, old_len, new_len, &edited_text);
+    let buffer = truff_core::Buffer::from_str(initial_text);
+    let point = |pos| {
+        let row = buffer.line_of_byte(pos);
+        tree_sitter::Point::new(row, pos - buffer.byte_of_line(row))
+    };
+    let new_buffer = truff_core::Buffer::from_str(&edited_text);
+    let new_row = new_buffer.line_of_byte(edit_start + new_len);
+    let edit = tree_sitter::InputEdit {
+        start_byte: edit_start,
+        old_end_byte: edit_start + old_len,
+        new_end_byte: edit_start + new_len,
+        start_position: point(edit_start),
+        old_end_position: point(edit_start + old_len),
+        new_end_position: tree_sitter::Point::new(
+            new_row,
+            edit_start + new_len - new_buffer.byte_of_line(new_row),
+        ),
+    };
+    let incremental_snapshot = tree.edit_and_parse(edit, &crop::Rope::from(edited_text.as_str()));
 
     // Fresh parse from scratch
     let fresh_tree = IncrementalSyntaxTree::parse_fresh(&edited_text);

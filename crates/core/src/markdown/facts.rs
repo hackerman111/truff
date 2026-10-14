@@ -145,7 +145,7 @@ impl MarkdownFacts {
                 }
 
                 // Check if inside any code range
-                let is_inside_code = code_ranges.iter().any(|r| r.contains(&i));
+                let is_inside_code = in_code(&code_ranges, i);
                 if is_inside_code {
                     i += 2;
                     continue;
@@ -161,6 +161,8 @@ impl MarkdownFacts {
                     i = end;
                     continue;
                 }
+                // No subsequent opening can have a closing delimiter either.
+                break;
             }
             i += 1;
         }
@@ -184,9 +186,7 @@ impl MarkdownFacts {
             let line_end = byte_offset + line_len;
 
             // Check if line is inside a code block
-            let inside_code = code_ranges
-                .iter()
-                .any(|r| r.contains(&line_start) || r.contains(&line_end));
+            let inside_code = in_code(&code_ranges, line_start) || in_code(&code_ranges, line_end);
             if !inside_code && let Some(hat_pos) = line.rfind('^') {
                 let candidate = &line[hat_pos + 1..].trim();
                 if !candidate.is_empty()
@@ -219,6 +219,12 @@ impl MarkdownFacts {
             blocks,
         })
     }
+}
+
+// Parser events produce disjoint source ranges in ascending order.
+fn in_code(ranges: &[Range<usize>], pos: usize) -> bool {
+    let index = ranges.partition_point(|range| range.end <= pos);
+    ranges.get(index).is_some_and(|range| range.contains(&pos))
 }
 
 fn slugify(text: &str) -> String {

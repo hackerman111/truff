@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension, params};
 use truff_core::markdown::facts::DocFacts;
 
 pub mod backlinks;
 pub mod resolve;
+mod schema;
 pub mod search;
 pub mod update;
 
@@ -16,8 +17,6 @@ pub use search::{
     DEFAULT_MAX_SEARCH_PAGE_SIZE, SearchPage, SearchQuery, SearchResult, SearchSession,
     escape_fts5_query,
 };
-
-const SCHEMA_SQL: &str = include_str!("schema.sql");
 
 /// Errors occurring during SQLite index operations.
 #[derive(Debug)]
@@ -60,7 +59,7 @@ impl IndexDatabase {
         Self::init(conn)
     }
 
-    fn init(conn: Connection) -> Result<Self, IndexError> {
+    fn init(mut conn: Connection) -> Result<Self, IndexError> {
         // Enforce required PRAGMAs: WAL, cache limit 8 MiB (-8000 KiB), synchronous NORMAL
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -70,7 +69,7 @@ impl IndexDatabase {
              PRAGMA temp_store = MEMORY;",
         )?;
 
-        conn.execute_batch(SCHEMA_SQL)?;
+        schema::initialize(&mut conn)?;
 
         Ok(Self {
             conn,
@@ -123,6 +122,21 @@ impl IndexDatabase {
     /// Clears any in-memory dirty overlay for a file after save or discard.
     pub fn clear_dirty_overlay(&mut self, file_id: FileId) {
         self.dirty_overlays.remove(&file_id);
+    }
+
+    /// Clears all in-memory dirty overlays.
+    pub fn clear_dirty_overlays(&mut self) {
+        self.dirty_overlays.clear();
+    }
+
+    /// Returns the indexed relative path for a file, if it still exists.
+    pub fn file_path(&self, file_id: FileId) -> Result<Option<String>, IndexError> {
+        let path = self
+            .conn
+            .prepare_cached("SELECT relative_path FROM files WHERE id = ?1")?
+            .query_row(params![file_id.0], |row| row.get(0))
+            .optional()?;
+        Ok(path)
     }
 
     /// Queries backlinks pointing to the target file or heading/block.

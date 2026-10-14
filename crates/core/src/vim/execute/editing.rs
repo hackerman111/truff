@@ -280,13 +280,14 @@ impl VimState {
         let InputContext::Editor { buffer, view, .. } = ctx else {
             return self.error("Editor target unavailable");
         };
-        let Some(reg) = self.registers.get(self.selected_reg.take()).cloned() else {
+        let Some(reg) = self.registers.get_shared(self.selected_reg.take()) else {
             return self.error("Register unavailable");
         };
-        let Some(bytes) = reg.text.len().checked_mul(count) else {
+        let Some(repetitions_len) = reg.text.len().checked_mul(count) else {
             return self.error("Paste count arithmetic overflow");
         };
-        if bytes > buffer.max_file_bytes().saturating_sub(buffer.byte_len()) {
+        let available = buffer.max_file_bytes().saturating_sub(buffer.byte_len());
+        if repetitions_len > available {
             return self.error("Paste exceeds buffer size limit");
         }
         let head = view.head();
@@ -296,16 +297,8 @@ impl VimState {
         } else {
             "\n"
         };
-        let mut text = String::new();
-        for index in 0..count {
-            text.push_str(&reg.text);
-            if reg.kind == RegisterKind::Linewise && !reg.text.ends_with('\n') && index + 1 < count
-            {
-                text.push_str(nl);
-            }
-        }
-        let mut prefix_len = 0;
-        let pos = if reg.kind == RegisterKind::Linewise {
+        let linewise = reg.kind == RegisterKind::Linewise;
+        let (pos, prefix, suffix) = if linewise {
             let insert = if after {
                 if line + 1 < buffer.line_len() {
                     buffer.byte_of_line(line + 1)
@@ -315,25 +308,59 @@ impl VimState {
             } else {
                 buffer.byte_of_line(line)
             };
-            if insert == buffer.byte_len() && insert > 0 && line_content_end(buffer, line) == insert
-            {
-                text.insert_str(0, nl);
-                prefix_len = nl.len();
-            }
-            if insert < buffer.byte_len() && !text.ends_with('\n') {
+            let prefix = insert == buffer.byte_len()
+                && insert > 0
+                && line_content_end(buffer, line) == insert;
+            let repeated_ends_with_lf =
+                count > 0 && (reg.text.ends_with('\n') || (reg.text.is_empty() && count > 1));
+            let suffix = insert < buffer.byte_len() && !prefix && !repeated_ends_with_lf;
+            (insert, prefix, suffix)
+        } else if after {
+            (
+                buffer
+                    .grapheme_next(head)
+                    .map_or(head.get(), BytePos::get)
+                    .min(line_content_end(buffer, line)),
+                false,
+                false,
+            )
+        } else {
+            (head.get(), false, false)
+        };
+
+        let separator_count = if linewise && !reg.text.ends_with('\n') {
+            count.saturating_sub(1)
+        } else {
+            0
+        };
+        let Some(separator_len) = separator_count.checked_mul(nl.len()) else {
+            return self.error("Paste count arithmetic overflow");
+        };
+        let prefix_len = usize::from(prefix) * nl.len();
+        let suffix_len = usize::from(suffix) * nl.len();
+        let Some(total_len) = repetitions_len
+            .checked_add(separator_len)
+            .and_then(|len| len.checked_add(prefix_len))
+            .and_then(|len| len.checked_add(suffix_len))
+        else {
+            return self.error("Paste count arithmetic overflow");
+        };
+        if total_len > available {
+            return self.error("Paste exceeds buffer size limit");
+        }
+
+        let mut text = String::with_capacity(total_len);
+        if prefix {
+            text.push_str(nl);
+        }
+        for index in 0..count {
+            text.push_str(&reg.text);
+            if index < separator_count {
                 text.push_str(nl);
             }
-            insert
-        } else if after {
-            buffer
-                .grapheme_next(head)
-                .map_or(head.get(), BytePos::get)
-                .min(line_content_end(buffer, line))
-        } else {
-            head.get()
-        };
-        if text.len() > buffer.max_file_bytes().saturating_sub(buffer.byte_len()) {
-            return self.error("Paste exceeds buffer size limit");
+        }
+        if suffix {
+            text.push_str(nl);
         }
         let cursor = if reg.kind == RegisterKind::Linewise {
             pos + prefix_len
