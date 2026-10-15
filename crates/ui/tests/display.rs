@@ -1,5 +1,5 @@
 use truff_core::text::BytePos;
-use truff_ui::editor::display::{Affinity, DisplayMap, ProjectionMode};
+use truff_ui::editor::display::{Affinity, DisplayMap, InlineStyle, ProjectionMode};
 use truff_ui::editor::layout::{HeightIndex, ScrollAnchor, VirtualizedLayout};
 use truff_ui::overlays::FlashOverlay;
 
@@ -260,8 +260,8 @@ fn test_editor_readable_column_and_margin() {
     let available_width = 1200.0;
     let (content_width, margin_x) =
         truff_ui::native::EditorWidget::calculate_column_metrics(available_width);
-    assert_eq!(content_width, 720.0);
-    assert_eq!(margin_x, (1200.0 - 720.0) / 2.0);
+    assert_eq!(content_width, 800.0);
+    assert_eq!(margin_x, (1200.0 - 800.0) / 2.0);
     assert_eq!(truff_ui::native::EditorWidget::TOP_MARGIN, 48.0);
 
     // Narrow window clamps to available_width - 48
@@ -281,15 +281,15 @@ fn test_typography_hierarchy_scale() {
     let default_typo = TypographyConfig::default();
 
     let (f_h1, lh_h1) = resolve_font_and_line_height("# Heading 1", &default_typo);
-    assert_eq!(f_h1, FontId::new(24.0, FontFamily::Monospace));
+    assert_eq!(f_h1, FontId::new(24.0, FontFamily::Proportional));
     assert_eq!(lh_h1, 31.0);
 
     let (f_h2, lh_h2) = resolve_font_and_line_height("## Heading 2", &default_typo);
-    assert_eq!(f_h2, FontId::new(20.0, FontFamily::Monospace));
+    assert_eq!(f_h2, FontId::new(20.0, FontFamily::Proportional));
     assert_eq!(lh_h2, 27.0);
 
     let (f_h3, lh_h3) = resolve_font_and_line_height("### Heading 3", &default_typo);
-    assert_eq!(f_h3, FontId::new(17.0, FontFamily::Monospace));
+    assert_eq!(f_h3, FontId::new(17.0, FontFamily::Proportional));
     assert_eq!(lh_h3, 24.0);
 
     let (f_code, lh_code) = resolve_font_and_line_height("```rust", &default_typo);
@@ -297,7 +297,7 @@ fn test_typography_hierarchy_scale() {
     assert_eq!(lh_code, 23.0);
 
     let (f_body, lh_body) = resolve_font_and_line_height("Regular markdown text", &default_typo);
-    assert_eq!(f_body, FontId::new(15.0, FontFamily::Monospace));
+    assert_eq!(f_body, FontId::new(15.0, FontFamily::Proportional));
     assert_eq!(lh_body, 23.0);
 
     // Test with scaled base_font_size: 20.0
@@ -307,12 +307,12 @@ fn test_typography_hierarchy_scale() {
     };
 
     let (f_h1_scaled, lh_h1_scaled) = resolve_font_and_line_height("# Heading 1", &scaled_typo);
-    assert_eq!(f_h1_scaled, FontId::new(32.0, FontFamily::Monospace));
+    assert_eq!(f_h1_scaled, FontId::new(32.0, FontFamily::Proportional));
     assert_eq!(lh_h1_scaled, 42.0);
 
     let (f_body_scaled, lh_body_scaled) =
         resolve_font_and_line_height("Regular markdown text", &scaled_typo);
-    assert_eq!(f_body_scaled, FontId::new(20.0, FontFamily::Monospace));
+    assert_eq!(f_body_scaled, FontId::new(20.0, FontFamily::Proportional));
     assert_eq!(lh_body_scaled, 30.0);
 
     let (f_code_scaled, lh_code_scaled) = resolve_font_and_line_height("```rust", &scaled_typo);
@@ -378,4 +378,96 @@ fn standard_inline_markers_and_wiki_links_still_project() {
     );
     display.set_cursor(BytePos::new(100));
     assert_eq!(display.visual_text(), "bold italic note code");
+}
+
+#[test]
+fn reading_mode_unconditionally_hides_markers() {
+    let source = "**bold** _italic_ ~~strike~~ `code` [link](https://example.com) <mark style=\"background-color:#ffff00\">hi</mark>";
+    let mut reading_map = DisplayMap::new(source, ProjectionMode::Reading);
+    let initial_visual = reading_map.visual_text().to_string();
+
+    assert!(!initial_visual.contains("**"));
+    assert!(!initial_visual.contains("~~"));
+    assert!(!initial_visual.contains("<mark"));
+    assert!(!initial_visual.contains("https://example.com"));
+    assert!(initial_visual.contains("bold"));
+    assert!(initial_visual.contains("italic"));
+    assert!(initial_visual.contains("strike"));
+    assert!(initial_visual.contains("code"));
+    assert!(initial_visual.contains("link"));
+    assert!(initial_visual.contains("hi"));
+
+    // Moving cursor to any position inside markers or content does NOT reveal markers in Reading mode
+    let bold_pos = BytePos::new(source.find("bold").unwrap());
+    reading_map.set_cursor(bold_pos);
+    assert_eq!(reading_map.visual_text(), initial_visual);
+
+    let mark_pos = BytePos::new(source.find("hi").unwrap());
+    reading_map.set_cursor(mark_pos);
+    assert_eq!(reading_map.visual_text(), initial_visual);
+
+    let link_pos = BytePos::new(source.find("link").unwrap());
+    reading_map.set_cursor(link_pos);
+    assert_eq!(reading_map.visual_text(), initial_visual);
+
+    // Setting a selection also does NOT reveal markers in Reading mode
+    reading_map.update(
+        None,
+        BytePos::ZERO,
+        Some((BytePos::ZERO, BytePos::new(source.len()))),
+    );
+    assert_eq!(reading_map.visual_text(), initial_visual);
+
+    // Switching to LivePreview reveals markers when cursor touches them
+    reading_map.set_mode(ProjectionMode::LivePreview);
+    reading_map.set_cursor(bold_pos);
+    assert!(reading_map.visual_text().contains("**bold**"));
+
+    // Switching back to Reading hides them again unconditionally
+    reading_map.set_mode(ProjectionMode::Reading);
+    assert_eq!(reading_map.visual_text(), initial_visual);
+}
+
+#[test]
+fn styled_spans_in_display_map() {
+    let source = "**bold** *italic* ~~strike~~ `code` [link](https://example.com) <span style=\"color:#112233\">blue</span> <mark style=\"background-color:#ffcc00\">hi</mark>";
+    let map = DisplayMap::new(source, ProjectionMode::LivePreview);
+    let styles = map.styled_spans();
+
+    let has_bold = styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Bold && &source[s.content.clone()] == "bold");
+    assert!(has_bold, "Missing bold styled span");
+
+    let has_italic = styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Italic && &source[s.content.clone()] == "italic");
+    assert!(has_italic, "Missing italic styled span");
+
+    let has_strike = styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Strikethrough && &source[s.content.clone()] == "strike");
+    assert!(has_strike, "Missing strikethrough styled span");
+
+    let has_code = styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Code && &source[s.content.clone()] == "code");
+    assert!(has_code, "Missing code styled span");
+
+    let has_link = styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Link && &source[s.content.clone()] == "link");
+    assert!(has_link, "Missing link styled span");
+
+    let has_color = styles.iter().any(|s| {
+        s.style == InlineStyle::TextColor([0x11, 0x22, 0x33, 255])
+            && &source[s.content.clone()] == "blue"
+    });
+    assert!(has_color, "Missing text color styled span");
+
+    let has_highlight = styles.iter().any(|s| {
+        s.style == InlineStyle::Highlight([0xff, 0xcc, 0x00, 255])
+            && &source[s.content.clone()] == "hi"
+    });
+    assert!(has_highlight, "Missing highlight styled span");
 }

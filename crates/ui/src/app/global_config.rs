@@ -15,7 +15,7 @@ fn default_theme() -> String {
 }
 
 fn default_font_family() -> String {
-    "monospace".to_string()
+    "proportional".to_string()
 }
 
 fn default_base_font_size() -> f32 {

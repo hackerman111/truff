@@ -12,7 +12,9 @@ mod markers;
 mod projection;
 mod types;
 
-pub use types::{Affinity, DisplayChunk, ProjectionMode, SourceHit, VisualPos};
+pub use types::{
+    Affinity, DisplayChunk, InlineStyle, ProjectionMode, SourceHit, StyledSpan, VisualPos,
+};
 
 use std::ops::Range;
 
@@ -27,6 +29,7 @@ pub struct DisplayMap {
     chunks: Vec<DisplayChunk>,
     visual_text: Option<Box<str>>,
     colors: Vec<truff_core::markdown::style::ColorSpan>,
+    styles: Vec<StyledSpan>,
     markers: Vec<(Range<usize>, Option<Range<usize>>)>,
     lists: Vec<truff_core::markdown::presentation::ListMarker>,
     presentation: Option<truff_core::markdown::presentation::LinePresentation>,
@@ -56,6 +59,7 @@ impl DisplayMap {
             chunks: Vec::new(),
             visual_text: None,
             colors,
+            styles: Vec::new(),
             markers: Vec::new(),
             lists: Vec::new(),
             presentation,
@@ -89,6 +93,10 @@ impl DisplayMap {
 
     pub fn color_spans(&self) -> &[truff_core::markdown::style::ColorSpan] {
         &self.colors
+    }
+
+    pub fn styled_spans(&self) -> &[StyledSpan] {
+        &self.styles
     }
 
     pub(crate) fn task_at_visual(&self, position: VisualPos) -> Option<usize> {

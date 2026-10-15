@@ -197,6 +197,9 @@ pub fn eval_motion(
             let line_idx = buffer.line_of_byte(current);
             current = buffer.byte_of_line(line_idx);
         }
+        Motion::MatchingBracket => {
+            current = find_matching_bracket(buffer, current);
+        }
     }
 
     (BytePos::new(snap_grapheme(buffer, current)), new_find)
@@ -340,4 +343,67 @@ pub(super) fn blank_line(buffer: &Buffer, line: usize) -> bool {
         .slice(buffer.byte_of_line(line)..line_content_end(buffer, line))
         .chars()
         .all(char::is_whitespace)
+}
+
+fn find_matching_bracket(buffer: &Buffer, pos: usize) -> usize {
+    let text = buffer.as_str();
+    let bytes = text.as_bytes();
+    if bytes.is_empty() {
+        return pos;
+    }
+    let pos = pos.min(bytes.len() - 1);
+    let line_idx = buffer.line_of_byte(pos);
+    let line_end = line_content_end(buffer, line_idx);
+
+    // If character at pos is not a bracket, scan forward on current line for the first bracket
+    let mut bracket_pos = pos;
+    let is_bracket = |b: u8| matches!(b, b'(' | b')' | b'[' | b']' | b'{' | b'}');
+    if !is_bracket(bytes[bracket_pos]) {
+        if let Some(first) = (bracket_pos..line_end).find(|&i| is_bracket(bytes[i])) {
+            bracket_pos = first;
+        } else {
+            return pos;
+        }
+    }
+
+    let b = bytes[bracket_pos];
+    match b {
+        b'(' => find_forward_match(bytes, bracket_pos, b'(', b')'),
+        b'[' => find_forward_match(bytes, bracket_pos, b'[', b']'),
+        b'{' => find_forward_match(bytes, bracket_pos, b'{', b'}'),
+        b')' => find_backward_match(bytes, bracket_pos, b'(', b')'),
+        b']' => find_backward_match(bytes, bracket_pos, b'[', b']'),
+        b'}' => find_backward_match(bytes, bracket_pos, b'{', b'}'),
+        _ => pos,
+    }
+}
+
+fn find_forward_match(bytes: &[u8], start: usize, open: u8, close: u8) -> usize {
+    let mut depth = 0;
+    for (i, &b) in bytes.iter().enumerate().skip(start) {
+        if b == open {
+            depth += 1;
+        } else if b == close {
+            depth -= 1;
+            if depth == 0 {
+                return i;
+            }
+        }
+    }
+    start
+}
+
+fn find_backward_match(bytes: &[u8], start: usize, open: u8, close: u8) -> usize {
+    let mut depth = 0;
+    for i in (0..=start).rev() {
+        if bytes[i] == close {
+            depth += 1;
+        } else if bytes[i] == open {
+            depth -= 1;
+            if depth == 0 {
+                return i;
+            }
+        }
+    }
+    start
 }

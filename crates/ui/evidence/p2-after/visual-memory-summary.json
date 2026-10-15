@@ -1,0 +1,18 @@
+[
+  {
+    "theme": "nord",
+    "png_count": 96,
+    "rss_min_mib": 203.62890625,
+    "rss_max_mib": 213.28515625,
+    "pss_min_mib": 114.2607421875,
+    "pss_max_mib": 120.6748046875
+  },
+  {
+    "theme": "light",
+    "png_count": 84,
+    "rss_min_mib": 200.07421875,
+    "rss_max_mib": 208.921875,
+    "pss_min_mib": 110.7802734375,
+    "pss_max_mib": 116.44140625
+  }
+]

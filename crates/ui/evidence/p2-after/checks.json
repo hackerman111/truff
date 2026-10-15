@@ -1,0 +1,50 @@
+[
+  {
+    "check": "fmt",
+    "exit_code": 0,
+    "command": [
+      "rtk",
+      "cargo",
+      "fmt",
+      "--all",
+      "--",
+      "--check"
+    ]
+  },
+  {
+    "check": "check",
+    "exit_code": 0,
+    "command": [
+      "rtk",
+      "cargo",
+      "check",
+      "--workspace",
+      "--all-targets"
+    ]
+  },
+  {
+    "check": "test",
+    "exit_code": 0,
+    "command": [
+      "rtk",
+      "cargo",
+      "test",
+      "--workspace"
+    ]
+  },
+  {
+    "check": "clippy",
+    "exit_code": 0,
+    "command": [
+      "rtk",
+      "cargo",
+      "clippy",
+      "--workspace",
+      "--all-targets",
+      "--all-features",
+      "--",
+      "-D",
+      "warnings"
+    ]
+  }
+]

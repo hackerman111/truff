@@ -1,0 +1,24 @@
+# Headless component run metadata; no native window is created.
+# Generated automatically on benchmark completion.
+
+[host]
+os = "linux"
+arch = "x86_64"
+debug_assertions = true
+measurement_boundary = "headless components"
+
+[binary]
+path = "/tmp/truff-ui-p0-check-target/debug/truff"
+size_bytes = 288447784
+size_mib = 275.09
+
+[thresholds]
+empty_window_rss_limit_mib = 100.0
+empty_window_rss_target_mib = 60.0
+vault_10k_rss_limit_mib = 160.0
+vault_10k_overhead_limit_mib = 60.0
+core_edit_p95_ms = 2.0
+warm_scroll_frame_p95_ms = 16.7
+visible_layout_ready_p95_ms = 50.0
+warm_startup_p95_ms = 700.0
+idle_cpu_30s_max_percent = 1.0

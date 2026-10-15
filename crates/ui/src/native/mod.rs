@@ -1,18 +1,27 @@
 //! Native egui/glow adapter. Application owns domain state; this module owns events and paint.
 mod backlinks;
+mod command_bar;
 mod content;
 pub mod creation;
 mod editor;
 mod events;
+mod file_commands;
 mod hints;
 pub mod icons;
+mod navigator;
+mod navigator_search;
 mod outline;
+mod p4_actions;
 mod paint;
 mod recent;
+mod search;
 mod sidebar;
 mod status;
+pub mod stream;
 mod tabs;
+pub mod toc;
 pub mod widgets;
+pub mod wiki;
 
 use crate::app::Application;
 pub use editor::EditorWidget;
@@ -53,10 +62,19 @@ pub struct NativeApp {
     pub editor: EditorWidget,
     pub dialogs: creation::CreationDialogs,
     pub navigator: crate::navigator::NavigatorState,
+    pub toc: toc::FloatingToc,
+    pub wiki: wiki::FolderWiki,
+    pub stream: stream::NoteStream,
     hints_tick: Instant,
     last_typography: crate::app::global_config::TypographyConfig,
     last_theme: Option<crate::theme::Theme>,
     recent_vaults: recent::RecentVaults,
+    search: Option<search::SearchTransport>,
+    navigator_origin: crate::focus::Focus,
+    navigator_revision: u64,
+    field_event_tail: Vec<egui::Event>,
+    field_keys: Vec<(events::FieldOwner, truff_core::vim::Key, bool)>,
+    navigator_selection: Option<crate::app::SelectionTarget>,
 }
 
 impl NativeApp {
@@ -71,9 +89,18 @@ impl NativeApp {
             hints_tick: Instant::now(),
             dialogs: creation::CreationDialogs::default(),
             navigator: crate::navigator::NavigatorState::default(),
+            toc: toc::FloatingToc::new(),
+            wiki: wiki::FolderWiki::new(),
+            stream: stream::NoteStream::new(),
             last_typography,
             last_theme: None,
             recent_vaults: recent::RecentVaults::default(),
+            search: None,
+            navigator_selection: None,
+            navigator_origin: crate::focus::Focus::Editor,
+            navigator_revision: 0,
+            field_keys: Vec::new(),
+            field_event_tail: Vec::new(),
         }
     }
     pub fn show(&mut self, ui: &mut egui::Ui) {
@@ -85,6 +112,17 @@ impl NativeApp {
         }
         self.events(&context);
         self.application.poll();
+        if self.navigator.is_open()
+            && self.navigator_revision != self.application.catalog_revision()
+            && !self.dialogs.is_any_open()
+            && !matches!(
+                self.navigator.mode,
+                crate::navigator::NavigatorMode::Content | crate::navigator::NavigatorMode::Mixed
+            )
+        {
+            self.refresh_navigator();
+        }
+        self.poll_navigator_search(&context);
         let now = Instant::now();
         self.application.shell.which_key_mut().tick(
             now.duration_since(self.hints_tick)
@@ -94,23 +132,94 @@ impl NativeApp {
         self.hints_tick = now;
         let theme = self.application.shell.theme().clone();
         if self.last_theme.as_ref() != Some(&theme) {
-            paint::apply_theme(ui, &theme);
+            theme.apply(ui);
             self.last_theme = Some(theme.clone());
         }
         tabs::show(&mut self.application, ui, &theme);
-        status::show(&self.application, ui, &theme);
+        self.application.refresh_command_completions();
+        status::show(&mut self.application, ui, &theme);
         if self.application.vault_path().is_none() {
             self.recent_vaults.refresh();
             context.request_repaint_after(recent::RecentVaults::INTERVAL);
         }
-        sidebar::show(
-            &mut self.application,
-            &mut self.dialogs,
-            &mut self.recent_vaults,
-            ui,
-            &theme,
-        );
-        backlinks::show(&mut self.application, ui, &theme);
+        if let Some(arg) = self.application.toc_requested.take() {
+            match arg.as_str() {
+                "pin" => {
+                    self.toc.set_pinned(true);
+                    self.toc.open();
+                }
+                "unpin" => {
+                    self.toc.set_pinned(false);
+                    self.toc.open();
+                }
+                "file" => {
+                    self.toc.model.scope = toc::TocScope::ActiveFile;
+                    self.toc.open();
+                }
+                "folder" => {
+                    self.toc.model.scope = toc::TocScope::Folder;
+                    self.toc.open();
+                }
+                "vault" => {
+                    self.toc.model.scope = toc::TocScope::Vault;
+                    self.toc.open();
+                }
+                _ => {
+                    self.toc.toggle_open();
+                }
+            }
+            self.sync_toc();
+        }
+        if let Some(folder_arg) = self.application.wiki_requested.take() {
+            let target_folder = if folder_arg.is_empty() {
+                self.application
+                    .active_relative_path()
+                    .and_then(|p| {
+                        std::path::Path::new(&p)
+                            .parent()
+                            .and_then(|d| d.to_str())
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_default()
+            } else {
+                folder_arg
+            };
+            self.wiki.open_folder(&target_folder, &self.application);
+        }
+        if let Some(stream_arg) = self.application.stream_requested.take() {
+            match stream_arg.as_str() {
+                "today" => self.stream.model.filter = stream::StreamFilter::Today,
+                "unfinished" => self.stream.model.filter = stream::StreamFilter::Unfinished,
+                "related" => self.stream.model.filter = stream::StreamFilter::Related,
+                "revisit" => self.stream.model.filter = stream::StreamFilter::Revisit,
+                "all" => self.stream.model.filter = stream::StreamFilter::All,
+                _ => {}
+            }
+            self.stream.open(&self.application);
+        }
+        self.sync_toc();
+
+        if !self.application.focus_mode {
+            sidebar::show(
+                &mut self.application,
+                &mut self.dialogs,
+                &mut self.recent_vaults,
+                ui,
+                &theme,
+            );
+            let dock_toc_action = backlinks::show(&mut self.application, &mut self.toc, ui, &theme);
+            self.handle_toc_action(dock_toc_action);
+        }
+        self.editor.input_blocked = self.application.shell.command().is_some()
+            || self.dialogs.is_any_open()
+            || self.navigator.is_open()
+            || self.wiki.is_open()
+            || self.stream.is_open()
+            || (self.toc.is_open && !self.toc.is_pinned)
+            || (self.application.shell.which_key().is_visible()
+                && self.application.shell.which_key().mode()
+                    == crate::overlays::WhichKeyMode::Help);
+        self.editor.retain_views(self.application.shell.workspace());
         let open_vault = content::show(
             &mut self.application,
             &mut self.editor,
@@ -129,10 +238,18 @@ impl NativeApp {
                 .settings
                 .init_from_app(self.application.shell.typography(), &config.theme);
         }
-        self.dialogs.show(&mut self.application, &context, &theme);
-        let nav_action = crate::navigator::show(&mut self.navigator, &context, &theme);
+        let nav_action =
+            crate::navigator::render::show_without_input(&mut self.navigator, &context, &theme);
         self.handle_navigator_action(nav_action);
-        hints::show(&self.application.shell, &context);
+        let toc_act = self.toc.show_overlay(&context, &theme);
+        self.handle_toc_action(toc_act);
+        let wiki_act = self.wiki.show(&context, &theme);
+        self.handle_wiki_action(wiki_act);
+        let stream_act = self.stream.show(&context, &theme);
+        self.handle_stream_action(stream_act);
+        self.dialogs.show(&mut self.application, &context, &theme);
+        hints::show(&mut self.application.shell, &context);
+        self.flush_field_keys(&context);
         if let Some(id) = self.application.shell.workspace().active_view()
             && let Some(view) = self.application.shell.workspace_mut().get_view_mut(id)
         {
@@ -159,283 +276,12 @@ impl NativeApp {
             }
         }
     }
-
-    pub fn open_navigator(&mut self, mode: crate::navigator::NavigatorMode) {
-        use crate::navigator::{NavigatorItem, NavigatorMode};
-
-        self.application
-            .shell
-            .push_focus(crate::focus::Focus::Navigator);
-
-        let (context_title, items) = match mode {
-            NavigatorMode::Files => {
-                let vault_name = self
-                    .application
-                    .vault_path()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("Хранилище");
-                let title = format!("Vault / {vault_name}");
-
-                let mut items = Vec::new();
-                let files = self.application.shell.sidebar_file_paths();
-                for (idx, path_str) in files.enumerate() {
-                    let path = std::path::Path::new(path_str);
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(path_str);
-                    items.push(NavigatorItem::new_file(
-                        idx as u64 + 1,
-                        name,
-                        path_str.to_owned(),
-                        false,
-                        0,
-                    ));
-                }
-                (title, items)
-            }
-            NavigatorMode::Sessions => {
-                let title = "Сессии и вкладки".to_string();
-                let mut items = Vec::new();
-                let mut views: Vec<_> = self
-                    .application
-                    .shell
-                    .workspace()
-                    .views()
-                    .values()
-                    .collect();
-                views.sort_by_key(|v| v.id().get());
-
-                for (idx, view) in views.iter().enumerate() {
-                    let buffer_id = view.buffer_id();
-                    let entry = self.application.shell.workspace().buffers().get(buffer_id);
-                    let buf_path = entry
-                        .and_then(|e| e.path())
-                        .map(|p| p.display().to_string());
-                    let buf_title = entry
-                        .and_then(|e| e.path())
-                        .and_then(|p| p.file_name())
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("Scratch")
-                        .to_string();
-                    let is_dirty = self
-                        .application
-                        .shell
-                        .workspace()
-                        .buffers()
-                        .get_buffer(buffer_id)
-                        .is_some_and(|b| b.is_dirty());
-                    let line_count = self
-                        .application
-                        .shell
-                        .workspace()
-                        .buffers()
-                        .get_buffer(buffer_id)
-                        .map_or(0, |b| b.line_len());
-
-                    items.push(NavigatorItem::new_buffer(
-                        idx as u64 + 1,
-                        buffer_id,
-                        buf_title,
-                        buf_path,
-                        is_dirty,
-                        line_count,
-                    ));
-                }
-                (title, items)
-            }
-            NavigatorMode::Commands => {
-                let title = "Палитра команд".to_string();
-                let mut items = Vec::new();
-                let registry = truff_core::commands::CommandRegistry::default();
-                for (idx, spec) in registry.specs().iter().enumerate() {
-                    items.push(NavigatorItem::new_command(
-                        idx as u64 + 1,
-                        spec.id.clone(),
-                        spec.title.to_string(),
-                        spec.description.to_string(),
-                        spec.group.clone(),
-                        spec.default_key.as_ref().map(|k| k.to_string()),
-                    ));
-                }
-                (title, items)
-            }
-            NavigatorMode::Outline => {
-                let note_name = self
-                    .application
-                    .active_relative_path()
-                    .unwrap_or_else(|| "Документ".to_string());
-                let title = format!("Outline / {note_name}");
-                let items = self
-                    .application
-                    .shell
-                    .editor_buffer()
-                    .map(outline::items)
-                    .unwrap_or_default();
-                (title, items)
-            }
-            NavigatorMode::Links => {
-                let title = "Ссылки и связи (Backlinks)".to_string();
-                let mut items = Vec::new();
-                for (idx, bl) in self.application.backlinks.iter().enumerate() {
-                    items.push(NavigatorItem::new_file(
-                        idx as u64 + 1,
-                        &bl.source_path,
-                        bl.source_path.clone(),
-                        false,
-                        0,
-                    ));
-                }
-                (title, items)
-            }
-            NavigatorMode::Boards => {
-                let title = "Kanban доски".to_string();
-                let mut items = Vec::new();
-                let files = self.application.shell.sidebar_file_paths();
-                for (idx, f) in files
-                    .filter(|f| f.ends_with(".kanban.md") || f.contains("board"))
-                    .enumerate()
-                {
-                    items.push(NavigatorItem::new_file(
-                        idx as u64 + 1,
-                        f,
-                        f.to_owned(),
-                        false,
-                        0,
-                    ));
-                }
-                (title, items)
-            }
-        };
-
-        self.navigator.open_mode(mode, context_title, items);
-    }
-
-    pub fn handle_navigator_action(&mut self, action: crate::navigator::NavigatorAction) {
-        use crate::navigator::NavigatorAction;
-        match action {
-            NavigatorAction::None => {}
-            NavigatorAction::Close => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-            }
-            NavigatorAction::OpenFile { path } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                if let Err(e) = self.application.open_note(&path) {
-                    self.application.status = e.to_string();
-                }
-            }
-            NavigatorAction::CreateFile { parent_dir } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                self.dialogs.file.open = true;
-                self.dialogs.file.path = parent_dir.map_or(String::new(), |d| format!("{d}/"));
-                self.dialogs.file.error = None;
-            }
-            NavigatorAction::CreateFolder { parent_dir } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                self.dialogs.folder.open = true;
-                self.dialogs.folder.path = parent_dir.map_or(String::new(), |d| format!("{d}/"));
-                self.dialogs.folder.error = None;
-            }
-            NavigatorAction::RenameFile { path } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                self.application.status = format!("Переименование: {path}");
-            }
-            NavigatorAction::DeleteFile { path } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                self.application
-                    .handle_shell_action(crate::shell::ShellAction::SidebarDeleteFile(path));
-            }
-            NavigatorAction::SwitchBuffer { buffer_id } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                if let Some(view) = self
-                    .application
-                    .shell
-                    .workspace()
-                    .views()
-                    .values()
-                    .find(|v| v.buffer_id() == buffer_id)
-                {
-                    let view_id = view.id();
-                    self.application
-                        .shell
-                        .workspace_mut()
-                        .set_active_view(Some(view_id));
-                    self.application.shell.reset_editor_input();
-                }
-            }
-            NavigatorAction::CloseBuffer { buffer_id } => {
-                if let Some(view) = self
-                    .application
-                    .shell
-                    .workspace()
-                    .views()
-                    .values()
-                    .find(|v| v.buffer_id() == buffer_id)
-                {
-                    let view_id = view.id();
-                    let _ = self
-                        .application
-                        .dispatch(truff_core::commands::Action::CloseView(view_id));
-                    if self.navigator.is_open()
-                        && self.navigator.mode == crate::navigator::NavigatorMode::Sessions
-                    {
-                        self.open_navigator(crate::navigator::NavigatorMode::Sessions);
-                    }
-                }
-            }
-            NavigatorAction::ExecuteCommand { command_id } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                if let Err(e) = self.application.execute_command(command_id.as_str()) {
-                    self.application.status = e.to_string();
-                }
-            }
-            NavigatorAction::JumpHeading { line } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                if let Some(view_id) = self.application.shell.workspace().active_view()
-                    && let Some((buffer, view)) = self
-                        .application
-                        .shell
-                        .workspace_mut()
-                        .editor_parts_mut(view_id)
-                {
-                    let line_idx = line.saturating_sub(1);
-                    if line_idx < buffer.line_len() {
-                        let byte_offset = buffer.byte_of_line(line_idx);
-                        let byte_pos = truff_core::text::BytePos::new(byte_offset);
-                        view.set_cursor(byte_pos, byte_pos);
-                    }
-                }
-            }
-            NavigatorAction::OpenLink { target } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                if let Err(e) = self.application.open_note(&target) {
-                    self.application.status = e.to_string();
-                }
-            }
-            NavigatorAction::SelectCustom { id, data } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                self.application.status = format!("{id}: {data}");
-            }
-        }
-    }
 }
 impl eframe::App for NativeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         self.show(ui);
     }
     fn persist_egui_memory(&self) -> bool {
-        false
+        true
     }
 }

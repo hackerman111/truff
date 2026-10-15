@@ -15,7 +15,12 @@ pub(super) fn show(
 ) -> bool {
     let mut open_vault = false;
     for change in application.shell.take_buffer_changes() {
-        if let Some(buffer) = application.shell.editor_buffer() {
+        if let Some(buffer) = application
+            .shell
+            .workspace()
+            .buffers()
+            .get_buffer(change.buffer_id)
+        {
             editor.apply_change(buffer, &change);
         }
     }
@@ -45,6 +50,45 @@ pub(super) fn show(
             if let Some(input) = input {
                 application.shell.set_focus(Focus::Editor);
                 super::events::input(application, input);
+            }
+            if application.link_completion.active
+                && !application.link_completion.candidates.is_empty()
+            {
+                let cursor_pos = editor
+                    .cursor_rect()
+                    .map(|r| r.left_bottom())
+                    .unwrap_or_else(|| ui.cursor().left_bottom());
+                egui::Area::new(egui::Id::new("link_completion_popup"))
+                    .fixed_pos(cursor_pos)
+                    .order(egui::Order::Foreground)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style())
+                            .fill(color(theme.bg_secondary))
+                            .stroke(egui::Stroke::new(1.0, color(theme.accent)))
+                            .show(ui, |ui| {
+                                ui.set_max_width(320.0);
+                                let mut clicked_idx = None;
+                                for (idx, candidate) in
+                                    application.link_completion.candidates.iter().enumerate()
+                                {
+                                    let is_selected = idx == application.link_completion.selected;
+                                    let text = egui::RichText::new(&candidate.display).color(
+                                        if is_selected {
+                                            color(theme.accent)
+                                        } else {
+                                            color(theme.text_primary)
+                                        },
+                                    );
+                                    if ui.selectable_label(is_selected, text).clicked() {
+                                        clicked_idx = Some(idx);
+                                    }
+                                }
+                                if let Some(idx) = clicked_idx {
+                                    application.link_completion.selected = idx;
+                                    let _ = application.apply_link_completion();
+                                }
+                            });
+                    });
             }
         }
     });

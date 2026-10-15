@@ -1,0 +1,11 @@
+{
+  "before": "/tmp/truff-ui-p2-before",
+  "core_store_changes_live": [],
+  "core_store_used": "identical phase-start snapshot",
+  "after_source": "live UI after operation-focus fix, before final Task-row presentation fix",
+  "comparison_scope": "Standalone Navigator file rows and NativeApp editor movement; task rendering is outside these scenarios",
+  "before_binary": "/tmp/truff-ui-p2-before-probe",
+  "before_binary_sha256": "8a88cbc47446736567692184d65826e7f790a724ab3e6ee5d3ea366c351ac6d9",
+  "after_binary": "/tmp/truff-ui-p2-after-probe",
+  "after_binary_sha256": "6e425a69e1abc3845e265000680517ca7b628f3400d6bf8426d5ef4a7c61810c"
+}

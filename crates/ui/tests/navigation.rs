@@ -180,7 +180,13 @@ fn focus_routes_once() {
 
     // In Sidebar, pressing 'd' deletes the selected file in sidebar, editor unaffected
     let action3 = shell.feed_key(Key::Char('d'));
-    assert_eq!(action3, ShellAction::SidebarDeleteFile("note1.md".into()));
+    assert_eq!(
+        action3,
+        ShellAction::RegisteredCommand {
+            id: truff_core::commands::CommandId::new("file.trash"),
+            argument: String::new()
+        }
+    );
     assert_eq!(shell.editor_text(), "second line\n"); // editor unchanged!
 }
 

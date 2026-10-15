@@ -24,7 +24,18 @@ impl Application {
         if let Some(callback) = &self.storage_waker {
             catalog.set_event_waker(callback.clone());
         }
-        self.shell = Shell::new();
+        let theme = self.shell.theme().clone();
+        let typography = self.shell.typography().clone();
+        let mut shell = Shell::new();
+        shell.take_keymap_from(&mut self.shell);
+        self.shell = shell;
+        self.shell.set_theme(theme);
+        self.shell.set_typography(typography);
+        self.view_projections.clear();
+        self.document_facts = None;
+        self.recent_notes.clear();
+        self.view_history = super::views::ViewHistory::default();
+        self.catalog_revision += 1;
         self.shell.set_sidebar_available(true);
         self.shell.set_focus(Focus::Sidebar);
         self.store = Some(store);
@@ -35,7 +46,7 @@ impl Application {
         self.queued_reloads.clear();
         self.queued_recovery.clear();
         self.close_after_save.clear();
-        self.backlinks.clear();
+        self.set_backlinks(Vec::new());
         self.restore_views.clear();
         self.initial_note_pending = true;
         self.catalog_indexing = true;
@@ -47,6 +58,7 @@ impl Application {
         self.refresh_watch_targets();
         let mut config = global_config::GlobalConfig::load();
         config.record_vault(&path);
+        self.recent_vault_paths = config.recent_vaults;
         Ok(())
     }
 
@@ -108,14 +120,14 @@ impl Application {
             .dispatch(Action::OpenPath(absolute))?;
         self.shell.reset_editor_input();
         self.shell.set_focus(Focus::Editor);
-        self.backlinks.clear();
-        self.backlink_selection = 0;
+        self.set_backlinks(Vec::new());
         self.shell.set_right_panel_available(false);
         self.pending_location = None;
         self.apply_effects(effects)?;
         if let Some(path) = self.active_relative_path() {
             self.shell.select_sidebar_file(&path);
         }
+        self.record_recent_note();
         Ok(())
     }
 
@@ -130,32 +142,8 @@ impl Application {
         } else {
             format!("{trimmed}.md")
         };
-        let absolute = paths.resolve_path(Path::new(&rel))?;
-        if let Some(parent) = absolute.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if !absolute.exists() {
-            let title = absolute
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Note");
-            let initial = format!("# {title}\n\n");
-            std::fs::write(&absolute, initial)?;
-        }
-        let mut files = self
-            .shell
-            .sidebar_model()
-            .all_items()
-            .iter()
-            .filter_map(|r| r.data.clone())
-            .collect::<Vec<_>>();
-        if !files.contains(&rel) {
-            files.push(rel.clone());
-            files.sort();
-            self.shell.set_sidebar_files(files);
-        }
-        self.open_note(&rel)?;
-        Ok(())
+        paths.resolve_path(Path::new(&rel))?;
+        self.start_file_operation(truff_store::catalog::CatalogJob::Create { path: rel })
     }
 
     pub fn create_folder(&mut self, path: &str) -> AppResult<()> {

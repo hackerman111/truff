@@ -6,9 +6,9 @@ pub mod execute;
 pub mod motion;
 pub mod parser;
 
-pub use execute::{InputContext, InputResult, VimState};
+pub use execute::{InputContext, InputResult, KeyDisposition, VimState};
 pub use motion::{Motion, TextObject, TextObjectKind, TextObjectTarget};
-pub use parser::{Command, Operator};
+pub use parser::{Command, Operator, ScrollPosition};
 
 /// Mode in which the editor or panel is currently operating.
 #[derive(
@@ -41,8 +41,11 @@ pub enum Key {
     Alt(char),
     Esc,
     Enter,
+    ShiftEnter,
+    CtrlEnter,
     Backspace,
     Tab,
+    ShiftTab,
     Delete,
     Up,
     Down,
@@ -62,8 +65,11 @@ impl fmt::Display for Key {
             Self::Alt(c) => write!(f, "<A-{c}>"),
             Self::Esc => write!(f, "<Esc>"),
             Self::Enter => write!(f, "<CR>"),
+            Self::ShiftEnter => write!(f, "<S-CR>"),
+            Self::CtrlEnter => write!(f, "<C-CR>"),
             Self::Backspace => write!(f, "<BS>"),
             Self::Tab => write!(f, "<Tab>"),
+            Self::ShiftTab => write!(f, "<S-Tab>"),
             Self::Delete => write!(f, "<Del>"),
             Self::Up => write!(f, "<Up>"),
             Self::Down => write!(f, "<Down>"),

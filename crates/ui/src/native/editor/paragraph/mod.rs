@@ -17,7 +17,7 @@ pub(super) struct Paragraph {
     pub(super) presentation_revision: u64,
     color: Color32,
     pixels_per_point: f32,
-    width: f32,
+    pub(super) width: f32,
     typography: TypographyKey,
 }
 

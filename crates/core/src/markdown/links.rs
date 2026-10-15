@@ -21,9 +21,20 @@ pub struct LinkOccurrence {
 
 impl LinkOccurrence {
     /// Parses a wiki-link string without surrounding `[[` and `]]`.
+    /// Handles escaped table pipes (`[[note\|alias]]`) and `#heading` / `#^block` anchors.
     pub fn parse_wiki_inner(inner: &str, full_range: Range<usize>, ordinal: usize) -> Self {
         let (path_part, alias_part) = match inner.find('|') {
-            Some(idx) => (&inner[..idx], Some(inner[idx + 1..].trim().to_string())),
+            Some(idx) => {
+                let path_end = if idx > 0 && inner.as_bytes()[idx - 1] == b'\\' {
+                    idx - 1
+                } else {
+                    idx
+                };
+                (
+                    &inner[..path_end],
+                    Some(inner[idx + 1..].trim().to_string()),
+                )
+            }
             None => (inner, None),
         };
 
@@ -43,5 +54,10 @@ impl LinkOccurrence {
             ordinal,
             is_wiki: true,
         }
+    }
+
+    /// Returns `Some(block_id)` if the link points to a `^block-id` anchor.
+    pub fn block_ref(&self) -> Option<&str> {
+        self.heading.as_deref()?.strip_prefix('^')
     }
 }

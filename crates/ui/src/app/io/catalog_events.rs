@@ -7,6 +7,7 @@ impl Application {
     pub(super) fn accept_catalog(&mut self, event: CatalogEvent) -> AppResult<()> {
         match event {
             CatalogEvent::Files(files) => {
+                self.catalog_revision += 1;
                 let first = files.first().cloned();
                 self.shell.set_sidebar_files(files);
                 if let Some(path) = self.active_relative_path() {
@@ -33,15 +34,19 @@ impl Application {
             CatalogEvent::Backlinks { path, occurrences }
                 if Some(path.as_str()) == self.active_relative_path().as_deref() =>
             {
-                if occurrences.is_empty() {
-                    self.backlinks = Vec::new();
-                    self.backlink_selection = 0;
+                let overlay = self.shell.focus() == crate::shell::Focus::Navigator
+                    || self.shell.command().is_some()
+                    || self.shell.which_key().is_visible();
+                self.catalog_revision += 1;
+                self.set_backlinks(occurrences);
+                if overlay {
+                    return Ok(());
+                }
+                if self.backlinks.is_empty() {
                     self.status = "No backlinks found".into();
                     self.shell.set_right_panel_available(false);
                     self.shell.set_focus(Focus::Editor);
                 } else {
-                    self.backlinks = occurrences;
-                    self.backlink_selection = 0;
                     self.shell.set_right_panel_available(true);
                     self.shell.set_focus(Focus::RightPanel);
                 }

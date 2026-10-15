@@ -43,6 +43,21 @@ impl CommandRegistry {
     pub fn specs(&self) -> &[CommandSpec] {
         &self.data.specs
     }
+
+    /// Returns all commands available in the given execution context.
+    pub fn specs_in_context(&self, context: CommandContext) -> Vec<&CommandSpec> {
+        self.data
+            .specs
+            .iter()
+            .filter(|spec| context.matches_spec(&spec.contexts))
+            .collect()
+    }
+
+    /// Returns `true` if `id` exists and is admitted in `context`.
+    pub fn is_available(&self, id: &CommandId, context: CommandContext) -> bool {
+        self.require(id, context).is_ok()
+    }
+
     /// Returns specs grouped by their category.
     pub fn by_category(&self) -> std::collections::BTreeMap<&str, Vec<&CommandSpec>> {
         let mut grouped = std::collections::BTreeMap::<&str, Vec<&CommandSpec>>::new();
@@ -51,14 +66,34 @@ impl CommandRegistry {
         }
         grouped
     }
+
     /// Searches commands by query matching title, description, group, or id.
     pub fn search(&self, query: &str) -> Vec<&CommandSpec> {
+        self.search_internal(query, None)
+    }
+
+    /// Searches commands available in `context` for Command Palette filtering.
+    pub fn search_in_context(&self, query: &str, context: CommandContext) -> Vec<&CommandSpec> {
+        self.search_internal(query, Some(context))
+    }
+
+    fn search_internal(&self, query: &str, context: Option<CommandContext>) -> Vec<&CommandSpec> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
-            return self.data.specs.iter().collect();
+            return self
+                .data
+                .specs
+                .iter()
+                .filter(|spec| context.is_none_or(|ctx| ctx.matches_spec(&spec.contexts)))
+                .collect();
         }
         let mut scored = Vec::new();
         for (spec, fields) in self.data.specs.iter().zip(&self.data.search) {
+            if let Some(ctx) = context
+                && !ctx.matches_spec(&spec.contexts)
+            {
+                continue;
+            }
             let score = if fields.title == q || fields.id == q {
                 100
             } else if fields.title.starts_with(&q) {
@@ -80,6 +115,7 @@ impl CommandRegistry {
         scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
         scored.into_iter().map(|(_, spec)| spec).collect()
     }
+
     pub fn get(&self, id: &CommandId) -> Result<&CommandSpec, RegistryError> {
         self.data
             .ids
@@ -87,13 +123,14 @@ impl CommandRegistry {
             .map(|position| &self.data.specs[self.data.ids[position]])
             .map_err(|_| RegistryError::UnknownCommand(id.clone()))
     }
+
     pub fn require(
         &self,
         id: &CommandId,
         context: CommandContext,
     ) -> Result<&CommandSpec, RegistryError> {
         let spec = self.get(id)?;
-        if spec.contexts.contains(&context) || spec.contexts.contains(&CommandContext::Global) {
+        if context.matches_spec(&spec.contexts) {
             Ok(spec)
         } else {
             Err(RegistryError::UnavailableContext {

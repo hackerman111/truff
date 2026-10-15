@@ -141,8 +141,11 @@ impl VimState {
         entry: InsertEntry,
         ctx: InputContext<'_>,
     ) -> InputResult {
-        let InputContext::Editor { buffer, view, .. } = ctx else {
-            return self.error("Editor target unavailable");
+        let (buffer, view) = match ctx {
+            InputContext::Editor { buffer, view, .. }
+            | InputContext::TextField { buffer, view, .. }
+            | InputContext::CommandLine { buffer, view } => (buffer, view),
+            _ => return self.error("Editable text target unavailable"),
         };
         let head = view.head();
         let line = buffer.line_of_byte(head.get());
@@ -200,8 +203,19 @@ impl VimState {
         InputResult::Consumed
     }
     pub(super) fn insert_key(&mut self, key: Key, ctx: InputContext<'_>) -> InputResult {
-        let InputContext::Editor { buffer, view, .. } = ctx else {
-            return self.error("Editor target unavailable");
+        let (view_id, field_id, buffer, view) = match ctx {
+            InputContext::Editor {
+                view_id,
+                buffer,
+                view,
+            } => (Some(view_id), None, buffer, view),
+            InputContext::TextField {
+                field_id,
+                buffer,
+                view,
+            } => (None, Some(field_id), buffer, view),
+            InputContext::CommandLine { buffer, view } => (None, None, buffer, view),
+            _ => return self.error("Editable text target unavailable"),
         };
         let head = view.head();
         match key {
@@ -236,7 +250,7 @@ impl VimState {
                     }
                 }
             }
-            Key::Tab | Key::Enter => {
+            Key::Tab | Key::Enter | Key::ShiftEnter => {
                 let text = if key == Key::Tab {
                     "\t"
                 } else if buffer.line_ending() == LineEnding::CrLf {
@@ -244,14 +258,49 @@ impl VimState {
                 } else {
                     "\n"
                 };
-                return self.execute_command(
-                    Command::TextCommit(text.into()),
+                let commit_ctx = if let Some(id) = view_id {
                     InputContext::Editor {
-                        view_id: view.id(),
+                        view_id: id,
                         buffer,
                         view,
-                    },
-                );
+                    }
+                } else if let Some(fid) = field_id {
+                    InputContext::TextField {
+                        field_id: fid,
+                        buffer,
+                        view,
+                    }
+                } else {
+                    InputContext::CommandLine { buffer, view }
+                };
+                return self.execute_command(Command::TextCommit(text.into()), commit_ctx);
+            }
+            Key::ShiftTab => {
+                let line = buffer.line_of_byte(head.get());
+                let line_start = buffer.byte_of_line(line);
+                let line_end = line_content_end(buffer, line);
+                let mut spaces = 0;
+                for c in buffer.slice(line_start..line_end).chars() {
+                    if c == '\t' {
+                        spaces = 1;
+                        break;
+                    } else if c == ' ' && spaces < 4 {
+                        spaces += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if spaces > 0 {
+                    let range = line_start..(line_start + spaces);
+                    let new_head = BytePos::new(head.get().saturating_sub(spaces).max(line_start));
+                    if let Err(e) = self.apply(
+                        buffer,
+                        view,
+                        Transaction::delete(range).with_cursor(new_head, new_head),
+                    ) {
+                        return self.error(e.to_string());
+                    }
+                }
             }
             Key::Left | Key::Right | Key::Up | Key::Down | Key::Home | Key::End => {
                 let pos = match key {

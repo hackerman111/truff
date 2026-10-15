@@ -146,6 +146,81 @@ impl Default for KeymapConfig {
                 command: CommandId::from_static("edit.repeat"),
                 description: "Repeat last edit".to_string(),
             },
+            // Flash in Normal Editor
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char('s')],
+                command: CommandId::from_static("flash.jump_word"),
+                description: "Flash jump to word".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char('S')],
+                command: CommandId::from_static("flash.select_syntax_object"),
+                description: "Flash select syntax object".to_string(),
+            },
+            // Leader (Space) bindings
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char(' '), Key::Char('f')],
+                command: CommandId::from_static("panel.files"),
+                description: "Find files".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char(' '), Key::Char('s')],
+                command: CommandId::from_static("panel.sessions"),
+                description: "Switch session / buffer".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char(' '), Key::Char('b')],
+                command: CommandId::from_static("panel.boards"),
+                description: "Open Kanban boards".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char(' '), Key::Char('o')],
+                command: CommandId::from_static("panel.outline"),
+                description: "Document outline".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char(' '), Key::Char('l')],
+                command: CommandId::from_static("panel.links"),
+                description: "Links & backlinks".to_string(),
+            },
+            // Non-text list/tree contextual commands (Rows / Navigator only)
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Enter],
+                command: CommandId::from_static("row.activate"),
+                description: "Activate selected item".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char('a')],
+                command: CommandId::from_static("file.create"),
+                description: "Create file".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char('A')],
+                command: CommandId::from_static("folder.create"),
+                description: "Create folder".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char('r')],
+                command: CommandId::from_static("file.rename"),
+                description: "Rename item".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char('d')],
+                command: CommandId::from_static("file.trash"),
+                description: "Trash item".to_string(),
+            },
         ];
 
         Self {

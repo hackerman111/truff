@@ -9,6 +9,32 @@ impl EditorWidget {
 
     /// Rebase cached rows using the unchanged prefix/suffix of the edit summary.
     pub(in crate::native) fn apply_change(&mut self, buffer: &Buffer, change: &BufferChange) {
+        if change.buffer_id != buffer.id() || change.revision != buffer.revision() {
+            return;
+        }
+        let byte_delta = change.new_range.len() as isize - change.old_range.len() as isize;
+        self.view_scrolls.retain(|_, saved| {
+            if saved.buffer_id != buffer.id() {
+                return true;
+            }
+            if saved.revision.checked_add(change.edit_batches) != Some(change.revision)
+                || change.invalidate_suffix
+            {
+                return false;
+            }
+            // Only the unchanged suffix has an exact mapping in a merged change summary.
+            saved.anchor_byte = if saved.anchor_byte >= change.old_range.end {
+                saved.anchor_byte.saturating_add_signed(byte_delta)
+            } else if saved.anchor_byte >= change.old_range.start {
+                saved.local_y = 0.0;
+                change.new_range.start
+            } else {
+                saved.anchor_byte
+            }
+            .min(buffer.byte_len());
+            saved.revision = buffer.revision();
+            true
+        });
         self.syntax.apply_change(buffer, change);
         if self.buffer_id != Some(buffer.id())
             || change.buffer_id != buffer.id()
@@ -24,7 +50,6 @@ impl EditorWidget {
         let old_count = self.heights.block_count();
         let new_count = super::viewport::line_count(buffer);
         let line_delta = new_count as isize - old_count as isize;
-        let byte_delta = change.new_range.len() as isize - change.old_range.len() as isize;
         if change.new_range.end > buffer.byte_len() {
             return;
         }
@@ -36,7 +61,10 @@ impl EditorWidget {
         if first > old_last || old_last >= old_count || new_last >= new_count {
             return;
         }
-        let old_top = self.heights.block_at_y(self.scroll);
+        let old_top = self
+            .heights
+            .block_at_y((self.scroll - Self::TOP_MARGIN).max(0.0));
+        let local_y = self.scroll - Self::TOP_MARGIN - self.heights.y_for_block(old_top.0);
         self.heights
             .replace_blocks(first..old_last + 1, new_last - first + 1);
         let new_top = if old_top.0 > old_last {
@@ -46,7 +74,7 @@ impl EditorWidget {
         } else {
             old_top.0
         };
-        self.scroll = self.heights.y_for_block(new_top) + old_top.1;
+        self.scroll = (Self::TOP_MARGIN + self.heights.y_for_block(new_top) + local_y).max(0.0);
         if line_delta == 0 {
             self.cache.retain(|&line, paragraph| {
                 if line >= first && line <= old_last {

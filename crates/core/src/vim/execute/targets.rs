@@ -27,6 +27,11 @@ impl VimState {
             crate::vim::motion::TextObjectTarget::MarkdownLink
                 | crate::vim::motion::TextObjectTarget::MarkdownHeading
                 | crate::vim::motion::TextObjectTarget::MarkdownCodeBlock
+                | crate::vim::motion::TextObjectTarget::MarkdownSection
+                | crate::vim::motion::TextObjectTarget::MarkdownListItem
+                | crate::vim::motion::TextObjectTarget::MarkdownQuote
+                | crate::vim::motion::TextObjectTarget::MarkdownTableCell
+                | crate::vim::motion::TextObjectTarget::MarkdownTableRow
         ) {
             if self.syntax_revision != Some(buffer.revision()) {
                 return Err("Syntax object ranges unavailable at this revision".into());
@@ -102,23 +107,11 @@ impl VimState {
         view: &View,
         mode: Mode,
     ) -> (std::ops::Range<usize>, bool) {
-        let start = view.anchor().get().min(view.head().get());
-        let end = view.anchor().get().max(view.head().get());
         let linewise = mode == Mode::VisualLine;
         let range = if linewise {
-            let first = buffer.line_of_byte(start);
-            let last = buffer.line_of_byte(end);
-            let end = if last + 1 < buffer.line_len() {
-                buffer.byte_of_line(last + 1)
-            } else {
-                buffer.byte_len()
-            };
-            buffer.byte_of_line(first)..end
+            buffer.visual_line_range(view.anchor(), view.head())
         } else {
-            start
-                ..buffer
-                    .grapheme_next(BytePos::new(end))
-                    .map_or(end, BytePos::get)
+            buffer.visual_char_inclusive_range(view.anchor(), view.head())
         };
         (range, linewise)
     }

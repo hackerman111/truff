@@ -5,7 +5,7 @@ use truff_ui::native::creation::SettingsDialog;
 fn test_settings_dialog_default() {
     let dialog = SettingsDialog::default();
     assert!(!dialog.open);
-    assert_eq!(dialog.font_family, "monospace");
+    assert_eq!(dialog.font_family, "proportional");
     assert_eq!(dialog.base_font_size, 15.0);
     assert_eq!(dialog.line_height_multiplier, 1.5);
     assert_eq!(dialog.custom_font_path, "");

@@ -1,6 +1,6 @@
 //! Standardized Zed-inspired interactive widgets (Ghost IconButtons, Primary/Secondary Buttons).
 use super::icons::{Icon, render_icon};
-use eframe::egui::{self, CornerRadius, FontId, Response, RichText, Sense, Ui, vec2};
+use eframe::egui::{self, CornerRadius, Response, RichText, Sense, Ui, vec2};
 
 /// Ghost icon button with 28×28 px clickable area and 5 px corner radius.
 pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
@@ -36,15 +36,15 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
 
 /// Primary button: height 32 px, radius 5 px, prominent accent fill.
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
-    let font = FontId::proportional(14.0);
+    let font = egui::TextStyle::Button.resolve(ui.style());
     let visuals = ui.visuals();
     let fill = visuals.selection.stroke.color;
     let text_color = visuals.panel_fill;
     let rich = RichText::new(text).font(font).strong().color(text_color);
 
     let btn = egui::Button::new(rich)
-        .min_size(vec2(0.0, 32.0))
-        .corner_radius(CornerRadius::same(5))
+        .min_size(vec2(0.0, ui.spacing().interact_size.y.max(32.0)))
+        .corner_radius(visuals.widgets.inactive.corner_radius)
         .fill(fill);
 
     ui.add(btn)
@@ -52,14 +52,14 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
 
 /// Secondary button: height 32 px, radius 5 px, ghost transparent in default state.
 pub fn secondary_button(ui: &mut Ui, text: &str) -> Response {
-    let font = FontId::proportional(14.0);
+    let font = egui::TextStyle::Button.resolve(ui.style());
     let visuals = ui.visuals();
     let text_color = visuals.widgets.inactive.fg_stroke.color;
     let rich = RichText::new(text).font(font).color(text_color);
 
     let btn = egui::Button::new(rich)
-        .min_size(vec2(0.0, 32.0))
-        .corner_radius(CornerRadius::same(5))
+        .min_size(vec2(0.0, ui.spacing().interact_size.y.max(32.0)))
+        .corner_radius(visuals.widgets.inactive.corner_radius)
         .fill(egui::Color32::TRANSPARENT);
 
     ui.add(btn)

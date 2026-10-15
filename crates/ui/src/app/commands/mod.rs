@@ -6,10 +6,17 @@ mod links;
 use std::path::Path;
 
 use truff_core::commands::Action;
-use truff_store::catalog::CatalogJob;
 
 use super::{AppResult, Application};
 use crate::editor::ProjectionMode;
+
+pub(crate) fn command_parts(command: &str) -> (&str, &str) {
+    let command = command.trim();
+    let (name, argument) = command
+        .split_once(char::is_whitespace)
+        .unwrap_or((command, ""));
+    (name, argument.trim())
+}
 
 impl Application {
     pub fn execute_command(&mut self, command: &str) -> AppResult<()> {
@@ -35,11 +42,7 @@ impl Application {
     }
 
     fn execute_command_inner(&mut self, command: &str) -> AppResult<()> {
-        let command = command.trim();
-        let (name, argument) = command
-            .split_once(char::is_whitespace)
-            .unwrap_or((command, ""));
-        let argument = argument.trim();
+        let (name, argument) = command_parts(command);
         match name {
             "vault" => {
                 if argument.is_empty() {
@@ -138,29 +141,51 @@ impl Application {
                 };
                 self.trash(&path)
             }
-            "new" => {
-                if argument.is_empty() || !argument.ends_with(".md") {
-                    return Err("Usage: :new <path.md>".into());
-                }
-                self.start_file_operation(CatalogJob::Create {
-                    path: argument.to_owned(),
-                })
-            }
+            "new" => self.create_note(argument),
+            "mkdir" => self.create_folder(argument),
             "theme" => self.apply_theme_command(argument),
             "settings" | "config" => self.apply_settings_command(argument),
             "source" => {
-                self.projection = ProjectionMode::Source;
+                self.set_projection(ProjectionMode::Source);
                 Ok(())
             }
             "preview" => {
-                self.projection = ProjectionMode::LivePreview;
+                self.set_projection(ProjectionMode::LivePreview);
+                Ok(())
+            }
+            "reading" => {
+                self.set_projection(ProjectionMode::Reading);
+                Ok(())
+            }
+            "focus" => {
+                self.focus_mode = !self.focus_mode;
+                self.shell.set_focus(crate::shell::Focus::Editor);
+                self.status = if self.focus_mode {
+                    "Focus mode · :focus для возврата панелей"
+                } else {
+                    "Панели восстановлены"
+                }
+                .into();
                 Ok(())
             }
             "help" => {
-                self.shell
-                    .which_key_mut()
-                    .show_help(crate::overlays::WhichKeyOverlay::default_help_categories());
+                self.shell.show_help();
                 self.status = "Which-key справка открыта (Esc для закрытия)".into();
+                Ok(())
+            }
+            "toc" => {
+                self.toc_requested = Some(argument.to_owned());
+                self.status = "Оглавление (Floating TOC)".into();
+                Ok(())
+            }
+            "wiki" | "folder" => {
+                self.wiki_requested = Some(argument.to_owned());
+                self.status = "Вики папки (Folder Wiki)".into();
+                Ok(())
+            }
+            "stream" => {
+                self.stream_requested = Some(argument.to_owned());
+                self.status = "Лента заметок (Note Stream)".into();
                 Ok(())
             }
             _ => Err(format!("Unknown command: {command}").into()),

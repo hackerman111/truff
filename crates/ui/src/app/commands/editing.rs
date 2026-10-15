@@ -1,30 +1,17 @@
 use super::super::{AppResult, Application};
-use truff_core::markdown::{LinkSelection, style::apply_text_color};
 use truff_core::vim::Mode;
 
 impl Application {
     pub(super) fn color_selection(&mut self, argument: &str) -> AppResult<()> {
-        let hex = argument.strip_prefix('#').unwrap_or(argument);
-        if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("Usage: :color #RRGGBB".into());
-        }
-        let range = self.selection_range()?;
-        let text = self.shell.editor_text();
-        let transaction = apply_text_color(&text, range, argument)?;
-        self.shell.apply_transaction(transaction)?;
+        let target = self.capture_selection()?;
+        self.color_target(target, argument)?;
         self.shell.feed_key(truff_core::vim::Key::Esc);
         self.status = "Color applied; u to undo".into();
         Ok(())
     }
-    pub(super) fn link_selection(&mut self, argument: &str) -> AppResult<()> {
-        if argument.is_empty() || argument.contains(['[', ']', '\n', '\r']) {
-            return Err("Usage: :link <note or note#heading>".into());
-        }
-        let range = self.selection_range()?;
-        let buffer = self.shell.editor_buffer().ok_or("Note is still loading")?;
-        let label = buffer.slice(range.clone()).to_string();
-        let transaction = LinkSelection::wikilink(range, argument, Some(&label));
-        self.shell.apply_transaction(transaction)?;
+    pub fn link_selection(&mut self, argument: &str) -> AppResult<()> {
+        let target = self.capture_selection()?;
+        self.link_target(&target, argument)?;
         self.shell.feed_key(truff_core::vim::Key::Esc);
         self.status = "Link created; :follow to open".into();
         Ok(())

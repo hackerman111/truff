@@ -19,13 +19,25 @@ impl VimState {
         match cmd {
             Command::Escape => {
                 self.cancel_input();
-                if let InputContext::Editor { view, .. } = ctx {
-                    view.set_cursor(view.head(), view.head());
+                match ctx {
+                    InputContext::Editor { view, .. }
+                    | InputContext::TextField { view, .. }
+                    | InputContext::CommandLine { view, .. } => {
+                        view.set_cursor(view.head(), view.head());
+                    }
+                    InputContext::Rows(model) | InputContext::Navigator { rows: model, .. } => {
+                        model.clear_visual_selection();
+                    }
+                    _ => {}
                 }
                 InputResult::Consumed
             }
             Command::Visual(mode) => {
                 self.mode = mode;
+                if let InputContext::Rows(model) | InputContext::Navigator { rows: model, .. } = ctx
+                {
+                    model.start_visual_selection();
+                }
                 InputResult::Consumed
             }
             Command::SelectRegister(reg) => {
@@ -156,7 +168,8 @@ impl VimState {
                 self.search(&query, if reverse { !forward } else { forward }, count, ctx)
             }
             Command::Motion { motion, count } => {
-                if let InputContext::Rows(model) = ctx {
+                if let InputContext::Rows(model) | InputContext::Navigator { rows: model, .. } = ctx
+                {
                     let movement = match motion {
                         Motion::Down => Move::Down(count),
                         Motion::Up => Move::Up(count),
@@ -169,7 +182,10 @@ impl VimState {
                     model.move_selection(movement);
                     return InputResult::Consumed;
                 }
-                if let InputContext::Editor { buffer, view, .. } = ctx {
+                if let InputContext::Editor { buffer, view, .. }
+                | InputContext::TextField { buffer, view, .. }
+                | InputContext::CommandLine { buffer, view, .. } = ctx
+                {
                     if matches!(motion, Motion::ScreenDown | Motion::ScreenUp) {
                         return InputResult::VisualRow {
                             down: motion == Motion::ScreenDown,
@@ -356,6 +372,33 @@ impl VimState {
                 }
             }
             Command::ColonCommand(cmd) => self.colon_command(&cmd, ctx),
+            Command::ScrollCursor(pos) => InputResult::ScrollCursor(pos),
+            Command::FollowLink => InputResult::FollowLink,
+            Command::SearchWordUnderCursor { forward } => {
+                let maybe_query = if let InputContext::Editor { buffer, view, .. } = &mut ctx {
+                    let pos = view.head();
+                    self.text_object_range(
+                        buffer,
+                        pos,
+                        crate::vim::motion::TextObject {
+                            kind: crate::vim::motion::TextObjectKind::Inner,
+                            target: TextObjectTarget::Word,
+                        },
+                    )
+                    .ok()
+                    .map(|range| buffer.slice(range).to_string())
+                } else {
+                    return self.error("Editor target unavailable");
+                };
+
+                if let Some(query) = maybe_query
+                    && !query.is_empty()
+                {
+                    self.last_search = Some((query.clone(), forward));
+                    return self.search(&query, forward, 1, ctx);
+                }
+                InputResult::Consumed
+            }
         }
     }
 }

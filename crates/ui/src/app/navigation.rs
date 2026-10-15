@@ -3,13 +3,37 @@ use super::{AppResult, Application};
 use truff_core::markdown::facts::MarkdownFacts;
 use truff_core::text::BytePos;
 
-pub(super) enum Location {
+pub(crate) enum Location {
     Byte(usize),
     Anchor(String),
 }
 
 impl Application {
-    pub(super) fn open_location(
+    pub fn set_backlinks(
+        &mut self,
+        occurrences: Vec<truff_store::index::backlinks::BacklinkOccurrence>,
+    ) {
+        use truff_core::navigation::{RowId, RowItem};
+        self.shell.right_model_mut().set_items(
+            occurrences
+                .iter()
+                .enumerate()
+                .map(|(index, link)| RowItem {
+                    id: RowId(index as u64 + 1),
+                    title: link.source_path.clone(),
+                    depth: 0,
+                    is_folder: false,
+                    is_collapsed: false,
+                    data: None,
+                })
+                .collect(),
+        );
+        self.backlinks = occurrences;
+        self.shell
+            .set_right_panel_available(!self.backlinks.is_empty());
+    }
+
+    pub(crate) fn open_location(
         &mut self,
         path: &str,
         location: Option<Location>,
@@ -24,11 +48,27 @@ impl Application {
         Ok(())
     }
 
+    pub fn jump_to_line(&mut self, line: usize) {
+        if let Some(view_id) = self.shell.workspace().active_view()
+            && let Some((buffer, view)) = self.shell.workspace_mut().editor_parts_mut(view_id)
+        {
+            let line_idx = line.saturating_sub(1);
+            if line_idx < buffer.line_len() {
+                let byte_offset = buffer.byte_of_line(line_idx);
+                let byte_pos = truff_core::text::BytePos::new(byte_offset);
+                view.set_cursor_with_jump(byte_pos, byte_pos);
+            }
+        }
+    }
+
     pub fn open_backlink(&mut self) -> AppResult<()> {
-        let link = self
-            .backlinks
-            .get(self.backlink_selection)
+        let index = self
+            .shell
+            .right_model()
+            .selected_row()
+            .map(|row| row.id.get().saturating_sub(1) as usize)
             .ok_or("No backlink selected")?;
+        let link = self.backlinks.get(index).ok_or("No backlink selected")?;
         let path = link.source_path.clone();
         let start = link.range.start;
         self.open_location(&path, Some(Location::Byte(start)))

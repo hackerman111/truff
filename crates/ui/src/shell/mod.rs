@@ -1,5 +1,5 @@
 use truff_core::commands::{Action, CommandId};
-use truff_core::config::{CompiledKeymap, KeymapConfig};
+use truff_core::config::CompiledKeymap;
 use truff_core::navigation::RowModel;
 use truff_core::text::{Buffer, EditError};
 use truff_core::vim::{Key, Mode, VimState};
@@ -9,8 +9,11 @@ use crate::editor::input::InputAdapter;
 use crate::overlays::{FlashKind, FlashOverlay, WhichKeyOverlay};
 use crate::theme::Theme;
 
+mod command_line;
 mod editor_input;
+pub(crate) use command_line::Completion;
 mod flash;
+mod help;
 mod panels;
 mod routing;
 mod tree;
@@ -32,6 +35,7 @@ pub enum ShellAction {
     VisualRow { down: bool, count: usize },
     RegisteredCommand { id: CommandId, argument: String },
     OpenNavigator(crate::navigator::NavigatorMode),
+    ScrollCursor(truff_core::vim::ScrollPosition),
 }
 
 #[derive(Debug)]
@@ -66,7 +70,7 @@ pub struct Shell {
     input: InputAdapter,
     flash: FlashOverlay,
     flash_kind: FlashKind,
-    command: Option<String>,
+    command_line: command_line::CommandLine,
     keymap: CompiledKeymap,
     custom_keymap: bool,
     binding_prefix: Vec<Key>,
@@ -108,8 +112,8 @@ impl Shell {
             input: InputAdapter::new(),
             flash: FlashOverlay::new(),
             flash_kind: FlashKind::Word,
-            command: None,
-            keymap: KeymapConfig::default()
+            command_line: command_line::CommandLine::default(),
+            keymap: routing::default_keymap()
                 .compile()
                 .expect("default keymap is valid"),
             custom_keymap: false,
@@ -171,11 +175,18 @@ impl Shell {
     }
 
     pub fn mode(&self) -> Mode {
-        self.editor_vim.mode
+        if matches!(self.focus, Focus::Sidebar | Focus::RightPanel) {
+            self.row_vim.mode
+        } else {
+            self.editor_vim.mode
+        }
     }
 
     pub fn command(&self) -> Option<&str> {
-        self.command.as_deref()
+        self.command_line
+            .input
+            .as_ref()
+            .map(|input| input.text.as_str())
     }
 
     pub fn search_query(&self) -> Option<&str> {

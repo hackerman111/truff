@@ -77,7 +77,12 @@ pub fn eval_text_object_range(
         | TextObjectTarget::AngleBracket => eval_delimited_object_range(buffer, pos, obj, 1),
         TextObjectTarget::MarkdownLink
         | TextObjectTarget::MarkdownHeading
-        | TextObjectTarget::MarkdownCodeBlock => None,
+        | TextObjectTarget::MarkdownCodeBlock
+        | TextObjectTarget::MarkdownSection
+        | TextObjectTarget::MarkdownListItem
+        | TextObjectTarget::MarkdownQuote
+        | TextObjectTarget::MarkdownTableCell
+        | TextObjectTarget::MarkdownTableRow => None,
         TextObjectTarget::Paragraph => Some(paragraph_range(buffer, current, obj.kind)),
         TextObjectTarget::Sentence => Some(sentence_range(buffer, current, obj.kind)),
     }

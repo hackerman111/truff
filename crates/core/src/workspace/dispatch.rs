@@ -275,6 +275,17 @@ impl Workspace {
                     path.display()
                 )));
             }
+            Action::ActivateRow {
+                panel,
+                row_id,
+                data,
+            } => {
+                effects.push(Effect::StatusMessage(format!(
+                    "Activate row in {panel}: {row_id:?}{}",
+                    data.as_deref()
+                        .map_or("".to_string(), |d| format!(" ({d})"))
+                )));
+            }
         }
 
         Ok(effects)

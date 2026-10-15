@@ -88,7 +88,8 @@ impl CatalogWorker {
                                 to,
                                 rewritten,
                             }) => {
-                                let mut changed = scan::affected_files(&paths, to)?;
+                                let mut changed = scan::affected_files(&paths, to)
+                                    .unwrap_or_else(|_| vec![to.clone()]);
                                 let mut removed = Vec::new();
                                 for (path, &id) in &ids {
                                     if std::path::Path::new(path).starts_with(from) {
@@ -102,20 +103,25 @@ impl CatalogWorker {
                             }
                             _ => (Vec::new(), Vec::new()),
                         };
+                        let mut post_error = None;
                         if !changed.is_empty() || !removed.is_empty() {
-                            scan::refresh(&paths, &mut db, &events_tx, &changed, &removed)?;
-                            ids = scan::indexed_paths(&db)?;
-                            let mut files: Vec<_> = ids.keys().cloned().collect();
-                            files.sort();
-                            let _ = events_tx.send(CatalogEvent::Files(files));
+                            if let Err(e) =
+                                scan::refresh(&paths, &mut db, &events_tx, &changed, &removed)
+                            {
+                                post_error = Some(e.to_string());
+                            } else if let Ok(new_ids) = scan::indexed_paths(&db) {
+                                ids = new_ids;
+                                let mut files: Vec<_> = ids.keys().cloned().collect();
+                                files.sort();
+                                let _ = events_tx.send(CatalogEvent::Files(files));
+                            }
                         }
-                        if events_tx
-                            .send(
-                                event
-                                    .unwrap_or_else(|error| CatalogEvent::Error(error.to_string())),
-                            )
-                            .is_err()
-                        {
+                        let event = match (event, post_error) {
+                            (Ok(ev), None) => ev,
+                            (Ok(_), Some(err)) => CatalogEvent::Error(err),
+                            (Err(e), _) => CatalogEvent::Error(e.to_string()),
+                        };
+                        if events_tx.send(event).is_err() {
                             break;
                         }
                         if events_tx.send(CatalogEvent::JobDone).is_err() {
@@ -126,7 +132,6 @@ impl CatalogWorker {
                 })();
                 if let Err(error) = result {
                     let _ = events_tx.send(CatalogEvent::Error(error.to_string()));
-                    let _ = events_tx.send(CatalogEvent::Ready);
                 }
             })?;
         Ok(Self {

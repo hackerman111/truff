@@ -19,6 +19,27 @@ pub enum ProjectionMode {
     /// Live Preview: hide syntax markers unless touched by caret/selection.
     #[default]
     LivePreview,
+    /// Reading mode: hide syntax markers unconditionally regardless of cursor.
+    Reading,
+}
+
+/// Supported inline formatting styles in Markdown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InlineStyle {
+    Bold,
+    Italic,
+    Strikethrough,
+    Code,
+    Link,
+    TextColor([u8; 4]),
+    Highlight([u8; 4]),
+}
+
+/// A formatted inline span with source byte range and style.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StyledSpan {
+    pub content: Range<usize>,
+    pub style: InlineStyle,
 }
 
 /// A position in the visual projection space.

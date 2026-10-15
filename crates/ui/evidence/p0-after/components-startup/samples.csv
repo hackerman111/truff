@@ -1,0 +1,16 @@
+scenario,metric,run_id,sample_idx,value,unit
+startup,wall_time_ms,1,0,63.8955,ms
+startup,rss_peak_mib,1,0,26.3164,mib
+startup,rss_steady_mib,1,0,26.3164,mib
+startup,pss_mib,1,0,23.9512,mib
+startup,note_open_1mib_ms,1,0,5.0943,ms
+startup,wall_time_ms,2,0,62.2226,ms
+startup,rss_peak_mib,2,0,28.3359,mib
+startup,rss_steady_mib,2,0,27.0156,mib
+startup,pss_mib,2,0,24.4629,mib
+startup,note_open_1mib_ms,2,0,4.9212,ms
+startup,wall_time_ms,3,0,62.8626,ms
+startup,rss_peak_mib,3,0,28.5312,mib
+startup,rss_steady_mib,3,0,28.5312,mib
+startup,pss_mib,3,0,25.9785,mib
+startup,note_open_1mib_ms,3,0,4.7517,ms

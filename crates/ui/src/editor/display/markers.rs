@@ -2,13 +2,52 @@ use std::ops::Range;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use truff_core::markdown::presentation::{LinePresentation, ListKind, ListMarker};
+use truff_core::markdown::style::ColorSpan;
 
 use super::DisplayMap;
+use super::types::{InlineStyle, StyledSpan};
+
+pub fn highlight_spans(text: &str) -> Vec<ColorSpan> {
+    let prefix = "<mark style=\"background-color:#";
+    let Some(first) = text.find(prefix) else {
+        return Vec::new();
+    };
+    let mut spans = Vec::new();
+    let mut offset = first;
+    while let Some(relative) = text[offset..].find(prefix) {
+        let start = offset + relative;
+        let hex_start = start + prefix.len();
+        let hex_end = hex_start + 6;
+        offset = hex_start;
+        let Some(hex) = text.get(hex_start..hex_end) else {
+            continue;
+        };
+        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) || !text[hex_end..].starts_with("\">") {
+            continue;
+        }
+        let content_start = hex_end + 2;
+        let Some(close_relative) = text[content_start..].find("</mark>") else {
+            break;
+        };
+        let close_start = content_start + close_relative;
+        let end = close_start + "</mark>".len();
+        offset = end;
+        let channel = |index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap_or(0);
+        spans.push(ColorSpan {
+            opening: start..content_start,
+            content: content_start..close_start,
+            closing: close_start..end,
+            rgba: [channel(0), channel(2), channel(4), 255],
+        });
+    }
+    spans
+}
 
 impl DisplayMap {
     pub(super) fn scan_markers(&mut self) {
         self.markers.clear();
         self.lists.clear();
+        self.styles.clear();
         if self.presentation.as_ref().is_some_and(|line| line.code) {
             self.colors.clear();
             return;
@@ -64,12 +103,9 @@ impl DisplayMap {
                         };
                     }
                 }
-                Event::Start(Tag::Strong | Tag::Emphasis | Tag::Strikethrough) => {
+                Event::Start(Tag::Strong) => {
                     let source = &text[range.clone()];
-                    let marker_len = if source.starts_with("**")
-                        || source.starts_with("__")
-                        || source.starts_with("~~")
-                    {
+                    let marker_len = if source.starts_with("**") || source.starts_with("__") {
                         2
                     } else {
                         1
@@ -77,7 +113,44 @@ impl DisplayMap {
                     self.markers
                         .push((range.start..range.start + marker_len, Some(range.clone())));
                     self.markers
-                        .push((range.end - marker_len..range.end, Some(range)));
+                        .push((range.end - marker_len..range.end, Some(range.clone())));
+                    if range.len() >= marker_len * 2 {
+                        self.styles.push(StyledSpan {
+                            content: (range.start + marker_len)..(range.end - marker_len),
+                            style: InlineStyle::Bold,
+                        });
+                    }
+                }
+                Event::Start(Tag::Emphasis) => {
+                    let source = &text[range.clone()];
+                    let marker_len = if source.starts_with("**") || source.starts_with("__") {
+                        2
+                    } else {
+                        1
+                    };
+                    self.markers
+                        .push((range.start..range.start + marker_len, Some(range.clone())));
+                    self.markers
+                        .push((range.end - marker_len..range.end, Some(range.clone())));
+                    if range.len() >= marker_len * 2 {
+                        self.styles.push(StyledSpan {
+                            content: (range.start + marker_len)..(range.end - marker_len),
+                            style: InlineStyle::Italic,
+                        });
+                    }
+                }
+                Event::Start(Tag::Strikethrough) => {
+                    let marker_len = 2;
+                    self.markers
+                        .push((range.start..range.start + marker_len, Some(range.clone())));
+                    self.markers
+                        .push((range.end - marker_len..range.end, Some(range.clone())));
+                    if range.len() >= marker_len * 2 {
+                        self.styles.push(StyledSpan {
+                            content: (range.start + marker_len)..(range.end - marker_len),
+                            style: InlineStyle::Strikethrough,
+                        });
+                    }
                 }
                 Event::Code(_) => {
                     let count = text[range.clone()]
@@ -87,7 +160,45 @@ impl DisplayMap {
                     self.markers
                         .push((range.start..range.start + count, Some(range.clone())));
                     self.markers
-                        .push((range.end - count..range.end, Some(range)));
+                        .push((range.end - count..range.end, Some(range.clone())));
+                    if range.len() >= count * 2 {
+                        self.styles.push(StyledSpan {
+                            content: (range.start + count)..(range.end - count),
+                            style: InlineStyle::Code,
+                        });
+                    }
+                }
+                Event::Start(Tag::Link { .. }) => {
+                    let source = &text[range.clone()];
+                    if source.starts_with('[') {
+                        if let Some(close_bracket) = source.find("](") {
+                            let open_marker = range.start..range.start + 1;
+                            let close_marker = (range.start + close_bracket)..range.end;
+                            let content_start = range.start + 1;
+                            let content_end = range.start + close_bracket;
+                            self.markers.push((open_marker, Some(range.clone())));
+                            self.markers.push((close_marker, Some(range.clone())));
+                            if content_start < content_end {
+                                self.styles.push(StyledSpan {
+                                    content: content_start..content_end,
+                                    style: InlineStyle::Link,
+                                });
+                            }
+                        } else if let Some(close_bracket) = source.find("][") {
+                            let open_marker = range.start..range.start + 1;
+                            let close_marker = (range.start + close_bracket)..range.end;
+                            let content_start = range.start + 1;
+                            let content_end = range.start + close_bracket;
+                            self.markers.push((open_marker, Some(range.clone())));
+                            self.markers.push((close_marker, Some(range.clone())));
+                            if content_start < content_end {
+                                self.styles.push(StyledSpan {
+                                    content: content_start..content_end,
+                                    style: InlineStyle::Link,
+                                });
+                            }
+                        }
+                    }
                 }
                 Event::Start(Tag::Heading { .. }) => {
                     let prefix = text[range.clone()]
@@ -124,6 +235,10 @@ impl DisplayMap {
                 let span = open..close + 2;
                 self.markers.push((open..open + 2, Some(span.clone())));
                 self.markers.push((close..close + 2, Some(span)));
+                self.styles.push(StyledSpan {
+                    content: (open + 2)..close,
+                    style: InlineStyle::Link,
+                });
                 start = close + 2;
             }
         }
@@ -149,6 +264,22 @@ impl DisplayMap {
             let enclosing = Some(span.opening.start..span.closing.end);
             self.markers.push((span.opening.clone(), enclosing.clone()));
             self.markers.push((span.closing.clone(), enclosing));
+            self.styles.push(StyledSpan {
+                content: span.content.clone(),
+                style: InlineStyle::TextColor(span.rgba),
+            });
+        }
+        for span in highlight_spans(text) {
+            self.markers.retain(|(range, _)| {
+                !ranges_touch(range, &span.opening) && !ranges_touch(range, &span.closing)
+            });
+            let enclosing = Some(span.opening.start..span.closing.end);
+            self.markers.push((span.opening.clone(), enclosing.clone()));
+            self.markers.push((span.closing.clone(), enclosing));
+            self.styles.push(StyledSpan {
+                content: span.content.clone(),
+                style: InlineStyle::Highlight(span.rgba),
+            });
         }
         self.markers.sort_by_key(|(range, _)| range.start);
     }

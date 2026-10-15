@@ -1,4 +1,4 @@
-use crate::commands::{Action, CommandId};
+use crate::commands::{Action, CommandContext, CommandId};
 use crate::navigation::RowModel;
 use crate::text::Buffer;
 use crate::workspace::{View, ViewId};
@@ -9,14 +9,42 @@ pub enum InputContext<'a> {
         buffer: &'a mut Buffer,
         view: &'a mut View,
     },
+    TextField {
+        field_id: &'a str,
+        buffer: &'a mut Buffer,
+        view: &'a mut View,
+    },
+    CommandLine {
+        buffer: &'a mut Buffer,
+        view: &'a mut View,
+    },
     RowModel {
         panel: &'a str,
         selected_index: usize,
         total_rows: usize,
     },
     Rows(&'a mut RowModel),
+    Navigator {
+        panel: &'a str,
+        rows: &'a mut RowModel,
+    },
     None,
 }
+
+impl InputContext<'_> {
+    /// Maps the runtime borrow context to its typed `CommandContext`.
+    pub fn command_context(&self) -> CommandContext {
+        match self {
+            Self::Editor { .. } => CommandContext::Editor,
+            Self::TextField { .. } => CommandContext::TextField,
+            Self::CommandLine { .. } => CommandContext::CommandLine,
+            Self::RowModel { .. } | Self::Rows(_) => CommandContext::Rows,
+            Self::Navigator { .. } => CommandContext::Navigator,
+            Self::None => CommandContext::Global,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputResult {
     Consumed,
@@ -34,6 +62,8 @@ pub enum InputResult {
         id: CommandId,
         argument: String,
     },
+    ScrollCursor(crate::vim::parser::ScrollPosition),
+    FollowLink,
 }
 
 pub(super) fn reborrow<'a>(ctx: &'a mut InputContext<'_>) -> InputContext<'a> {
@@ -47,7 +77,18 @@ pub(super) fn reborrow<'a>(ctx: &'a mut InputContext<'_>) -> InputContext<'a> {
             buffer,
             view,
         },
+        InputContext::TextField {
+            field_id,
+            buffer,
+            view,
+        } => InputContext::TextField {
+            field_id,
+            buffer,
+            view,
+        },
+        InputContext::CommandLine { buffer, view } => InputContext::CommandLine { buffer, view },
         InputContext::Rows(model) => InputContext::Rows(model),
+        InputContext::Navigator { panel, rows } => InputContext::Navigator { panel, rows },
         InputContext::RowModel {
             panel,
             selected_index,

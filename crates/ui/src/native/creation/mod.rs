@@ -1,10 +1,12 @@
 mod file;
 mod folder;
+mod operation;
 mod settings;
 mod vault;
 
 pub use file::FileDialog;
 pub use folder::FolderDialog;
+pub use operation::OperationDialog;
 pub use settings::SettingsDialog;
 pub use vault::VaultDialog;
 
@@ -18,11 +20,16 @@ pub struct CreationDialogs {
     pub file: FileDialog,
     pub folder: FolderDialog,
     pub settings: SettingsDialog,
+    pub operation: OperationDialog,
 }
 
 impl CreationDialogs {
     pub fn is_any_open(&self) -> bool {
-        self.vault.open || self.file.open || self.folder.open || self.settings.open
+        self.operation.is_open()
+            || self.vault.open
+            || self.file.open
+            || self.folder.open
+            || self.settings.open
     }
 
     pub(super) fn show(
@@ -35,5 +42,6 @@ impl CreationDialogs {
         self.file.show(application, context, theme);
         self.folder.show(application, context, theme);
         self.settings.show(application, context, theme);
+        self.operation.show(application, context, theme);
     }
 }

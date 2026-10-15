@@ -186,3 +186,21 @@ impl Default for Workspace {
         Self::new()
     }
 }
+
+/// Pure source-level refactor plan describing an edit to the source buffer and creation of a target file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefactorPlan {
+    pub source_transaction: crate::text::Transaction,
+    pub target_path: PathBuf,
+    pub extracted_content: String,
+}
+
+impl From<crate::markdown::link_selection::ExtractNotePlan> for RefactorPlan {
+    fn from(plan: crate::markdown::link_selection::ExtractNotePlan) -> Self {
+        Self {
+            source_transaction: plan.source_transaction,
+            target_path: plan.target_path,
+            extracted_content: plan.extracted_content,
+        }
+    }
+}

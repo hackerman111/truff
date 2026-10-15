@@ -9,6 +9,9 @@ pub enum Focus {
     RightPanel,
     Navigator,
     CommandBar,
+    TOC,
+    Wiki,
+    Stream,
 }
 
 /// Focus manager maintaining current target and deterministic restoration history.
@@ -55,7 +58,12 @@ impl FocusManager {
     pub fn pop_focus(&mut self) -> Focus {
         while let Some(prev) = self.history.pop() {
             // Do not pop back into transient overlay targets
-            if prev != Focus::Navigator && prev != Focus::CommandBar {
+            if prev != Focus::Navigator
+                && prev != Focus::CommandBar
+                && prev != Focus::TOC
+                && prev != Focus::Wiki
+                && prev != Focus::Stream
+            {
                 self.current = prev;
                 return prev;
             }

@@ -250,6 +250,64 @@ impl Buffer {
         }
     }
 
+    /// Alias for `grapheme_next`: advances to the next extended grapheme cluster boundary.
+    pub fn next_grapheme(&self, pos: BytePos) -> Option<BytePos> {
+        self.grapheme_next(pos)
+    }
+
+    /// Alias for `grapheme_prev`: moves to the preceding extended grapheme cluster boundary.
+    pub fn prev_grapheme(&self, pos: BytePos) -> Option<BytePos> {
+        self.grapheme_prev(pos)
+    }
+
+    /// Snaps any byte offset to the start (floor) of the extended grapheme cluster containing it.
+    pub fn snap_grapheme_floor(&self, pos: BytePos) -> BytePos {
+        let clamped = self.floor_char_boundary(pos.get().min(self.byte_len()));
+        if clamped == 0 || clamped == self.byte_len() {
+            return BytePos::new(clamped);
+        }
+        let bp = BytePos::new(clamped);
+        self.grapheme_next(bp)
+            .and_then(|next| self.grapheme_prev(next))
+            .unwrap_or(bp)
+    }
+
+    /// Computes a half-open UTF-8 byte range `start..end` for `VisualChar` selection.
+    /// Includes the full final extended grapheme cluster (e.g. `👩‍💻`, `e\u{0301}`, flags, CJK)
+    /// regardless of selection direction (`anchor <= head` or `anchor > head`).
+    pub fn visual_char_inclusive_range(&self, anchor: BytePos, head: BytePos) -> Range<usize> {
+        if self.is_empty() {
+            return 0..0;
+        }
+        let a = self.snap_grapheme_floor(anchor);
+        let h = self.snap_grapheme_floor(head);
+        let start = a.min(h);
+        let last = a.max(h);
+        let end = self
+            .grapheme_next(last)
+            .map_or_else(|| self.byte_len(), BytePos::get);
+        start.get()..end
+    }
+
+    /// Computes a half-open UTF-8 byte range `start..end` for `VisualLine` selection,
+    /// covering full lines including LF, CRLF, and final unterminated EOF lines.
+    pub fn visual_line_range(&self, anchor: BytePos, head: BytePos) -> Range<usize> {
+        if self.is_empty() {
+            return 0..0;
+        }
+        let start_byte = anchor.get().min(head.get()).min(self.byte_len());
+        let end_byte = anchor.get().max(head.get()).min(self.byte_len());
+        let first_line = self.line_of_byte(start_byte);
+        let last_line = self.line_of_byte(end_byte);
+        let start = self.byte_of_line(first_line);
+        let end = if last_line + 1 < self.line_len() {
+            self.byte_of_line(last_line + 1)
+        } else {
+            self.byte_len()
+        };
+        start..end
+    }
+
     /// Applies a transaction atomically to the buffer.
     pub fn apply(&mut self, tx: Transaction) -> Result<ChangeSet, EditError> {
         let mut normalized_edits = tx.edits;

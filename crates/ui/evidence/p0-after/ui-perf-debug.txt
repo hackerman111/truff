@@ -1,0 +1,7 @@
+scenario,iterations,ns_per_iter,layout_builds,retained
+idle_frame,100,1407452,0,28
+insert_character_frame,100,2009605,100,28
+insert_newline_frame,100,2158161,200,35
+cursor_down_frame,100,2118072,80,35
+navigator_filter_10000,100,47351795,0,1
+flash_word_windows,100,1268567,0,100

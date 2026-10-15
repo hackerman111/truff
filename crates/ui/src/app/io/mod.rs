@@ -141,6 +141,7 @@ impl Application {
             changed = true;
         }
         changed |= self.release_closed_buffers();
+        self.restore_closed_views();
         changed
     }
 

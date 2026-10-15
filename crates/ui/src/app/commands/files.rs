@@ -8,13 +8,18 @@ impl Application {
     pub(super) fn rename_note(&mut self, argument: &str) -> AppResult<()> {
         let from = if self.shell.focus() == Focus::Sidebar {
             self.shell
-                .sidebar_model()
-                .selected_row()
-                .and_then(|row| row.data.clone())
+                .sidebar_selected_path()
                 .ok_or("Select a note first")?
         } else {
             self.active_relative_path().ok_or("Open a note first")?
         };
+        self.rename_path(&from, argument)
+    }
+
+    pub(crate) fn rename_path(&mut self, from: &str, argument: &str) -> AppResult<()> {
+        if !self.is_note_operation_target(from) {
+            return Err("Folder operations are unavailable; select an indexed or open note".into());
+        }
         if argument.is_empty() {
             return Err("Usage: :rename <new/path.md>".into());
         }
@@ -30,7 +35,7 @@ impl Application {
             return Err("Destination is already tracked by the workspace".into());
         }
         self.start_file_operation(CatalogJob::Rename {
-            from,
+            from: from.to_owned(),
             to: argument.to_owned(),
             dirty: self.dirty_paths(),
         })
@@ -53,13 +58,32 @@ impl Application {
     }
 
     pub(crate) fn trash(&mut self, path: &str) -> AppResult<()> {
+        if !self.is_note_operation_target(path) {
+            return Err("Folder operations are unavailable; select an indexed or open note".into());
+        }
         self.start_file_operation(CatalogJob::Trash {
             path: path.to_owned(),
             dirty: self.dirty_paths(),
         })
     }
 
-    pub(super) fn start_file_operation(&mut self, job: CatalogJob) -> AppResult<()> {
+    pub(crate) fn is_note_operation_target(&self, path: &str) -> bool {
+        if self.shell.sidebar_file_paths().any(|note| note == path) {
+            return true;
+        }
+        let Some(paths) = &self.paths else {
+            return false;
+        };
+        self.shell.workspace().buffers().entries().any(|entry| {
+            entry.buffer().is_some()
+                && entry
+                    .path()
+                    .and_then(|absolute| paths.relative_path(absolute).ok())
+                    .is_some_and(|relative| relative == Path::new(path))
+        })
+    }
+
+    pub(in crate::app) fn start_file_operation(&mut self, job: CatalogJob) -> AppResult<()> {
         if self.file_operation_pending()
             || !self.pending_saves.is_empty()
             || !self.pending_loads.is_empty()

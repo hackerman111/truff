@@ -117,7 +117,7 @@ impl KeymapConfig {
             .unwrap_or_default()
     }
 
-    /// Validates the keymap to ensure no ambiguous collisions.
+    /// Validates the keymap to ensure no ambiguous collisions within any shared context.
     pub fn validate(&self) -> Result<(), KeymapError> {
         if self.bindings.len() > 4096 {
             return Err(KeymapError::InvalidBinding(
@@ -125,6 +125,7 @@ impl KeymapConfig {
             ));
         }
         let registry = CommandRegistry::default();
+        let mut resolved = Vec::with_capacity(self.bindings.len());
         for binding in &self.bindings {
             if binding.keys.len() > 32 {
                 return Err(KeymapError::InvalidBinding(
@@ -134,35 +135,53 @@ impl KeymapConfig {
             if binding.keys.is_empty() {
                 return Err(KeymapError::InvalidBinding("empty key sequence".into()));
             }
-            registry
+            let spec = registry
                 .get(&binding.command)
                 .map_err(KeymapError::Registry)?;
+            if spec.contexts.is_empty() {
+                return Err(KeymapError::InvalidBinding(format!(
+                    "command {} has no admitted contexts",
+                    binding.command
+                )));
+            }
+            resolved.push((binding, &spec.contexts));
         }
 
-        let mut bindings: Vec<_> = self.bindings.iter().collect();
-        bindings.sort_unstable_by(|left, right| {
-            left.mode
-                .cmp(&right.mode)
-                .then_with(|| left.keys.cmp(&right.keys))
-        });
-        for pair in bindings.windows(2) {
-            let [left, right] = pair else { continue };
-            if left.mode != right.mode {
-                continue;
-            }
-            if left.keys == right.keys {
-                return Err(KeymapError::DuplicateBinding {
-                    mode: left.mode,
-                    keys: left.keys.clone(),
-                });
-            }
-            if right.keys.starts_with(&left.keys) {
-                return Err(KeymapError::ShadowedPrefix {
-                    prefix: left.keys.clone(),
-                    conflicting_key: right.keys[left.keys.len()],
-                });
+        // Check collisions per concrete context so Editor and Rows can bind the same key
+        // to distinct context-specific commands (e.g. `a` -> edit.append vs `a` -> file.create).
+        for ctx in CommandContext::ALL {
+            let mut active: Vec<&KeyBinding> = resolved
+                .iter()
+                .filter(|(_, contexts)| ctx.matches_spec(contexts))
+                .map(|(b, _)| *b)
+                .collect();
+
+            active.sort_unstable_by(|left, right| {
+                left.mode
+                    .cmp(&right.mode)
+                    .then_with(|| left.keys.cmp(&right.keys))
+            });
+
+            for pair in active.windows(2) {
+                let [left, right] = pair else { continue };
+                if left.mode != right.mode {
+                    continue;
+                }
+                if left.keys == right.keys {
+                    return Err(KeymapError::DuplicateBinding {
+                        mode: left.mode,
+                        keys: left.keys.clone(),
+                    });
+                }
+                if right.keys.starts_with(&left.keys) {
+                    return Err(KeymapError::ShadowedPrefix {
+                        prefix: left.keys.clone(),
+                        conflicting_key: right.keys[left.keys.len()],
+                    });
+                }
             }
         }
+
         Ok(())
     }
 

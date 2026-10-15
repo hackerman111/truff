@@ -36,6 +36,7 @@ pub enum Motion {
     ParagraphBackward,
     ParagraphForward,
     CurrentLine,
+    MatchingBracket,
 }
 
 /// Type of text object boundary.
@@ -61,6 +62,11 @@ pub enum TextObjectTarget {
     MarkdownLink,
     MarkdownHeading,
     MarkdownCodeBlock,
+    MarkdownSection,
+    MarkdownListItem,
+    MarkdownQuote,
+    MarkdownTableCell,
+    MarkdownTableRow,
 }
 
 /// Structured text object.

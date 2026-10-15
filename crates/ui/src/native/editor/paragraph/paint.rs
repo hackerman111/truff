@@ -3,10 +3,7 @@ use super::Paragraph;
 use crate::editor::Affinity;
 use crate::overlays::FlashTarget;
 use crate::theme::Theme;
-use eframe::egui::{
-    self, Color32, FontId, Painter, Pos2, Rect,
-    epaint::text::{Glyph, PlacedRow},
-};
+use eframe::egui::{self, Color32, FontId, Painter, Pos2, Rect, epaint::text::PlacedRow};
 use std::ops::Range;
 use truff_core::{text::BytePos, vim::Mode};
 
@@ -21,6 +18,8 @@ pub(in super::super) struct ParagraphView<'a> {
 }
 const HIGHLIGHT_PAD_Y: f32 = 2.0;
 const HIGHLIGHT_PAD_X: f32 = 1.0;
+
+use eframe::egui::epaint::text::Glyph;
 
 fn glyph_vertical_bounds(origin_y: f32, row: &PlacedRow, glyph: &Glyph) -> (f32, f32) {
     let baseline_y = origin_y + row.pos.y + glyph.pos.y;
@@ -38,12 +37,33 @@ fn glyph_vertical_bounds(origin_y: f32, row: &PlacedRow, glyph: &Glyph) -> (f32,
     (top - HIGHLIGHT_PAD_Y, bottom + HIGHLIGHT_PAD_Y)
 }
 
-fn row_fallback_vertical_bounds(origin_y: f32, row: &PlacedRow) -> (f32, f32) {
-    if let Some(glyph) = row.glyphs.first() {
-        glyph_vertical_bounds(origin_y, row, glyph)
+fn cluster_vertical_bounds(origin_y: f32, row: &PlacedRow, glyphs: &[Glyph]) -> (f32, f32) {
+    if let Some((first, rest)) = glyphs.split_first() {
+        let (mut min_y, mut max_y) = glyph_vertical_bounds(origin_y, row, first);
+        for g in rest {
+            let (top, bottom) = glyph_vertical_bounds(origin_y, row, g);
+            min_y = min_y.min(top);
+            max_y = max_y.max(bottom);
+        }
+        (min_y, max_y)
+    } else if let Some(last) = row.glyphs.last() {
+        glyph_vertical_bounds(origin_y, row, last)
     } else {
         let baseline_y = origin_y + row.pos.y + row.size.y * 0.6;
-        let cap_height = 12.0;
+        let cap_height = (row.size.y * 0.6).max(10.0);
+        (
+            baseline_y - cap_height - HIGHLIGHT_PAD_Y,
+            baseline_y + HIGHLIGHT_PAD_Y,
+        )
+    }
+}
+
+fn row_vertical_bounds(origin_y: f32, row: &PlacedRow) -> (f32, f32) {
+    if !row.glyphs.is_empty() {
+        cluster_vertical_bounds(origin_y, row, &row.glyphs)
+    } else {
+        let baseline_y = origin_y + row.pos.y + row.size.y * 0.6;
+        let cap_height = (row.size.y * 0.6).max(10.0);
         (
             baseline_y - cap_height - HIGHLIGHT_PAD_Y,
             baseline_y + HIGHLIGHT_PAD_Y,
@@ -55,78 +75,79 @@ fn paragraph_vertical_bounds(origin_y: f32, rows: &[PlacedRow]) -> (f32, f32) {
     let mut min_y = f32::INFINITY;
     let mut max_y = f32::NEG_INFINITY;
     for row in rows {
-        if !row.glyphs.is_empty() {
-            for glyph in &row.glyphs {
-                let (g_top, g_bottom) = glyph_vertical_bounds(origin_y, row, glyph);
-                min_y = min_y.min(g_top);
-                max_y = max_y.max(g_bottom);
-            }
-        } else {
-            let (r_top, r_bottom) = row_fallback_vertical_bounds(origin_y, row);
-            min_y = min_y.min(r_top);
-            max_y = max_y.max(r_bottom);
-        }
+        let (r_top, r_bottom) = row_vertical_bounds(origin_y, row);
+        min_y = min_y.min(r_top);
+        max_y = max_y.max(r_bottom);
     }
     if min_y <= max_y {
         (min_y, max_y)
-    } else if let Some(first_row) = rows.first() {
-        row_fallback_vertical_bounds(origin_y, first_row)
     } else {
-        let baseline_y = origin_y + super::super::LINE_HEIGHT * 0.6;
-        let cap_height = 12.0;
         (
-            baseline_y - cap_height - HIGHLIGHT_PAD_Y,
-            baseline_y + HIGHLIGHT_PAD_Y,
+            origin_y - HIGHLIGHT_PAD_Y,
+            origin_y + super::super::LINE_HEIGHT + HIGHLIGHT_PAD_Y,
         )
     }
 }
 
 impl Paragraph {
-    fn char_rect_at(&self, origin: Pos2, source: usize) -> Rect {
+    pub(in crate::native::editor) fn char_rect_at(&self, origin: Pos2, source: usize) -> Rect {
+        use unicode_segmentation::UnicodeSegmentation;
+
+        let rel_source = source.saturating_sub(self.range.start);
         let visual = self
             .display
-            .source_to_visual(
-                BytePos::new(source.saturating_sub(self.range.start)),
-                Affinity::Right,
-            )
+            .source_to_visual(BytePos::new(rel_source), Affinity::Right)
             .get();
-        let chars = self.display.visual_text()[..visual.min(self.display.visual_text().len())]
-            .chars()
-            .count();
-        let ccursor = egui::text::CCursor::new(chars);
+        let visual_text = self.display.visual_text();
+
+        let cluster_char_len = if visual < visual_text.len() {
+            visual_text[visual..]
+                .graphemes(true)
+                .next()
+                .map_or(1, |g| g.chars().count())
+        } else {
+            1
+        };
+
+        let chars_before = visual_text[..visual.min(visual_text.len())].chars().count();
+        let ccursor = egui::text::CCursor::new(chars_before);
         let layout_cursor = self.galley.layout_from_cursor(ccursor);
+
         if let Some(row) = self.galley.rows.get(layout_cursor.row) {
-            let x = row.x_offset(layout_cursor.column) + row.pos.x + origin.x;
-            let (width, (min_y, max_y)) =
-                if let Some(glyph) = row.glyphs.get(layout_cursor.column.0) {
-                    (
-                        glyph.advance_width,
-                        glyph_vertical_bounds(origin.y, row, glyph),
-                    )
-                } else if let Some(glyph) = row.glyphs.last() {
-                    (
-                        (row.size.y * 0.5).max(8.5),
-                        glyph_vertical_bounds(origin.y, row, glyph),
-                    )
-                } else {
-                    (
-                        (row.size.y * 0.5).max(8.5),
-                        row_fallback_vertical_bounds(origin.y, row),
-                    )
-                };
+            let col_start = layout_cursor.column;
+            let col_end = egui::text::CharIndex(col_start.0 + cluster_char_len);
+
+            let x_start = row.x_offset(col_start) + row.pos.x + origin.x;
+            let (min_y, max_y) = if col_start.0 < row.glyphs.len() {
+                let slice = &row.glyphs[col_start.0..col_end.0.min(row.glyphs.len())];
+                cluster_vertical_bounds(origin.y, row, slice)
+            } else if let Some(last) = row.glyphs.last() {
+                glyph_vertical_bounds(origin.y, row, last)
+            } else {
+                row_vertical_bounds(origin.y, row)
+            };
+
+            let width = if col_start.0 < row.glyphs.len() {
+                let x_end = row.x_offset(col_end) + row.pos.x + origin.x;
+                (x_end - x_start).max(row.glyphs[col_start.0].advance_width)
+            } else if let Some(glyph) = row.glyphs.last() {
+                glyph.advance_width
+            } else {
+                (row.size.y * 0.55).round().max(4.0)
+            };
+
             Rect::from_min_max(
-                Pos2::new(x - HIGHLIGHT_PAD_X, min_y),
-                Pos2::new(x + width.max(2.0) + HIGHLIGHT_PAD_X, max_y),
+                Pos2::new(x_start - HIGHLIGHT_PAD_X, min_y),
+                Pos2::new(x_start + width.max(2.0) + HIGHLIGHT_PAD_X, max_y),
             )
         } else {
             let caret = self
                 .galley
                 .pos_from_cursor(ccursor)
                 .translate(origin.to_vec2());
-            Rect::from_min_size(
-                caret.left_top(),
-                egui::vec2(8.5, caret.height().max(super::super::LINE_HEIGHT)),
-            )
+            let line_h = caret.height().max(super::super::LINE_HEIGHT);
+            let width = (line_h * 0.55).round().max(4.0);
+            Rect::from_min_size(caret.left_top(), egui::vec2(width, line_h))
         }
     }
 
@@ -149,15 +170,14 @@ impl Paragraph {
             .display
             .source_to_visual(
                 BytePos::new(end_source.saturating_sub(self.range.start)),
-                Affinity::Right,
+                Affinity::Left,
             )
             .get();
-        let start_chars = self.display.visual_text()
-            [..visual_start.min(self.display.visual_text().len())]
+        let visual_text = self.display.visual_text();
+        let start_chars = visual_text[..visual_start.min(visual_text.len())]
             .chars()
             .count();
-        let end_chars = self.display.visual_text()
-            [..visual_end.min(self.display.visual_text().len())]
+        let end_chars = visual_text[..visual_end.min(visual_text.len())]
             .chars()
             .count();
         if start_chars >= end_chars && !self.galley.rows.is_empty() {
@@ -175,23 +195,10 @@ impl Paragraph {
                 let col_end = sel_end - row_char_start;
                 let x_start = row.x_offset(egui::text::CharIndex(col_start)) + row.pos.x + origin.x;
                 let x_end = row.x_offset(egui::text::CharIndex(col_end)) + row.pos.x + origin.x;
-                let glyph_slice =
-                    &row.glyphs[col_start.min(row.glyphs.len())..col_end.min(row.glyphs.len())];
-                let (min_y, max_y) = if !glyph_slice.is_empty() {
-                    let mut min_y = f32::INFINITY;
-                    let mut max_y = f32::NEG_INFINITY;
-                    for glyph in glyph_slice {
-                        let (g_top, g_bottom) = glyph_vertical_bounds(origin.y, row, glyph);
-                        min_y = min_y.min(g_top);
-                        max_y = max_y.max(g_bottom);
-                    }
-                    (min_y, max_y)
-                } else {
-                    row_fallback_vertical_bounds(origin.y, row)
-                };
+                let (min_y, max_y) = row_vertical_bounds(origin.y, row);
                 let rect = Rect::from_min_max(
-                    Pos2::new(x_start.min(x_end), min_y),
-                    Pos2::new(x_start.max(x_end), max_y),
+                    Pos2::new(x_start.min(x_end) - HIGHLIGHT_PAD_X, min_y),
+                    Pos2::new(x_start.max(x_end) + HIGHLIGHT_PAD_X, max_y),
                 );
                 painter.rect_filled(rect, 2.0, color);
             }

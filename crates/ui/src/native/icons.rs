@@ -12,6 +12,7 @@ pub enum Icon {
     Vault,
     MoreHorizontal,
     Gear,
+    Search,
 }
 
 /// Renders a crisp 5.5 px diameter dirty indicator circle without font dependencies.
@@ -167,6 +168,18 @@ pub fn render_icon(painter: &Painter, icon: Icon, rect: Rect, color: Color32, st
                 let p2 = center + dir * 5.8;
                 painter.line_segment([p1, p2], stroke);
             }
+        }
+        Icon::Search => {
+            let r = 3.5;
+            let c = Pos2::new(center.x - 1.5, center.y - 1.5);
+            painter.circle_stroke(c, r, stroke);
+            painter.line_segment(
+                [
+                    Pos2::new(c.x + 2.5, c.y + 2.5),
+                    Pos2::new(center.x + 4.5, center.y + 4.5),
+                ],
+                stroke,
+            );
         }
     }
 }

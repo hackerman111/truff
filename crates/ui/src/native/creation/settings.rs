@@ -1,5 +1,6 @@
 use super::super::{editor::color, icons, resolve_font_and_line_height, widgets};
 use crate::app::Application;
+use crate::components::follow_tab_focus;
 use crate::theme::Theme;
 use eframe::egui;
 
@@ -17,7 +18,7 @@ impl Default for SettingsDialog {
     fn default() -> Self {
         Self {
             open: false,
-            font_family: "monospace".into(),
+            font_family: "proportional".into(),
             base_font_size: 15.0,
             line_height_multiplier: 1.5,
             custom_font_path: "".into(),
@@ -72,45 +73,33 @@ impl SettingsDialog {
 
         let mut close_dialog = false;
         let mut submit_settings = false;
+        let mut cancelled = false;
 
-        let modal_frame = egui::Frame::new()
-            .fill(color(theme.bg_secondary))
-            .stroke(egui::Stroke::new(1.0, color(theme.border)))
-            .corner_radius(egui::CornerRadius::same(8))
-            .inner_margin(egui::Margin::same(20));
-
-        egui::Window::new("settings_window")
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(480.0)
-            .max_width(480.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .frame(modal_frame)
-            .show(context, |ui| {
-                ui.visuals_mut().extreme_bg_color =
-                    color(crate::theme::Color::from_hex("#20242c").unwrap());
-                ui.visuals_mut().widgets.inactive.bg_stroke =
-                    egui::Stroke::new(1.0, color(theme.border));
-                ui.visuals_mut().widgets.hovered.bg_stroke =
-                    egui::Stroke::new(1.0, color(theme.accent));
-
+        crate::components::dialog_with_footer(
+            context,
+            theme,
+            "settings_dialog",
+            |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(
                             egui::RichText::new("Настройки")
-                                .size(16.0)
+                                .size(theme.geometry.ui_font_size + 3.0)
                                 .strong()
                                 .color(color(theme.text_primary)),
                         );
                         ui.label(
                             egui::RichText::new("Типографика редактора и внешний вид")
-                                .size(12.0)
+                                .size(theme.geometry.ui_font_size)
                                 .color(color(theme.text_muted)),
                         );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                        if widgets::icon_button(ui, icons::Icon::Close, "Закрыть").clicked()
+                        if follow_tab_focus(
+                            widgets::icon_button(ui, icons::Icon::Close, "Закрыть"),
+                            ui,
+                        )
+                        .clicked()
                         {
                             close_dialog = true;
                         }
@@ -120,7 +109,7 @@ impl SettingsDialog {
                 ui.add_space(14.0);
                 ui.label(
                     egui::RichText::new("Семейство шрифта")
-                        .size(12.0)
+                        .size(theme.geometry.ui_font_size)
                         .strong()
                         .color(color(theme.text_primary)),
                 );
@@ -130,17 +119,19 @@ impl SettingsDialog {
                     let is_prop = self.font_family == "proportional";
                     let is_custom = self.font_family == "custom";
 
-                    if ui
-                        .selectable_label(is_mono, "Моноширинный (по умолчанию)")
-                        .clicked()
+                    if follow_tab_focus(ui.selectable_label(is_mono, "Моноширинный"), ui).clicked()
                     {
                         self.font_family = "monospace".into();
                     }
-                    if ui.selectable_label(is_prop, "Пропорциональный").clicked() {
+                    if follow_tab_focus(
+                        ui.selectable_label(is_prop, "Пропорциональный (по умолчанию)"),
+                        ui,
+                    )
+                    .clicked()
+                    {
                         self.font_family = "proportional".into();
                     }
-                    if ui
-                        .selectable_label(is_custom, "Пользовательский файл")
+                    if follow_tab_focus(ui.selectable_label(is_custom, "Пользовательский файл"), ui)
                         .clicked()
                     {
                         self.font_family = "custom".into();
@@ -152,7 +143,7 @@ impl SettingsDialog {
                     ui.horizontal(|ui| {
                         ui.label(
                             egui::RichText::new("Путь к TTF/OTF:")
-                                .size(12.0)
+                                .size(theme.geometry.ui_font_size)
                                 .color(color(theme.text_muted)),
                         );
                         ui.add(
@@ -167,24 +158,31 @@ impl SettingsDialog {
                 ui.add_space(12.0);
                 ui.label(
                     egui::RichText::new("Базовый размер шрифта")
-                        .size(12.0)
+                        .size(theme.geometry.ui_font_size)
                         .strong()
                         .color(color(theme.text_primary)),
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.button(" - ").clicked() && self.base_font_size > 10.0 {
+                    if follow_tab_focus(ui.button(" - "), ui).clicked()
+                        && self.base_font_size > 10.0
+                    {
                         self.base_font_size = (self.base_font_size - 1.0).max(10.0);
                     }
-                    ui.add(
-                        egui::Slider::new(&mut self.base_font_size, 10.0..=32.0)
-                            .step_by(1.0)
-                            .suffix(" px"),
+                    follow_tab_focus(
+                        ui.add(
+                            egui::Slider::new(&mut self.base_font_size, 10.0..=32.0)
+                                .step_by(1.0)
+                                .suffix(" px"),
+                        ),
+                        ui,
                     );
-                    if ui.button(" + ").clicked() && self.base_font_size < 32.0 {
+                    if follow_tab_focus(ui.button(" + "), ui).clicked()
+                        && self.base_font_size < 32.0
+                    {
                         self.base_font_size = (self.base_font_size + 1.0).min(32.0);
                     }
-                    if ui.button("Сброс (15px)").clicked() {
+                    if follow_tab_focus(ui.button("Сброс (15px)"), ui).clicked() {
                         self.base_font_size = 15.0;
                     }
                 });
@@ -192,7 +190,7 @@ impl SettingsDialog {
                 ui.add_space(12.0);
                 ui.label(
                     egui::RichText::new("Предпросмотр")
-                        .size(12.0)
+                        .size(theme.geometry.ui_font_size)
                         .strong()
                         .color(color(theme.text_primary)),
                 );
@@ -223,11 +221,9 @@ impl SettingsDialog {
                 };
 
                 let preview_frame = egui::Frame::new()
-                    .fill(color(
-                        crate::theme::Color::from_hex("#1c2028").unwrap_or(theme.bg_primary),
-                    ))
+                    .fill(color(theme.bg_canvas))
                     .stroke(egui::Stroke::new(1.0, color(theme.border)))
-                    .corner_radius(egui::CornerRadius::same(6))
+                    .corner_radius(egui::CornerRadius::same(theme.geometry.corner_radius as u8))
                     .inner_margin(egui::Margin::same(12));
 
                 preview_frame.show(ui, |ui| {
@@ -259,40 +255,32 @@ impl SettingsDialog {
                 ui.add_space(12.0);
                 ui.label(
                     egui::RichText::new("Тема оформления")
-                        .size(12.0)
+                        .size(theme.geometry.ui_font_size)
                         .strong()
                         .color(color(theme.text_primary)),
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui
-                        .selectable_label(self.active_theme == "nord", "nord")
-                        .clicked()
-                    {
-                        self.active_theme = "nord".into();
-                    }
-                    if ui
-                        .selectable_label(
-                            self.active_theme == "dark" || self.active_theme == "obsidian-dark",
-                            "dark",
-                        )
-                        .clicked()
-                    {
-                        self.active_theme = "dark".into();
-                    }
-                    if ui
-                        .selectable_label(self.active_theme == "light", "light")
-                        .clicked()
-                    {
-                        self.active_theme = "light".into();
+                    for name in ["nord", "dark", "light"] {
+                        let selected = self.active_theme == name
+                            || name == "dark" && self.active_theme == "obsidian-dark";
+                        if follow_tab_focus(ui.selectable_label(selected, name), ui).clicked() {
+                            self.active_theme = name.into();
+                        }
                     }
                 });
 
                 if let Some(err) = &self.error {
                     ui.add_space(6.0);
-                    ui.colored_label(egui::Color32::from_rgb(255, 100, 100), err);
+                    ui.colored_label(color(theme.state_error), err);
                 }
 
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.error = None;
+                    close_dialog = true;
+                }
+            },
+            |ui| {
                 ui.add_space(16.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
@@ -301,16 +289,15 @@ impl SettingsDialog {
                         submit_settings = true;
                     }
                     if widgets::secondary_button(ui, "Отмена").clicked() {
-                        self.error = None;
-                        close_dialog = true;
+                        cancelled = true;
                     }
                 });
-
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    self.error = None;
-                    close_dialog = true;
-                }
-            });
+            },
+        );
+        if cancelled {
+            self.error = None;
+            close_dialog = true;
+        }
 
         if submit_settings {
             let custom_path =

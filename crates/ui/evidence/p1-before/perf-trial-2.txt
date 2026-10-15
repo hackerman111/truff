@@ -1,0 +1,5 @@
+scenario,items,p50_ms,p95_ms,max_retained
+navigator,100,0.083,0.096,11
+navigator,1000,0.092,0.098,11
+navigator,10000,0.091,0.120,11
+editor,2000,0.046,0.134,28

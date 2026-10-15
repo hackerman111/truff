@@ -58,6 +58,7 @@ pub struct RowModel {
     items: Vec<RowItem>,
     visible_indices: Vec<usize>,
     selected_visible_idx: usize,
+    selection_anchor: Option<usize>,
     filter: String,
 }
 
@@ -70,6 +71,7 @@ impl RowModel {
     pub fn set_items(&mut self, items: Vec<RowItem>) {
         self.items = items;
         self.selected_visible_idx = 0;
+        self.selection_anchor = None;
         self.recompute_visibility();
     }
 
@@ -78,6 +80,7 @@ impl RowModel {
         self.filter.clear();
         self.filter.push_str(query);
         self.selected_visible_idx = 0;
+        self.selection_anchor = None;
         self.recompute_visibility();
     }
     pub fn filter(&self) -> &str {
@@ -105,6 +108,31 @@ impl RowModel {
     /// Returns references to all underlying items (both visible and collapsed).
     pub fn all_items(&self) -> &[RowItem] {
         &self.items
+    }
+
+    /// Starts visual range selection at the current visible index.
+    pub fn start_visual_selection(&mut self) {
+        self.selection_anchor = Some(self.selected_visible_idx);
+    }
+
+    /// Clears any active visual selection range.
+    pub fn clear_visual_selection(&mut self) {
+        self.selection_anchor = None;
+    }
+
+    /// Returns the inclusive range of visible indices currently selected.
+    pub fn selected_range(&self) -> std::ops::RangeInclusive<usize> {
+        let anchor = self.selection_anchor.unwrap_or(self.selected_visible_idx);
+        anchor.min(self.selected_visible_idx)..=anchor.max(self.selected_visible_idx)
+    }
+
+    /// Returns references to all rows in the active selection range.
+    pub fn selected_rows(&self) -> Vec<&RowItem> {
+        if self.visible_indices.is_empty() {
+            return Vec::new();
+        }
+        let range = self.selected_range();
+        range.filter_map(|idx| self.get_visible_row(idx)).collect()
     }
 
     /// Selects a row by RowId among currently visible rows.

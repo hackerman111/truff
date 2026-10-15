@@ -1,13 +1,19 @@
 //! Application orchestration: one Shell/Workspace, storage jobs, and retained widgets.
 mod commands;
+pub(crate) use commands::command_parts;
+mod completion;
+mod document;
 pub mod global_config;
 mod io;
-mod navigation;
+pub(crate) mod navigation;
 pub mod path_completion;
 mod registered;
 mod retention;
+mod selection;
 mod session;
+pub(crate) use selection::SelectionTarget;
 mod vault;
+mod views;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -29,9 +35,13 @@ pub struct Application {
     pub shell: Shell,
     pub status: String,
     pub backlinks: Vec<BacklinkOccurrence>,
-    pub backlink_selection: usize,
     pub quit_requested: bool,
     pub settings_requested: bool,
+    pub focus_mode: bool,
+    pub toc_requested: Option<String>,
+    pub wiki_requested: Option<String>,
+    pub stream_requested: Option<String>,
+    pub link_completion: crate::overlays::LinkCompletionOverlay,
     store: Option<Store>,
     catalog: Option<CatalogWorker>,
     paths: Option<VaultPaths>,
@@ -49,9 +59,14 @@ pub struct Application {
     pending_recovery: HashSet<truff_core::workspace::SnapshotKey>,
     closed_buffers: HashMap<BufferId, Option<truff_core::workspace::SnapshotKey>>,
     recovery_deadline: Option<Instant>,
-    projection: crate::editor::ProjectionMode,
+    view_projections: HashMap<ViewId, crate::editor::ProjectionMode>,
     storage_waker: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
     watched_generation: Option<u64>,
+    view_history: views::ViewHistory,
+    catalog_revision: u64,
+    recent_vault_paths: Vec<PathBuf>,
+    document_facts: Option<document::DocumentFacts>,
+    recent_notes: VecDeque<String>,
 }
 
 impl Default for Application {
@@ -70,9 +85,13 @@ impl Application {
             shell,
             status: "Open a vault with :vault <path>".into(),
             backlinks: Vec::new(),
-            backlink_selection: 0,
             quit_requested: false,
             settings_requested: false,
+            focus_mode: false,
+            toc_requested: None,
+            wiki_requested: None,
+            stream_requested: None,
+            link_completion: crate::overlays::LinkCompletionOverlay::default(),
             store: None,
             catalog: None,
             paths: None,
@@ -90,9 +109,14 @@ impl Application {
             pending_recovery: HashSet::new(),
             closed_buffers: HashMap::new(),
             recovery_deadline: None,
-            projection: crate::editor::ProjectionMode::LivePreview,
+            view_projections: HashMap::new(),
             storage_waker: None,
             watched_generation: None,
+            view_history: views::ViewHistory::default(),
+            catalog_revision: 0,
+            recent_vault_paths: config.recent_vaults.clone(),
+            document_facts: None,
+            recent_notes: VecDeque::new(),
         }
     }
 
@@ -100,8 +124,53 @@ impl Application {
         self.paths.as_ref().map(VaultPaths::root)
     }
     pub fn projection(&self) -> crate::editor::ProjectionMode {
-        self.projection
+        self.shell
+            .workspace()
+            .active_view()
+            .and_then(|id| self.view_projections.get(&id).copied())
+            .unwrap_or(crate::editor::ProjectionMode::LivePreview)
     }
+    pub(super) fn set_projection(&mut self, mode: crate::editor::ProjectionMode) {
+        self.view_projections
+            .retain(|id, _| self.shell.workspace().get_view(*id).is_some());
+        if let Some(id) = self.shell.workspace().active_view() {
+            self.view_projections.insert(id, mode);
+        }
+    }
+    pub(crate) fn recent_notes(&self) -> impl Iterator<Item = &str> {
+        self.recent_notes.iter().map(String::as_str)
+    }
+
+    pub(crate) fn record_recent_note(&mut self) {
+        let Some(path) = self.active_relative_path() else {
+            return;
+        };
+        if self.recent_notes.front() == Some(&path) {
+            return;
+        }
+        self.recent_notes.retain(|existing| existing != &path);
+        self.recent_notes.push_front(path);
+        self.recent_notes.truncate(128);
+    }
+
+    pub(crate) fn focus_view(&mut self, id: ViewId) -> AppResult<()> {
+        self.dispatch(Action::FocusView(id))?;
+        self.shell.reset_editor_input();
+        self.record_recent_note();
+        Ok(())
+    }
+
+    pub(crate) fn catalog_revision(&self) -> u64 {
+        self.catalog_revision
+    }
+
+    pub(crate) fn search_index_path(&self) -> Option<PathBuf> {
+        if self.catalog_indexing {
+            return None;
+        }
+        Some(self.paths.as_ref()?.truff_dir().join("index.db"))
+    }
+
     pub fn needs_poll(&self) -> bool {
         self.catalog_indexing
             || self.pending_catalog > 0

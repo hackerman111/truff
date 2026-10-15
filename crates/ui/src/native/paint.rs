@@ -1,6 +1,5 @@
-use super::editor::color;
 use crate::app::global_config::TypographyConfig;
-use crate::editor::{Affinity, DisplayMap};
+use crate::editor::{Affinity, DisplayMap, InlineStyle};
 use eframe::egui::{self, Color32, FontId, Galley, Painter};
 use std::sync::Arc;
 use truff_core::text::BytePos;
@@ -21,6 +20,9 @@ pub fn resolve_font_and_line_height(source: &str, typography: &TypographyConfig)
         (FontId::new(size, family), (size * 1.35).round())
     } else if source_trim.starts_with("### ") || source_trim.starts_with("#### ") {
         let size = (base * 1.15).round();
+        (FontId::new(size, family), (size * 1.4).round())
+    } else if source_trim.starts_with("##### ") || source_trim.starts_with("###### ") {
+        let size = base;
         (FontId::new(size, family), (size * 1.4).round())
     } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
         let size = base;
@@ -56,52 +58,94 @@ pub(super) fn shape(
             .x
     });
 
-    let mut job =
-        egui::text::LayoutJob::simple(display.visual_text().to_owned(), font, foreground, width);
+    let mut job = egui::text::LayoutJob::simple(
+        display.visual_text().to_owned(),
+        font.clone(),
+        foreground,
+        width,
+    );
     job.sections[0].format.line_height = Some(line_height);
     let base = job.sections[0].format.clone();
-    let mut ranges = display
-        .color_spans()
-        .iter()
-        .filter_map(|span| {
-            let start = display
-                .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
-                .get();
-            let end = display
-                .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
-                .get();
-            (start < end).then_some((start..end, span.rgba))
-        })
-        .collect::<Vec<_>>();
-    ranges.sort_by_key(|(range, _)| range.start);
+
+    let visual_len = display.visual_text().len();
+    let mut mapped_styles: Vec<(std::ops::Range<usize>, &InlineStyle)> = Vec::new();
+    for span in display.styled_spans() {
+        let start = display
+            .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
+            .get();
+        let end = display
+            .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
+            .get();
+        if start < end && end <= visual_len {
+            mapped_styles.push((start..end, &span.style));
+        }
+    }
+
+    let mut boundaries = vec![0, visual_len];
+    for (range, _) in &mapped_styles {
+        boundaries.push(range.start);
+        boundaries.push(range.end);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
     job.sections.clear();
-    let mut offset = 0;
-    for (range, [r, g, b, a]) in ranges {
-        let start = range.start.max(offset);
-        let end = range.end.min(job.text.len());
+    for window in boundaries.windows(2) {
+        let start = window[0];
+        let end = window[1];
         if start >= end {
             continue;
         }
-        if offset < start {
-            job.sections.push(egui::text::LayoutSection {
-                leading_space: 0.0,
-                byte_range: offset.into()..start.into(),
-                format: base.clone(),
-            });
-        }
         let mut format = base.clone();
-        format.color = Color32::from_rgba_unmultiplied(r, g, b, a);
+        for (range, style) in &mapped_styles {
+            if range.start <= start && range.end >= end {
+                match style {
+                    InlineStyle::Bold => {
+                        format.color = Color32::from_rgba_unmultiplied(
+                            (format.color.r() as u16 + 50).min(255) as u8,
+                            (format.color.g() as u16 + 50).min(255) as u8,
+                            (format.color.b() as u16 + 50).min(255) as u8,
+                            format.color.a(),
+                        );
+                    }
+                    InlineStyle::Italic => {
+                        format.italics = true;
+                    }
+                    InlineStyle::Strikethrough => {
+                        format.strikethrough = egui::Stroke::new(1.0, format.color);
+                    }
+                    InlineStyle::Code => {
+                        format.font_id =
+                            FontId::new((font.size * 0.95).max(9.0), egui::FontFamily::Monospace);
+                        format.background = Color32::from_rgba_unmultiplied(128, 128, 128, 45);
+                    }
+                    InlineStyle::Link => {
+                        format.color = Color32::from_rgb(136, 192, 208);
+                        format.underline = egui::Stroke::new(
+                            1.0,
+                            Color32::from_rgba_unmultiplied(136, 192, 208, 180),
+                        );
+                    }
+                    InlineStyle::TextColor([r, g, b, a]) => {
+                        format.color = Color32::from_rgba_unmultiplied(*r, *g, *b, *a);
+                    }
+                    InlineStyle::Highlight([r, g, b, a]) => {
+                        let alpha = (*a as u16 * 75 / 255) as u8;
+                        format.background = Color32::from_rgba_unmultiplied(*r, *g, *b, alpha);
+                    }
+                }
+            }
+        }
         job.sections.push(egui::text::LayoutSection {
             leading_space: 0.0,
             byte_range: start.into()..end.into(),
             format,
         });
-        offset = end;
     }
-    if offset < job.text.len() || job.sections.is_empty() {
+    if job.sections.is_empty() {
         job.sections.push(egui::text::LayoutSection {
             leading_space: 0.0,
-            byte_range: offset.into()..job.text.len().into(),
+            byte_range: 0.into()..0.into(),
             format: base,
         });
     }
@@ -109,26 +153,4 @@ pub(super) fn shape(
     job.sections[0].leading_space = -indent;
     job.wrap.max_width = (width - indent).max(1.0);
     (painter.layout_job(job), indent)
-}
-
-pub(super) fn apply_theme(ui: &mut egui::Ui, theme: &crate::theme::Theme) {
-    let mut visuals = ui.visuals().clone();
-    visuals.override_text_color = Some(color(theme.text_primary));
-    visuals.panel_fill = color(theme.bg_primary);
-    visuals.window_fill = color(theme.bg_surface);
-    visuals.widgets.noninteractive.bg_fill = color(theme.bg_primary);
-    visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, color(theme.border));
-    visuals.widgets.inactive.bg_fill = color(theme.bg_secondary);
-    visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
-    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(4);
-    visuals.widgets.hovered.bg_fill = color(theme.selection);
-    visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
-    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(4);
-    visuals.widgets.active.bg_fill = color(theme.selection);
-    visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, color(theme.text_primary));
-    visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
-    visuals.selection.bg_fill = color(theme.selection);
-    visuals.selection.stroke = egui::Stroke::new(1.0, color(theme.accent));
-    ui.ctx().set_visuals(visuals.clone());
-    *ui.visuals_mut() = visuals;
 }

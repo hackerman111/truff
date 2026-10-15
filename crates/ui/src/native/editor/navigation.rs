@@ -4,6 +4,46 @@ use eframe::egui;
 use truff_core::{Buffer, text::BytePos, workspace::View};
 
 impl EditorWidget {
+    pub(in crate::native) fn page_target(
+        &self,
+        buffer: &Buffer,
+        view: &View,
+        down: bool,
+        half: bool,
+    ) -> usize {
+        let line = buffer.line_of_byte(view.head().get());
+        let local = self.cache.get(&line).map_or(0.0, |entry| {
+            entry
+                .char_rect_at(egui::Pos2::ZERO, view.head().get())
+                .center()
+                .y
+        });
+        let height = self.last_viewport.map_or(LINE_HEIGHT, |rect| rect.height());
+        let distance = if half { height / 2.0 } else { height };
+        let y = self.heights.y_for_block(line) + local + if down { distance } else { -distance };
+        let (target_line, local) = self.heights.block_at_y(y.max(0.0));
+        let Some(entry) = self.cache.get(&target_line) else {
+            return if target_line >= buffer.line_len() {
+                buffer.byte_len()
+            } else {
+                buffer.byte_of_line(target_line)
+            };
+        };
+        let index = entry.galley.cursor_from_pos(egui::vec2(0.0, local)).index.0;
+        let visual = entry
+            .display
+            .visual_text()
+            .char_indices()
+            .nth(index)
+            .map_or(entry.display.visual_text().len(), |(byte, _)| byte);
+        entry.range.start
+            + entry
+                .display
+                .visual_to_source(VisualPos::new(visual))
+                .pos
+                .get()
+    }
+
     pub fn visual_target(
         &self,
         buffer: &Buffer,

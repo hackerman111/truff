@@ -1,0 +1,652 @@
+
+running 4 tests
+test text::buffer::line_ending::tests::detection_keeps_crlf_for_mixed_newlines ... ok
+test text::buffer::line_ending::tests::normalization_borrows_when_no_bare_lf_exists ... ok
+test text::buffer::line_ending::tests::normalization_inserts_cr_only_before_bare_lf ... ok
+test workspace::changes::tests::merged_edits_preserve_unchanged_prefix_suffix_and_length_delta ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 2 tests
+test queued_watcher_does_not_reload_an_unloaded_buffer ... ok
+test unload_preserves_identity_and_rejects_old_replies_after_reopen ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+
+running 4 tests
+test unicode_load_snaps_every_attached_view_to_buffer_graphemes ... ok
+test keymap_validation_rejects_invalid_commands_and_sequences ... ok
+test keymap_prefixes_and_duplicates_are_scoped_to_the_mode ... ok
+test keymap_prefix_conflicts_are_reported_in_either_input_order ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+test ambiguous_adjacent_color_spans_do_not_expand_removal_range ... ok
+test malformed_short_color_tag_does_not_panic_during_removal ... ok
+test crlf_normalization_counts_added_bytes_against_limit ... ok
+test crlf_edits_preserve_normalized_text_and_undo ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 4 tests
+test vertical_motion_preserves_grapheme_column_across_utf8_and_crlf ... ok
+test search_matches_across_rope_chunks_and_large_counts ... ok
+test incremental_parse_preserves_old_coordinates_when_lines_are_deleted ... ok
+test literal_search_matches_reference_with_overlap_wrap_and_unicode ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+
+running 8 tests
+test styles_allow_fence_body_and_ignore_false_closers ... ok
+test registers_share_named_and_unnamed_then_preserve_append_semantics ... ok
+test replacement_aliases_follow_reopens_and_expire_at_epoch_change ... ok
+test counted_delimited_objects_expand_both_boundaries ... ok
+test indexed_mapping_matches_linear_mapping_at_adjacent_boundaries ... ok
+test indexed_batches_map_grouped_undo_and_redo_in_sequence ... ok
+test streaming_graphemes_match_individual_steps_across_rope_leaves ... ok
+test grapheme_stream_matches_unicode_segmentation_from_inside_clusters ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+
+running 8 tests
+test test_workspace_activate_row_effect ... ok
+test test_row_model_visual_selection_and_actions ... ok
+test test_collect_flash_targets ... ok
+test test_unicode_visual_char_and_line_ranges ... ok
+test test_link_selection_and_refactor_plan ... ok
+test test_markdown_snapshot_facts_and_queries ... ok
+test test_markdown_smart_edit_and_undo ... ok
+test test_input_semantics_and_key_disposition ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 1 test
+test horizontal_motions_preserve_line_and_grapheme_bounds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test ordinary_and_empty_inserts_keep_their_text_roundtrip ... ok
+test oversized_insert_text_capacity_is_compacted_without_changing_undo_redo ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 2 tests
+test duplicate_next_keys_keep_first_binding_and_sort_by_key ... ok
+test hints_match_btree_reference_for_modes_contexts_and_prefixes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 5 tests
+test block_id_and_headings_extraction ... ok
+test escaped_wiki ... ok
+test duplicate_occurrences ... ok
+test no_links_in_code ... ok
+test incremental_equals_fresh ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test presentation_uses_real_list_depth_and_excludes_fenced_code ... ok
+test incremental_block_context_matches_fresh_parse_after_fence_edits ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 4 tests
+test linewise_size_limit_counts_prefix_suffix_and_separators ... ok
+test linewise_repeat_count_includes_interline_separators ... ok
+test count_one_matches_unprefixed_paste ... ok
+test linewise_paste_before_and_after_final_line_preserves_newline_shape ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 2 tests
+test every_registered_id_is_retrievable_and_unknown_id_is_preserved ... ok
+test cached_search_matches_uncached_scoring_and_order ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test insert_mode_delete_is_saved_for_dot_after_it_leaves_insert ... ok
+test committed_insert_survives_escape_and_repeats_with_dot ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test queued_save_keeps_its_revision_when_the_buffer_is_edited_again ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 4 tests
+test color_fenced_code_protected ... ok
+test color_replaces_wrapper ... ok
+test remove_style_clean ... ok
+test color_undo_exact ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 22 tests
+test anchor_at_shared_edit_boundary_has_right_affinity ... ok
+test buffer_floor_char_boundary_and_line_of_byte_multibyte ... ok
+test grapheme_navigation ... ok
+test evicted_savepoint_does_not_match_an_unrelated_empty_stack ... ok
+test later_edit_anchor_includes_preceding_deltas ... ok
+test grouped_changes_expose_each_coordinate_space_in_execution_order ... ok
+test edit_unicode_atomic ... ok
+test grouped_redo_failure_preserves_text_revision_and_history ... ok
+test grouped_undo_failure_preserves_text_revision_history_and_savepoint ... ok
+test adjacent_deletions_can_be_undone_atomically ... ok
+test grouped_dependent_edits_roundtrip_and_rebase ... ok
+test edit_size_limit ... ok
+test lowering_history_limit_evicts_redo_and_does_not_alias_savepoint ... ok
+test registers_and_crlf ... ok
+test oversized_history_group_is_dropped_in_full ... ok
+test savepoint_splits_an_active_undo_group ... ok
+test undo_group_roundtrip ... ok
+test history_bounded_memory ... ok
+test growing_group_stays_bounded ... ok
+test rope_graphemes_handle_large_clusters_and_invalid_byte_positions ... ok
+test rope_graphemes_match_unicode_reference_across_fragmented_chunks ... ok
+test rope_snapping_matches_nearest_unicode_boundary_at_every_byte ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+
+running 9 tests
+test colon_commands_protect_dirty_buffers ... ok
+test test_visual_line_yank_multibyte_without_trailing_newline ... ok
+test test_visual_line_indent_multibyte_without_trailing_newline ... ok
+test emoji_delete ... ok
+test visual_mode_delete_selection_with_lowercase_x ... ok
+test visual_mode_delete_lines_with_uppercase_x ... ok
+test table_driven_edits ... ok
+test keymap_hints_match ... ok
+test macro_bounded ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 16 tests
+test literal_unicode_search_wraps_and_remembers_direction ... ok
+test search_wrap_keeps_matches_overlapping_the_cursor ... ok
+test count_overflow_is_explicit_and_parser_recovers ... ok
+test nested_brackets_and_syntax_objects_use_source_ranges ... ok
+test linewise_paste_separates_unterminated_lines ... ok
+test failed_find_never_deletes_and_vertical_operators_are_linewise ... ok
+test insert_and_change_are_single_undo_groups ... ok
+test indent_and_dedent_cover_all_selected_lines ... ok
+test dot_keeps_count_and_find_target ... ok
+test append_at_eof_and_open_crlf ... ok
+test visual_row_hook_preserves_visual_anchor ... ok
+test test_command_registry_human_readable_and_search ... ok
+test visual_operators_are_inclusive_and_undoable ... ok
+test canonical_commit_is_one_event_and_repeats_in_dot_and_macros ... ok
+test compiled_keymap_validates_registry_and_contextual_hints ... ok
+test macro_limits_count_commands_and_reset_each_run ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+
+running 9 tests
+test old_vault_reply ... ok
+test stale_result_after_reopen ... ok
+test open_path_registers_the_buffer_before_load_reply ... ok
+test close_view_keeps_dirty ... ok
+test two_views_one_buffer ... ok
+test reload_keeps_revision_monotonic_and_rejects_dirty_overwrite ... ok
+test watcher_conflict_retains_base_and_rejects_old_epoch_and_path ... ok
+test late_save_ack_keeps_dirty ... ok
+test approved_reload_discards_only_the_revision_user_approved ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 5 tests
+test operations::commit::tests::replacements_use_original_byte_ranges_and_validate_unicode_and_overlap ... ok
+test worker::watch::tests::reconciliation_still_rejects_a_watched_path_replaced_with_a_symlink ... ok
+test worker::watch::tests::identical_refresh_skips_full_scan_but_preserves_pending_external_changes ... ok
+test worker::tests::recovery_faults_never_ack_and_preserve_the_previous_copy ... ok
+test worker::tests::failed_write_stages_never_ack_or_remove_recovery ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test dirty_backlinks_query_does_not_hide_disk_links_from_later_rename ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 1 test
+test restart_skips_unchanged_notes_preserves_ids_and_resolves_forward_anchors ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 1 test
+test rename_and_trash_subtree_update_files_and_index_without_affecting_stable_id ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 14 tests
+test fingerprint_is_sha256 ... ok
+test atomic_save_preserves_permissions ... ok
+test protected_paths_and_symlink_parents_are_rejected ... ok
+test recovery_budget_failure_keeps_the_only_valid_copy_and_bounds_malformed_reads ... ok
+test recovery_last_ack ... ok
+test new_file_save_never_replaces_an_existing_destination ... ok
+test shutdown_preserves_accepted_save ... ok
+test concurrent_lock_acquisition_has_exactly_one_owner ... ok
+test durable_queue_full ... ok
+test recovery_retains_only_two_valid_snapshots ... ok
+test deleted_base_file_is_never_silently_recreated ... ok
+test failed_save_keeps_dirty ... ok
+test dirty_external_conflict ... ok
+test unread_outcomes_apply_backpressure_and_shutdown_does_not_deadlock ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+
+running 5 tests
+test stale_search_query ... ok
+test heading_block_target ... ok
+test repeated_link_occurrences ... ok
+test resolver_ambiguous ... ok
+test dirty_facts_replace_disk ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+
+running 2 tests
+test fts_pages_keep_count_past_end_and_do_not_leak_removed_or_replaced_rows ... ok
+test legacy_index_migrates_fts_rowids_and_filename_keys_without_losing_content ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 4 tests
+test link_selection_one_transaction ... ok
+test operation_recovery ... ok
+test dirty_affected_file_blocked ... ok
+test rename_respects_occurrences ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 1 test
+test indexed_rewrites_and_stale_source_fallback_preserve_occurrences_and_self_links ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 3 tests
+test vault_root_replaced_by_symlink_is_rejected ... ok
+test canonical_vault_boundary_accepts_alias_above_root ... ok
+test replaced_internal_directory_is_checked_after_parent_cache_is_warm ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test basename_lookup_matches_previous_path_fallback ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 3 tests
+test closed_view_dirty_buffer ... ok
+test missing_file_session ... ok
+test restore_active_first ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 11 tests
+test editor::layout::tests::test_snap_to_grapheme_boundary_cyrillic ... ok
+test native::creation::vault::tests::completion_cache_expires_on_path_change_or_after_half_second ... ok
+test navigator::actions::tests::static_action_keys_keep_mode_order_and_file_actions_resolve_on_demand ... ok
+test editor::layout::tests::test_snap_to_grapheme_boundary_emoji ... ok
+test rows::scroll::tests::thousand_rows_twelve_visible_follow_then_preserve_manual_scroll ... ok
+test app::io::store_events::tests::save_ack_does_not_release_a_pending_recovery_key ... ok
+test app::session::tests::recovery_cleanup_waits_for_an_inflight_checkpoint_at_the_same_revision ... ok
+test native::outline::tests::rope_outline_matches_string_lines ... ok
+test components::tests::tab_focus_in_fixed_footer_does_not_scroll_the_body ... ok
+test native::editor::invalidation::tests::an_unannounced_edit_followed_by_a_published_edit_rebuilds_stale_rows ... ok
+test native::editor::invalidation::tests::sequential_edits_newlines_undo_and_unannounced_replacement_keep_cached_sources_exact ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+test restored_snapshots_use_ids_outside_the_historical_namespace ... ok
+test actual_watcher_reloads_clean_conflicts_dirty_and_suppresses_own_saves ... ok
+test rename_reloads_more_resident_backlinks_than_the_storage_queue_holds ... ok
+test clean_buffer_command_edits_schedule_and_write_idle_recovery ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.54s
+
+
+running 4 tests
+test failed_recovery_cleanup_keeps_the_resident_copy ... ok
+test closed_clean_text_is_released_and_reopened_from_disk_with_same_identity ... ok
+test pending_save_and_recovery_finish_before_closed_buffer_is_released ... ok
+test dirty_closed_buffer_stays_resident_and_recoverable ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+
+running 13 tests
+test cursor_and_selection_update_reveals_and_hides_both_spans ... ok
+test hidden_marker_edit ... ok
+test flash_visible_only ... ok
+test list_projection_does_not_interpret_code_or_star_bullets_as_emphasis ... ok
+test stable_scroll_anchor ... ok
+test standard_inline_markers_and_wiki_links_still_project ... ok
+test test_editor_readable_column_and_margin ... ok
+test test_typography_hierarchy_scale ... ok
+test source_visual_affinity ... ok
+test unchanged_projection_borrows_source_storage ... ok
+test list_projection_keeps_unicode_text_and_maps_rendered_markers_to_source ... ok
+test live_preview_projects_color_wrappers_and_keeps_code_literal ... ok
+test cursor_does_not_reparse ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 1 test
+test test_end_to_end_keyboard_workflow ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 7 tests
+test test_four_tier_palette_tokens ... ok
+test test_semantic_design_tokens ... ok
+test ime_preedit_cancel ... ok
+test ime_commit_single ... ok
+test theme_no_parse ... ok
+test task_toggle_preserves_selection_and_can_be_undone ... ok
+test app_theme_command_and_persistence ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 11 tests
+test test_default_config_is_empty ... ok
+test test_record_vault_deduplicates_and_orders ... ok
+test test_remove_recent_vault ... ok
+test test_prune_nonexistent_removes_dead_vaults ... ok
+test test_theme_config_defaults_to_nord_and_deserializes_custom ... ok
+test typography_config_defaults_and_parsing ... ok
+test test_roundtrip_toml ... ok
+test execute_settings_command ... ok
+test test_settings_and_config_commands ... ok
+test test_app_auto_opens_saved_vault ... ok
+test test_create_and_open_vault ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 12 tests
+test test_tab_bar_renders_open_buffers_and_switches_active ... ok
+test test_sidebar_header_ghost_actions ... ok
+test test_tab_vector_close_and_dirty_dot ... ok
+test window_editor_runs_vim_instead_of_inserting_normal_keys ... ok
+test test_tab_close_button_hover ... ok
+test retained_paragraphs_are_bounded_and_scroll_reuses_layout ... ok
+test test_create_note_and_folder_dialogs ... ok
+test composition_and_paste_edit_the_workspace_once ... ok
+test test_gui_welcome_screen_and_vault_creation_modal ... ok
+test test_styled_vault_and_note_dialogs ... ok
+test window_keyboard_workflow_saves_renames_and_restores_real_files ... ok
+test closing_window_recovers_dirty_text_and_save_clears_recovery ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+
+running 20 tests
+test editor_font_sizes_share_four_levels_and_keep_configured_base ... ok
+test test_configure_fonts ... ok
+test test_settings_dialog_default_and_init ... ok
+test test_procedural_vector_icons_and_dirty_dot ... ok
+test test_gear_icon ... ok
+test test_zed_component_widgets ... ok
+test test_native_app_typography_change_handled_in_show ... ok
+test printable_os_key_and_text_are_dispatched_once ... ok
+test sidebar_frame_response_toggles_folders_and_opens_files ... ok
+test editing_a_fence_updates_cached_list_context_on_other_lines ... ok
+test native_lists_keep_depth_code_context_and_toggle_tasks_with_undo ... ok
+test test_visual_mode_character_and_line_highlighting_dimensions ... ok
+test test_dialog_open_suppresses_flash_shortcut ... ok
+test ime_is_transient_and_commit_uses_one_transaction ... ok
+test newline_edits_reuse_unchanged_paragraphs_and_theme_persists_between_frames ... ok
+test wrapped_list_rows_align_with_the_item_text ... ok
+test test_settings_dialog_ui_render_and_open_state ... ok
+test test_settings_command_opens_dialog_in_native_app ... ok
+test viewport_cache_is_bounded_reuses_shapes_and_handles_multi_megabyte_line ... ok
+test viewport_cache_stays_near_one_screen_while_moving ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+
+running 15 tests
+test requesting_write_does_not_mark_unsaved_text_clean ... ok
+test row_motion_shared ... ok
+test cannot_focus_nonexistent_sidebar_and_can_write ... ok
+test sidebar_moves_path_storage_into_rows ... ok
+test ctrl_w_w_cycles_between_available_panes ... ok
+test sidebar_tree_normalizes_trailing_separators_for_ordering ... ok
+test cannot_focus_nonexistent_right_panel_and_can_write ... ok
+test sidebar_tree_orders_folders_before_files_at_each_depth ... ok
+test pressing_insert_or_esc_in_panel_restores_editor_focus ... ok
+test focus_routes_once ... ok
+test test_focus_manager_stack_and_deterministic_pop ... ok
+test test_sidebar_hierarchical_folders_and_auto_expansion ... ok
+test viewport_bounded ... ok
+test empty_backlinks_reports_message_and_restores_editor ... ok
+test test_active_vs_selected_file_state ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 9 tests
+test file_labels_borrow_path_and_preserve_explicit_names ... ok
+test test_navigator_initial_state_and_mode_setup ... ok
+test test_navigator_fuzzy_search_and_score ... ok
+test test_navigator_sessions_and_commands_mode ... ok
+test test_navigator_vim_motion_navigation ... ok
+test test_navigator_mode_transitions_and_search_mode ... ok
+test test_navigator_quick_actions_and_context_menu ... ok
+test test_navigator_normal_mode_shortcuts_and_native_app_integration ... ok
+test closing_navigator_releases_items_and_search_buffers ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+test borrowed_lowercase_filter_matches_previous_algorithm ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+test test_expand_path_dot_dot_slash ... ok
+test test_expand_path_dot_slash ... ok
+test test_expand_path_tilde ... ok
+test test_complete_directories_in_temp ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test test_probe_1mib_performance_baseline ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+
+running 1 test
+test report_contains_only_supplied_measurements_without_release_claims ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 8 tests
+test each_view_keeps_its_own_projection ... ok
+test opening_vault_keeps_the_active_theme_and_typography ... ok
+test both_docks_leave_a_usable_editor_in_a_small_comfortable_window ... ok
+test focus_command_hides_docks_and_focus_cannot_move_into_a_hidden_pane ... ok
+test native_persists_egui_panel_sizes ... ok
+test comfortable_settings_actions_are_reachable_by_keyboard_in_a_small_window ... ok
+test navigator_uses_available_space_and_keeps_last_row_visible_at_each_density_and_dpi ... ok
+test light_theme_reaches_native_widgets_and_creation_dialogs_fit_the_viewport ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
+
+
+running 14 tests
+test first_edit_preserves_the_top_gutter ... ok
+test backlinks_use_row_motions_and_paint_the_offscreen_target ... ok
+test modal_folder_field_keeps_literal_text_and_normal_editor_still_starts_flash ... ok
+test editing_above_an_inactive_view_rebases_its_scroll_anchor ... ok
+test help_owns_flash_key_and_editor_scroll ... ok
+test editor_caret_at_end_of_tall_wrapped_paragraph_is_visible ... ok
+test dragging_editor_selection_at_bottom_scrolls_and_preserves_source_anchor ... ok
+test navigator_count_page_filter_resize_and_preview_keep_the_selected_row_visible ... ok
+test navigator_offscreen_selection_is_actually_painted ... ok
+test navigator_wheel_stays_manual_until_the_next_keyboard_motion ... ok
+test help_eighty_items_keyboard_filter_and_escape_restore_the_previous_pane ... ok
+test opening_help_mid_batch_owns_paste_and_cut ... ok
+test editor_pages_visual_motion_resize_and_two_views_keep_source_and_scroll ... ok
+test file_and_vault_fields_own_literal_text ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+
+running 2 tests
+test test_settings_dialog_default ... ok
+test test_settings_dialog_init_from_app_and_config ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 8 tests
+test inactive_views_and_jump_history_rebase_for_edits_and_undo ... ok
+test flash_pending_operator_uses_source_target_once ... ok
+test shared_panel_counts_and_literal_filter ... ok
+test mixed_insert_commits_and_preedit_share_one_undo_group ... ok
+test remapped_binding_retains_count_and_registry_context ... ok
+test ime_surrounding_deletion_counts_scalars_and_undoes_with_insert ... ok
+test flash_modes_select_canonical_objects_and_cancel_operator ... ok
+test flash_uses_disjoint_windows_without_copying_source_envelope ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 5 tests
+test test_question_mark_in_insert_mode_inserts_char ... ok
+test test_which_key_modes_and_help_categories ... ok
+test test_question_mark_in_normal_mode_opens_help ... ok
+test test_help_command_opens_which_key_help ... ok
+test test_gui_renders_which_key_overlay ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+
+running 1 test
+test crates/core/src/text/edit.rs - text::edit::ChangeSet (line 150) - compile fail ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling truff-ui v0.1.0 (/home/papayka/Rust_project/Truff_v2/crates/ui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.08s
+     Running unittests src/lib.rs (target/debug/deps/truff_core-ce0544dc93013ae9)
+     Running tests/buffer_unload.rs (target/debug/deps/buffer_unload-6e29ddabc645e5b6)
+     Running tests/core_easy_perf.rs (target/debug/deps/core_easy_perf-78529b3580461b3d)
+     Running tests/core_local_allocations.rs (target/debug/deps/core_local_allocations-477becf3a0d66010)
+     Running tests/core_optimizations.rs (target/debug/deps/core_optimizations-f929d3b203e8f710)
+     Running tests/core_state_optimizations.rs (target/debug/deps/core_state_optimizations-db268a18feb98339)
+     Running tests/core_upd_features.rs (target/debug/deps/core_upd_features-ba0e34ee21bc0ae9)
+     Running tests/cursor_bounds.rs (target/debug/deps/cursor_bounds-5e6e100109335509)
+     Running tests/history_capacity.rs (target/debug/deps/history_capacity-e4046d8bd18394dc)
+     Running tests/key_hints.rs (target/debug/deps/key_hints-e929b5b2a21824c5)
+     Running tests/markdown.rs (target/debug/deps/markdown-cc628616d7f8b142)
+     Running tests/markdown_presentation.rs (target/debug/deps/markdown_presentation-5263c191b7c992ac)
+     Running tests/paste_capacity.rs (target/debug/deps/paste_capacity-534e0213df900d04)
+     Running tests/registry_cache.rs (target/debug/deps/registry_cache-9f541dfda6bb7601)
+     Running tests/repeat_recording.rs (target/debug/deps/repeat_recording-c9dd6693f27dd541)
+     Running tests/save_snapshot.rs (target/debug/deps/save_snapshot-43aed95da21d9714)
+     Running tests/style.rs (target/debug/deps/style-a5f44eeb1bcaad63)
+     Running tests/text.rs (target/debug/deps/text-013e86a540717056)
+     Running tests/vim.rs (target/debug/deps/vim-90fa9bd93b3b676f)
+     Running tests/vim_routing.rs (target/debug/deps/vim_routing-d29aaa61ea1fbdd2)
+     Running tests/workspace.rs (target/debug/deps/workspace-a6247526ce7966fa)
+     Running unittests src/lib.rs (target/debug/deps/truff_store-716734484dbeff34)
+     Running tests/catalog.rs (target/debug/deps/catalog-76a898b668be4951)
+     Running tests/catalog_incremental.rs (target/debug/deps/catalog_incremental-1cb74b1c92129b97)
+     Running tests/catalog_subtree.rs (target/debug/deps/catalog_subtree-7117d3392e5e3632)
+     Running tests/files.rs (target/debug/deps/files-bf3f6bef2fa58681)
+     Running tests/index.rs (target/debug/deps/index-feb87e1d73de197f)
+     Running tests/index_optimizations.rs (target/debug/deps/index_optimizations-8b32858c1845cead)
+     Running tests/operations.rs (target/debug/deps/operations-c632da080410d6bb)
+     Running tests/operations_cached.rs (target/debug/deps/operations_cached-11c5a9c89243749d)
+     Running tests/recovery_directory.rs (target/debug/deps/recovery_directory-c4b57c72c7a60fee)
+     Running tests/resolver_filename_keys.rs (target/debug/deps/resolver_filename_keys-6ab08167916d0df5)
+     Running tests/session.rs (target/debug/deps/session-f34a1439f0bcea8b)
+     Running unittests src/lib.rs (target/debug/deps/truff_ui-d40596e4dd2016fd)
+     Running unittests src/main.rs (target/debug/deps/truff-b94de62c0e4353e4)
+     Running tests/app_storage.rs (target/debug/deps/app_storage-b9b07bc44899bb81)
+     Running tests/buffer_retention.rs (target/debug/deps/buffer_retention-b618e4b6083776b7)
+     Running tests/display.rs (target/debug/deps/display-e1588a98bc0b8e14)
+     Running tests/e2e_workflow.rs (target/debug/deps/e2e_workflow-92c4dcc4ca0b4742)
+     Running tests/editor_input.rs (target/debug/deps/editor_input-14eddea41a2b45bb)
+     Running tests/global_config.rs (target/debug/deps/global_config-83c31233f775498a)
+     Running tests/gui.rs (target/debug/deps/gui-452ab4732874d963)
+     Running tests/native.rs (target/debug/deps/native-f0aa167eeee7bab5)
+     Running tests/navigation.rs (target/debug/deps/navigation-2ab067d4a61e2e31)
+     Running tests/navigator.rs (target/debug/deps/navigator-aa46b914fc0747db)
+     Running tests/navigator_filter.rs (target/debug/deps/navigator_filter-dd48667955f3a6e7)
+     Running tests/path_completion.rs (target/debug/deps/path_completion-e2fa28608365f6a8)
+     Running tests/perf_probe.rs (target/debug/deps/perf_probe-536454202e4adc8a)
+     Running tests/perf_report.rs (target/debug/deps/perf_report-238b6fe02de50526)
+     Running tests/responsive.rs (target/debug/deps/responsive-2bf14d449e185c62)
+     Running tests/scroll_follow.rs (target/debug/deps/scroll_follow-24de182dab05608a)
+     Running tests/settings_dialog.rs (target/debug/deps/settings_dialog-4795eb3af8775afc)
+     Running tests/vim_routing.rs (target/debug/deps/vim_routing-f4f031526dc26552)
+     Running tests/which_key.rs (target/debug/deps/which_key-41dd5555a59e488a)
+   Doc-tests truff_core
+   Doc-tests truff_store
+   Doc-tests truff_ui

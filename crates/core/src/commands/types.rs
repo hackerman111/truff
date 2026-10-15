@@ -84,6 +84,12 @@ pub enum Action {
     RenamePath { from: PathBuf, to: PathBuf },
     /// Move a path to trash / recovery.
     TrashPath(PathBuf),
+    /// Activate the currently selected row in a list/tree/Navigator.
+    ActivateRow {
+        panel: String,
+        row_id: crate::navigation::RowId,
+        data: Option<String>,
+    },
 }
 
 /// Effects produced by `Workspace::dispatch` or `Workspace::accept`.
@@ -176,11 +182,54 @@ impl From<EditError> for AppError {
 }
 
 /// Input target admitted by a registered command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum CommandContext {
+    /// Main Markdown document buffer editor.
     Editor,
+    /// Editable single-line or modal text field (search input, rename prompt, filter input).
+    TextField,
+    /// Vim `:` command line or `/` search prompt.
+    CommandLine,
+    /// Non-text list or tree view backed by `RowModel`.
     Rows,
+    /// Universal Navigator / SessionX / picker panel.
+    Navigator,
+    /// Non-editable modal / overlay view (Help, WhichKey, previews).
+    Modal,
+    /// Available across all contexts when not shadowed by active text insertion.
     Global,
+}
+
+impl CommandContext {
+    pub const ALL: [Self; 7] = [
+        Self::Editor,
+        Self::TextField,
+        Self::CommandLine,
+        Self::Rows,
+        Self::Navigator,
+        Self::Modal,
+        Self::Global,
+    ];
+
+    /// Returns `true` if this context represents an editable text target.
+    pub const fn is_editable_text(self) -> bool {
+        matches!(self, Self::Editor | Self::TextField | Self::CommandLine)
+    }
+
+    /// Returns `true` if this context represents a row/list/tree target.
+    pub const fn is_row_list(self) -> bool {
+        matches!(self, Self::Rows | Self::Navigator)
+    }
+
+    /// Checks whether a command registered for `spec_contexts` is available in `active`.
+    pub fn matches_spec(self, spec_contexts: &[Self]) -> bool {
+        spec_contexts.contains(&self)
+            || spec_contexts.contains(&Self::Global)
+            || (self == Self::Navigator && spec_contexts.contains(&Self::Rows))
+            || (self == Self::TextField && spec_contexts.contains(&Self::Editor))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

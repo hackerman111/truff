@@ -16,6 +16,15 @@ use crate::theme::Color;
 
 pub(super) const LINE_HEIGHT: f32 = 24.0;
 
+#[derive(Clone, Copy)]
+struct ViewScroll {
+    buffer_id: truff_core::text::BufferId,
+    revision: u64,
+    anchor_byte: usize,
+    local_y: f32,
+    horizontal: f32,
+}
+
 #[derive(Default)]
 pub struct EditorWidget {
     cache: BTreeMap<usize, Paragraph>,
@@ -30,11 +39,15 @@ pub struct EditorWidget {
     buffer_id: Option<truff_core::text::BufferId>,
     revision: Option<u64>,
     syntax: syntax::EditorSyntax,
+    view_scrolls: BTreeMap<truff_core::workspace::ViewId, ViewScroll>,
+    last_viewport: Option<eframe::egui::Rect>,
+    follow_pending: bool,
+    pending_scroll_pos: Option<truff_core::vim::ScrollPosition>,
+    pub(in crate::native) input_blocked: bool,
 }
 
 pub fn color(value: Color) -> Color32 {
-    let [r, g, b, a] = value.to_rgba_u8();
-    Color32::from_rgba_unmultiplied(r, g, b, a)
+    crate::theme::style::color(value)
 }
 
 impl EditorWidget {
@@ -42,9 +55,15 @@ impl EditorWidget {
 
     /// Calculates the constrained readable column width and centered horizontal margin.
     pub fn calculate_column_metrics(available_width: f32) -> (f32, f32) {
-        let content_width = (available_width - 48.0).clamp(320.0, 720.0);
-        let margin_x = ((available_width - content_width) / 2.0).max(24.0);
-        (content_width, margin_x)
+        crate::theme::GeometryTokens::compact().column_metrics(available_width)
+    }
+
+    pub fn scroll_cursor(&mut self, position: truff_core::vim::ScrollPosition) {
+        self.pending_scroll_pos = Some(position);
+    }
+
+    pub fn is_input_blocked(&self) -> bool {
+        self.input_blocked
     }
 
     pub fn visible_source_range(&self) -> Range<usize> {
@@ -69,9 +88,20 @@ impl EditorWidget {
         self.scroll = (self.scroll + amount).max(0.0);
     }
     pub fn top_line(&self) -> usize {
-        self.heights.block_at_y(self.scroll).0
+        self.heights
+            .block_at_y((self.scroll - Self::TOP_MARGIN).max(0.0))
+            .0
+    }
+    pub(in crate::native) fn retain_views(&mut self, workspace: &truff_core::workspace::Workspace) {
+        self.view_scrolls
+            .retain(|id, _| workspace.get_view(*id).is_some());
     }
     pub fn cursor_rect(&self) -> Option<Rect> {
         self.cursor_rect
+    }
+    pub fn char_rect(&self, line: usize, source_byte: usize) -> Option<Rect> {
+        self.cache
+            .get(&line)
+            .map(|entry| entry.char_rect_at(eframe::egui::Pos2::ZERO, source_byte))
     }
 }

@@ -85,6 +85,19 @@ pub enum Command {
         reverse: bool,
         count: usize,
     },
+    ScrollCursor(ScrollPosition),
+    SearchWordUnderCursor {
+        forward: bool,
+    },
+    FollowLink,
+}
+
+/// Viewport alignment target for `zz`, `zt`, `zb`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollPosition {
+    Center,
+    Top,
+    Bottom,
 }
 
 /// Result of parsing a sequence of keys.

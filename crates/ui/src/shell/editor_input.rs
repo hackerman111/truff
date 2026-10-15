@@ -40,7 +40,7 @@ impl Shell {
         self.flash.cancel();
         self.key_prefix.clear();
         self.which_key.hide();
-        self.command = None;
+        self.command_line.input = None;
     }
 
     pub fn ime_preedit(&self) -> Option<&str> {

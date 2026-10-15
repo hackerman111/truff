@@ -139,6 +139,43 @@ impl Shell {
         self.sidebar_model.select_id(target_id);
     }
 
+    pub(crate) fn sidebar_selected_path(&self) -> Option<String> {
+        let row = self.sidebar_model.selected_row()?;
+        if let Some(path) = &row.data {
+            return Some(path.clone());
+        }
+        let selected = self
+            .sidebar_model
+            .all_items()
+            .iter()
+            .position(|item| item.id == row.id)?;
+        let mut parts = vec![row.title.as_str()];
+        let mut depth = row.depth;
+        for item in self.sidebar_model.all_items()[..selected].iter().rev() {
+            if item.depth < depth {
+                parts.push(&item.title);
+                depth = item.depth;
+            }
+        }
+        parts.reverse();
+        Some(parts.join("/"))
+    }
+
+    pub(crate) fn sidebar_creation_parent(&self) -> Option<String> {
+        if self.focus() != Focus::Sidebar {
+            return None;
+        }
+        let path = self.sidebar_selected_path()?;
+        if self.sidebar_model.selected_row()?.is_folder {
+            return Some(path);
+        }
+        std::path::Path::new(&path)
+            .parent()?
+            .to_str()
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned)
+    }
+
     pub fn right_model(&self) -> &RowModel {
         &self.right_model
     }

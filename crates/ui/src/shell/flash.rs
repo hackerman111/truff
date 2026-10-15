@@ -73,23 +73,43 @@ impl Shell {
             .ok_or(InputError::UnavailableTarget)?;
         let mut targets = Vec::new();
         if kind == FlashKind::SyntaxObject {
-            let objects = self
-                .editor_vim
-                .syntax_object_ranges(buffer.revision())
-                .ok_or_else(|| {
-                    InputError::Vim("Syntax targets unavailable at this revision".into())
-                })?;
-            targets.extend(
-                objects
-                    .iter()
-                    .filter(|o| {
-                        ranges
-                            .iter()
-                            .any(|range| o.around.start < range.end && o.around.end > range.start)
-                    })
-                    .take(100)
-                    .map(|o| o.around.clone()),
-            );
+            let snapshot = truff_core::markdown::MarkdownSnapshot::from_buffer(buffer);
+            self.editor_vim
+                .set_syntax_objects(buffer.revision(), snapshot.syntax_object_ranges());
+            for range in ranges {
+                if targets.len() == 100 {
+                    break;
+                }
+                let flash_targets = truff_core::markdown::collect_flash_targets(
+                    buffer,
+                    Some(&snapshot),
+                    range.clone(),
+                    truff_core::markdown::FlashMode::SyntaxObject,
+                );
+                for target in flash_targets {
+                    if !targets.contains(&target.range) {
+                        targets.push(target.range);
+                        if targets.len() == 100 {
+                            break;
+                        }
+                    }
+                }
+            }
+            if targets.is_empty()
+                && let Some(objects) = self.editor_vim.syntax_object_ranges(buffer.revision())
+            {
+                targets.extend(
+                    objects
+                        .iter()
+                        .filter(|o| {
+                            ranges.iter().any(|range| {
+                                o.around.start < range.end && o.around.end > range.start
+                            })
+                        })
+                        .take(100)
+                        .map(|o| o.around.clone()),
+                );
+            }
         } else {
             for range in ranges {
                 if targets.len() == 100 {

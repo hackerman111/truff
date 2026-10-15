@@ -265,6 +265,8 @@ fn ime_is_transient_and_commit_uses_one_transaction() {
 #[test]
 fn viewport_cache_is_bounded_reuses_shapes_and_handles_multi_megabyte_line() {
     let (mut app, context) = scratch(&"one two three\n".repeat(100_000));
+    // Native panels settle their measured height after the initial frame.
+    frame(&mut app, &context, vec![]);
     assert!(app.editor.cached_paragraph_count() < 100);
     let builds = app.editor.layout_rebuild_count();
     frame(&mut app, &context, vec![]);
@@ -529,7 +531,7 @@ fn test_settings_dialog_default_and_init() {
 
     let default_dialog = SettingsDialog::default();
     assert!(!default_dialog.open);
-    assert_eq!(default_dialog.font_family, "monospace");
+    assert_eq!(default_dialog.font_family, "proportional");
     assert_eq!(default_dialog.base_font_size, 15.0);
     assert_eq!(default_dialog.line_height_multiplier, 1.5);
     assert_eq!(default_dialog.custom_font_path, "");
@@ -622,4 +624,203 @@ fn editing_a_fence_updates_cached_list_context_on_other_lines() {
     assert!(output.shapes.iter().any(
         |shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "• item")
     ));
+}
+
+#[test]
+fn test_unicode_grapheme_selection_and_heading_geometry() {
+    let source = "# Заголовок H1\n\nW i Ж 界 👩‍💻 e\u{0301}\n\n";
+    let (mut app, context) = scratch(source);
+    frame(&mut app, &context, vec![]);
+
+    // 1. Heading geometry: H1 heading line height must be tall (20-24px), not small body font (14-16px).
+    let h1_offset = source.find("Заголовок").unwrap();
+    let rect_h1 = app
+        .editor
+        .char_rect(0, h1_offset)
+        .expect("char rect for H1 exists");
+    assert!(
+        rect_h1.height() >= 20.0 && rect_h1.height() <= 24.0,
+        "H1 cursor height must reflect heading size, got {}",
+        rect_h1.height()
+    );
+
+    // 2. Unicode cluster advances on line 2 ("W i Ж 界 👩‍💻 e\u{0301}")
+    let line2 = 2;
+    let offset_w = source.find('W').unwrap();
+    let offset_i = source.find('i').unwrap();
+    let offset_zh = source.find('Ж').unwrap();
+    let offset_kai = source.find('界').unwrap();
+    let offset_emoji = source.find("👩‍💻").unwrap();
+    let offset_accent = source.find("e\u{0301}").unwrap();
+
+    let rect_w = app.editor.char_rect(line2, offset_w).unwrap();
+    let rect_i = app.editor.char_rect(line2, offset_i).unwrap();
+    let rect_zh = app.editor.char_rect(line2, offset_zh).unwrap();
+    let rect_kai = app.editor.char_rect(line2, offset_kai).unwrap();
+    let rect_emoji = app.editor.char_rect(line2, offset_emoji).unwrap();
+    let rect_accent = app.editor.char_rect(line2, offset_accent).unwrap();
+
+    // In proportional / standard font: 'i' is narrower than 'W'
+    assert!(
+        rect_i.width() < rect_w.width(),
+        "i width ({}) should be < W width ({})",
+        rect_i.width(),
+        rect_w.width()
+    );
+    // 'Ж' has wider advance than 'i'
+    assert!(
+        rect_zh.width() > rect_i.width(),
+        "Ж width ({}) should be > i width ({})",
+        rect_zh.width(),
+        rect_i.width()
+    );
+    // '界' (CJK full-width) is wider than standard latin
+    assert!(
+        rect_kai.width() > rect_i.width(),
+        "界 width ({}) should be > i width ({})",
+        rect_kai.width(),
+        rect_i.width()
+    );
+    // '👩‍💻' is an emoji ZWJ sequence (woman + ZWJ + laptop) spanning full emoji advance
+    assert!(
+        rect_emoji.width() >= rect_kai.width() * 0.8,
+        "👩‍💻 width ({}) should cover the full emoji cluster",
+        rect_emoji.width()
+    );
+    // 'e\u{0301}' combining accent cluster
+    assert!(
+        rect_accent.width() >= rect_i.width(),
+        "e\\u{{0301}} width ({}) should cover combining cluster",
+        rect_accent.width()
+    );
+
+    // All characters on line 2 share the same visual row vertical bounds without cropping
+    assert_eq!(
+        rect_w.top(),
+        rect_i.top(),
+        "Visual row rects should have uniform top"
+    );
+    assert_eq!(
+        rect_w.bottom(),
+        rect_i.bottom(),
+        "Visual row rects should have uniform bottom"
+    );
+
+    // 3. Empty line geometry: no hardcoded 8.5px
+    let line1 = 1; // empty line between H1 and line 2
+    let rect_empty = app
+        .editor
+        .char_rect(line1, source.find("\n\n").unwrap() + 1)
+        .unwrap();
+    assert_ne!(
+        rect_empty.width(),
+        8.5,
+        "Empty line should not use arbitrary 8.5px width"
+    );
+    assert!(
+        rect_empty.height() >= 16.0,
+        "Empty line should have proper row height, got {}",
+        rect_empty.height()
+    );
+}
+
+#[test]
+fn test_native_heading_hierarchy_and_reading_mode_and_inline_paint() {
+    // 1. Heading hierarchy scaling
+    let typo = truff_ui::app::global_config::TypographyConfig::default();
+    let (f_h1, lh_h1) = truff_ui::native::resolve_font_and_line_height("# H1", &typo);
+    let (f_h2, lh_h2) = truff_ui::native::resolve_font_and_line_height("## H2", &typo);
+    let (f_h3, lh_h3) = truff_ui::native::resolve_font_and_line_height("### H3", &typo);
+    let (f_h4, lh_h4) = truff_ui::native::resolve_font_and_line_height("#### H4", &typo);
+    let (f_h5, _lh_h5) = truff_ui::native::resolve_font_and_line_height("##### H5", &typo);
+    let (f_h6, _lh_h6) = truff_ui::native::resolve_font_and_line_height("###### H6", &typo);
+
+    assert!(f_h1.size > f_h2.size);
+    assert!(f_h2.size > f_h3.size);
+    assert!(f_h3.size >= f_h4.size);
+    assert!(f_h4.size >= f_h5.size);
+    assert!(f_h5.size >= f_h6.size);
+    assert!(lh_h1 > lh_h2);
+    assert!(lh_h2 > lh_h3);
+    assert!(lh_h3 >= lh_h4);
+
+    // 2. Inline formatting in LayoutJob
+    let source = "Some **bold text** with *italics* and `inline code` plus [a link](https://test.com) and <mark style=\"background-color:#ffff00\">highlight</mark>.";
+    let (mut app, context) = scratch(source);
+    let output = frame(&mut app, &context, vec![]);
+
+    let formatted_text = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("bold text") => Some(text),
+            _ => None,
+        })
+        .expect("missing formatted text galley");
+
+    let job = &formatted_text.galley.job;
+    assert!(
+        job.sections.len() > 1,
+        "Job must contain multiple styled sections"
+    );
+
+    let sec_slice = |range: &std::ops::Range<egui::text::ByteIndex>| {
+        let start: usize = range.start.into();
+        let end: usize = range.end.into();
+        &job.text[start..end]
+    };
+
+    let has_italic_section = job.sections.iter().any(|sec| {
+        let sec_text = sec_slice(&sec.byte_range);
+        sec_text.contains("italics") && sec.format.italics
+    });
+    assert!(has_italic_section, "Must have italic formatted section");
+
+    let has_code_section = job.sections.iter().any(|sec| {
+        let sec_text = sec_slice(&sec.byte_range);
+        sec_text.contains("inline code")
+            && sec.format.font_id.family == egui::FontFamily::Monospace
+            && sec.format.background != egui::Color32::TRANSPARENT
+    });
+    assert!(
+        has_code_section,
+        "Must have monospace code formatted section"
+    );
+
+    let has_link_section = job.sections.iter().any(|sec| {
+        let sec_text = sec_slice(&sec.byte_range);
+        sec_text.contains("a link") && sec.format.underline.width > 0.0
+    });
+    assert!(has_link_section, "Must have underlined link section");
+
+    let has_highlight_section = job.sections.iter().any(|sec| {
+        let sec_text = sec_slice(&sec.byte_range);
+        sec_text.contains("highlight") && sec.format.background.a() > 0
+    });
+    assert!(
+        has_highlight_section,
+        "Must have highlight background section"
+    );
+
+    // 3. Command :reading toggles projection to Reading
+    assert_eq!(
+        app.application.projection(),
+        truff_ui::editor::ProjectionMode::LivePreview
+    );
+    frame(&mut app, &context, vec![Event::Text(":".into())]);
+    frame(&mut app, &context, vec![Event::Text("reading".into())]);
+    frame(&mut app, &context, vec![key(egui::Key::Enter)]);
+    assert_eq!(
+        app.application.projection(),
+        truff_ui::editor::ProjectionMode::Reading
+    );
+
+    // Command :preview toggles projection back to LivePreview
+    frame(&mut app, &context, vec![Event::Text(":".into())]);
+    frame(&mut app, &context, vec![Event::Text("preview".into())]);
+    frame(&mut app, &context, vec![key(egui::Key::Enter)]);
+    assert_eq!(
+        app.application.projection(),
+        truff_ui::editor::ProjectionMode::LivePreview
+    );
 }

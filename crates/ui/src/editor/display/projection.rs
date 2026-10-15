@@ -42,14 +42,18 @@ impl DisplayMap {
             }
             let caret_touches =
                 |range: &Range<usize>| cursor_offset >= range.start && cursor_offset <= range.end;
-            let revealed = caret_touches(marker_range)
-                || span_range.as_ref().is_some_and(caret_touches)
-                || selection_range.as_ref().is_some_and(|selection| {
-                    ranges_touch(selection, marker_range)
-                        || span_range
-                            .as_ref()
-                            .is_some_and(|span| ranges_touch(selection, span))
-                });
+            let revealed = if self.mode == ProjectionMode::Reading {
+                false
+            } else {
+                caret_touches(marker_range)
+                    || span_range.as_ref().is_some_and(caret_touches)
+                    || selection_range.as_ref().is_some_and(|selection| {
+                        ranges_touch(selection, marker_range)
+                            || span_range
+                                .as_ref()
+                                .is_some_and(|span| ranges_touch(selection, span))
+                    })
+            };
             let hidden = !revealed
                 && !self.list_at_marker(marker_range).is_some_and(|list| {
                     matches!(

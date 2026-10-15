@@ -1,34 +1,19 @@
-use std::borrow::Cow;
+use truff_core::{Buffer, markdown::facts::DocFacts};
 
-use truff_core::Buffer;
-
-pub(super) fn items(buffer: &Buffer) -> Vec<crate::navigator::NavigatorItem> {
-    let mut items = Vec::new();
-    for (line_idx, line) in buffer.rope().lines().enumerate() {
-        let mut chunks = line.chunks();
-        let Some(first) = chunks.next() else {
-            continue;
-        };
-        let line_text = if chunks.next().is_none() {
-            Cow::Borrowed(first)
-        } else {
-            Cow::Owned(line.to_string())
-        };
-        let trimmed = line_text.trim_start();
-        if trimmed.starts_with('#') {
-            let level = trimmed.chars().take_while(|&c| c == '#').count();
-            let heading_text = trimmed[level..].trim();
-            if !heading_text.is_empty() && level <= 6 {
-                items.push(crate::navigator::NavigatorItem::new_heading(
-                    line_idx as u64 + 1,
-                    line_idx + 1,
-                    level,
-                    heading_text.to_string(),
-                ));
-            }
-        }
-    }
-    items
+pub(super) fn items(buffer: &Buffer, facts: &DocFacts) -> Vec<crate::navigator::NavigatorItem> {
+    facts
+        .headings
+        .iter()
+        .map(|heading| {
+            let line = buffer.line_of_byte(heading.range.start) + 1;
+            crate::navigator::NavigatorItem::new_heading(
+                line as u64,
+                line,
+                heading.level as usize,
+                heading.text.clone(),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -44,7 +29,8 @@ mod tests {
             "я".repeat(100_000)
         );
         let buffer = Buffer::from_text(BufferId(1), &text).unwrap();
-        let actual = items(&buffer);
+        let facts = truff_core::markdown::facts::MarkdownFacts::extract(&text).unwrap();
+        let actual = items(&buffer, &facts);
         let expected: Vec<_> = text
             .lines()
             .enumerate()

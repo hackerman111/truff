@@ -1,4 +1,5 @@
 use super::editor::color;
+use crate::{overlays::WhichKeyMode, shell::Shell};
 use eframe::egui;
 
 fn humanize_description(desc: &str) -> String {
@@ -38,207 +39,160 @@ fn humanize_description(desc: &str) -> String {
     }
 }
 
-pub(super) fn show(shell: &crate::shell::Shell, context: &egui::Context) {
+pub(super) fn show(shell: &mut Shell, context: &egui::Context) {
     if !shell.which_key().is_visible() {
         return;
     }
-
+    if shell.which_key().mode() == WhichKeyMode::Help {
+        show_help(shell, context);
+        return;
+    }
     let theme = shell.theme();
     let overlay = shell.which_key();
-
+    let screen = context.content_rect();
     egui::Window::new("which_key_overlay")
         .title_bar(false)
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -32.0])
-        .frame(
-            egui::Frame::new()
-                .fill(color(theme.bg_elevated))
-                .stroke(egui::Stroke::new(1.0, color(theme.border_subtle)))
-                .corner_radius(egui::CornerRadius::same(theme.geometry.corner_radius as u8))
-                .inner_margin(egui::Margin::symmetric(16, 12)),
-        )
+        .frame(crate::components::overlay_frame(theme))
         .show(context, |ui| {
-            ui.horizontal(|ui| {
-                let title = if overlay.title().is_empty() {
+            ui.set_width((screen.width() * 0.8).clamp(32.0, 1000.0) - 32.0);
+            ui.label(
+                egui::RichText::new(if overlay.title().is_empty() {
                     "Which-Key"
                 } else {
                     overlay.title()
-                };
-                ui.label(
-                    egui::RichText::new(format!("⌨  {title}"))
-                        .strong()
-                        .size(14.0)
-                        .color(color(theme.accent_primary)),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new("[Esc] закрыть")
-                            .color(color(theme.text_muted))
-                            .size(11.0),
-                    );
-                });
-            });
-            ui.add_space(6.0);
+                })
+                .strong()
+                .color(color(theme.accent_primary)),
+            );
             ui.separator();
-            ui.add_space(8.0);
-
-            match overlay.mode() {
-                crate::overlays::WhichKeyMode::Prefix => {
-                    let hints = overlay.hints();
-                    if hints.is_empty() {
-                        ui.label(
-                            egui::RichText::new("Нет доступных действий")
-                                .color(color(theme.text_muted)),
-                        );
-                        return;
-                    }
-
-                    // Structured multi-column layout (3 columns)
-                    let num_cols = if hints.len() <= 4 {
-                        2
-                    } else if hints.len() <= 9 {
-                        3
-                    } else {
-                        4
-                    };
-
-                    ui.columns(num_cols, |cols| {
-                        let chunk_size = hints.len().div_ceil(num_cols);
-                        for (col_idx, col_ui) in cols.iter_mut().enumerate() {
-                            let start = col_idx * chunk_size;
-                            let end = (start + chunk_size).min(hints.len());
-                            if start >= hints.len() {
-                                continue;
-                            }
-
-                            col_ui.vertical(|ui| {
-                                ui.spacing_mut().item_spacing.y = 6.0;
-                                for hint in &hints[start..end] {
-                                    ui.horizontal(|ui| {
-                                        // Key badge
-                                        egui::Frame::new()
-                                            .fill(color(theme.bg_tertiary))
-                                            .stroke(egui::Stroke::new(
-                                                1.0,
-                                                color(theme.border_subtle),
-                                            ))
-                                            .corner_radius(egui::CornerRadius::same(4))
-                                            .inner_margin(egui::Margin::symmetric(6, 2))
-                                            .show(ui, |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(hint.key.to_string())
-                                                        .monospace()
-                                                        .strong()
-                                                        .size(11.0)
-                                                        .color(color(theme.accent_primary)),
-                                                );
-                                            });
-
-                                        let label = humanize_description(&hint.description);
-                                        if hint.is_prefix {
-                                            ui.label(
-                                                egui::RichText::new(format!("{label} →"))
-                                                    .strong()
-                                                    .size(12.0)
-                                                    .color(color(theme.text_primary)),
-                                            );
-                                        } else {
-                                            ui.label(
-                                                egui::RichText::new(label)
-                                                    .size(12.0)
-                                                    .color(color(theme.text_primary)),
-                                            );
-                                        }
-                                    });
-                                }
+            egui::ScrollArea::vertical()
+                .max_height(screen.height() * 0.25)
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for hint in overlay.hints() {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(crate::overlays::key_label(hint.key))
+                                        .monospace()
+                                        .strong()
+                                        .color(color(theme.accent_primary)),
+                                );
+                                ui.label(humanize_description(&hint.description));
+                                ui.add_space(16.0);
                             });
                         }
                     });
-                }
-                crate::overlays::WhichKeyMode::Help => {
-                    let categories = overlay.categories();
-                    egui::ScrollArea::vertical()
-                        .max_height(320.0)
-                        .show(ui, |ui| {
-                            let num_cols = if categories.len() <= 2 { 2 } else { 3 };
-                            ui.columns(num_cols, |cols| {
-                                let chunk_size = categories.len().div_ceil(num_cols);
-                                for (col_idx, col_ui) in cols.iter_mut().enumerate() {
-                                    let start = col_idx * chunk_size;
-                                    let end = (start + chunk_size).min(categories.len());
-                                    if start >= categories.len() {
-                                        continue;
-                                    }
+                });
+        });
+}
 
-                                    col_ui.vertical(|ui| {
-                                        ui.spacing_mut().item_spacing.y = 12.0;
-                                        for category in &categories[start..end] {
-                                            let cat_frame = egui::Frame::new()
-                                                .fill(color(theme.bg_panel))
-                                                .stroke(egui::Stroke::new(
-                                                    1.0,
-                                                    color(theme.border_subtle),
-                                                ))
-                                                .corner_radius(egui::CornerRadius::same(6))
-                                                .inner_margin(egui::Margin::symmetric(10, 8));
-
-                                            cat_frame.show(ui, |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(&category.name)
-                                                        .strong()
-                                                        .size(12.0)
-                                                        .color(color(theme.accent_primary)),
-                                                );
-                                                ui.add_space(4.0);
-                                                ui.separator();
-                                                ui.add_space(4.0);
-
-                                                for hint in &category.hints {
-                                                    ui.horizontal(|ui| {
-                                                        egui::Frame::new()
-                                                            .fill(color(theme.bg_tertiary))
-                                                            .stroke(egui::Stroke::new(
-                                                                1.0,
-                                                                color(theme.border_subtle),
-                                                            ))
-                                                            .corner_radius(
-                                                                egui::CornerRadius::same(3),
-                                                            )
-                                                            .inner_margin(egui::Margin::symmetric(
-                                                                5, 1,
-                                                            ))
-                                                            .show(ui, |ui| {
-                                                                ui.label(
-                                                                    egui::RichText::new(
-                                                                        hint.key.to_string(),
-                                                                    )
-                                                                    .monospace()
-                                                                    .size(11.0)
-                                                                    .strong()
-                                                                    .color(color(
-                                                                        theme.accent_primary,
-                                                                    )),
-                                                                );
-                                                            });
-                                                        ui.label(
-                                                            egui::RichText::new(
-                                                                humanize_description(
-                                                                    &hint.description,
-                                                                ),
-                                                            )
-                                                            .size(12.0)
-                                                            .color(color(theme.text_primary)),
-                                                        );
-                                                    });
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
+fn show_help(shell: &mut Shell, context: &egui::Context) {
+    let theme = shell.theme().clone();
+    let screen = context.content_rect();
+    let mut size = theme.geometry.navigator_size(screen.size());
+    size.y = screen.height() * 0.82;
+    let mut close = false;
+    let help = &mut shell.which_key_mut().help;
+    egui::Modal::new(egui::Id::new("full_help"))
+        .frame(crate::components::overlay_frame(&theme))
+        .show(context, |ui| {
+            ui.set_width((size.x - theme.spacing_lg * 2.0).max(0.0));
+            ui.set_height((size.y - theme.spacing_lg * 2.0).max(0.0));
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Справка по горячим клавишам")
+                        .strong()
+                        .color(color(theme.accent_primary)),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    close |= ui.button("Закрыть ×").clicked();
+                });
+            });
+            if help.inserting {
+                ui.memory_mut(|memory| memory.request_focus(egui::Id::new("overlay_search_input")));
+            }
+            let response = crate::components::search_input(
+                ui,
+                &mut help.query,
+                "/ — поиск по клавишам и описаниям",
+                &theme,
+            );
+            if help.inserting {
+                response.request_focus();
+            } else if response.clicked() {
+                help.inserting = true;
+            } else {
+                response.surrender_focus();
+            }
+            if response.changed() {
+                help.filter();
+            }
+            ui.separator();
+            let height = (ui.available_height() - 36.0).max(1.0);
+            let row_height = theme.geometry.list_row_height;
+            let stride = row_height + ui.spacing().item_spacing.y;
+            let count = help.filtered.len();
+            let mut area = egui::ScrollArea::vertical()
+                .id_salt("help_items")
+                .max_height(height)
+                .auto_shrink([false, false]);
+            if let Some(offset) = help.scroll.prepare(help.selected, count, stride, height) {
+                area = area.vertical_scroll_offset(offset);
+            }
+            let output = area.show_rows(ui, row_height, count, |ui, rows| {
+                for index in rows {
+                    let item = &help.items[help.filtered[index]];
+                    let selected = index == help.selected;
+                    let response =
+                        crate::components::list_row(ui, row_height, selected, &theme, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    [140.0_f32.min(ui.available_width() * 0.3), 30.0],
+                                    egui::Label::new(
+                                        egui::RichText::new(&item.keys)
+                                            .monospace()
+                                            .color(color(theme.accent_primary)),
+                                    )
+                                    .truncate(),
+                                );
+                                ui.vertical(|ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&item.description)
+                                                .size(theme.geometry.ui_font_size)
+                                                .color(color(theme.text_primary)),
+                                        )
+                                        .truncate(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(&item.category)
+                                            .size(theme.geometry.ui_font_size - 2.0)
+                                            .color(color(theme.text_muted)),
+                                    );
+                                });
                             });
                         });
+                    if response.clicked() {
+                        help.selected = index;
+                    }
                 }
-            }
+            });
+            help.scroll.observe(&output);
+            ui.separator();
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} / {} · j/k · gg/G · PgUp/PgDn · Ctrl-d/u · / поиск · Esc назад",
+                    if count == 0 { 0 } else { help.selected + 1 },
+                    count
+                ))
+                .size(theme.geometry.ui_font_size - 2.0)
+                .color(color(theme.text_muted)),
+            );
         });
+    if close {
+        shell.which_key_mut().hide();
+    }
 }

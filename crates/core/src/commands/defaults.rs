@@ -501,20 +501,28 @@ impl CommandRegistry {
                 vec![CommandContext::Global],
             ),
             cmd(
+                "row.activate",
+                "Открыть выбранный элемент",
+                "Активировать выбранную строку навигатора или списка",
+                "Навигация",
+                Some("Enter"),
+                vec![CommandContext::Rows, CommandContext::Navigator],
+            ),
+            cmd(
                 "file.create",
                 "Создать заметку",
                 "Создать новую заметку в хранилище",
                 "Файлы",
                 Some("a"),
-                vec![CommandContext::Global],
+                vec![CommandContext::Rows, CommandContext::Navigator],
             ),
             cmd(
                 "folder.create",
                 "Создать папку",
                 "Создать новую папку в хранилище",
                 "Файлы",
-                None,
-                vec![CommandContext::Global],
+                Some("A"),
+                vec![CommandContext::Rows, CommandContext::Navigator],
             ),
             cmd(
                 "file.rename",
@@ -522,7 +530,7 @@ impl CommandRegistry {
                 "Переименовать выбранную заметку или папку",
                 "Файлы",
                 Some("r"),
-                vec![CommandContext::Global],
+                vec![CommandContext::Rows, CommandContext::Navigator],
             ),
             cmd(
                 "file.move",
@@ -530,7 +538,7 @@ impl CommandRegistry {
                 "Переместить заметку в другую папку",
                 "Файлы",
                 None,
-                vec![CommandContext::Global],
+                vec![CommandContext::Rows, CommandContext::Navigator],
             ),
             cmd(
                 "file.trash",
@@ -538,7 +546,7 @@ impl CommandRegistry {
                 "Переместить файл или папку в корзину",
                 "Файлы",
                 Some("d"),
-                vec![CommandContext::Global],
+                vec![CommandContext::Rows, CommandContext::Navigator],
             ),
             // Panes and Focus
             cmd(

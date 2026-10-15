@@ -7,7 +7,113 @@ use crate::overlays::FlashKind;
 
 use super::{Focus, Shell, ShellAction};
 
+pub(super) fn default_keymap() -> KeymapConfig {
+    use truff_core::config::KeyBinding;
+    let mut config = KeymapConfig::default();
+    for (mode, keys, id, description) in [
+        (
+            Mode::Insert,
+            vec![Key::Ctrl('p')],
+            "panel.commands",
+            "Палитра команд",
+        ),
+        (
+            Mode::VisualChar,
+            vec![Key::Ctrl('p')],
+            "panel.commands",
+            "Палитра команд",
+        ),
+        (
+            Mode::VisualLine,
+            vec![Key::Ctrl('p')],
+            "panel.commands",
+            "Палитра команд",
+        ),
+        (
+            Mode::Normal,
+            vec![Key::Char(':')],
+            "app.command_line",
+            "Командная строка",
+        ),
+        (Mode::Normal, vec![Key::Char('?')], "app.help", "Справка"),
+        (
+            Mode::Normal,
+            vec![Key::Ctrl('w'), Key::Char('h')],
+            "focus.left",
+            "Левая панель",
+        ),
+        (
+            Mode::Normal,
+            vec![Key::Ctrl('w'), Key::Char('l')],
+            "focus.right",
+            "Правая панель",
+        ),
+        (
+            Mode::Normal,
+            vec![Key::Ctrl('w'), Key::Char('j')],
+            "focus.down",
+            "Панель снизу",
+        ),
+        (
+            Mode::Normal,
+            vec![Key::Ctrl('w'), Key::Char('k')],
+            "focus.up",
+            "Панель сверху",
+        ),
+        (
+            Mode::Normal,
+            vec![Key::Ctrl('p')],
+            "panel.commands",
+            "Палитра команд",
+        ),
+        (
+            Mode::Normal,
+            vec![Key::Char(' '), Key::Char('c')],
+            "style.text_color",
+            "Цвет текста",
+        ),
+        (
+            Mode::VisualChar,
+            vec![Key::Char(' '), Key::Char('c')],
+            "style.text_color",
+            "Цвет выделения",
+        ),
+        (
+            Mode::VisualLine,
+            vec![Key::Char(' '), Key::Char('c')],
+            "style.text_color",
+            "Цвет выделения",
+        ),
+        (
+            Mode::VisualChar,
+            vec![Key::Char(' '), Key::Char('l')],
+            "note.link_selection",
+            "Ссылка из выделения",
+        ),
+        (
+            Mode::VisualLine,
+            vec![Key::Char(' '), Key::Char('l')],
+            "note.link_selection",
+            "Ссылка из выделения",
+        ),
+    ] {
+        config.bindings.push(KeyBinding {
+            mode,
+            keys,
+            command: CommandId::from_static(id),
+            description: description.into(),
+        });
+    }
+    config
+}
+
 impl Shell {
+    pub(crate) fn take_keymap_from(&mut self, previous: &mut Self) {
+        std::mem::swap(&mut self.keymap, &mut previous.keymap);
+        self.custom_keymap = previous.custom_keymap;
+        previous.custom_keymap = false;
+    }
+
     pub fn set_keymap(&mut self, config: KeymapConfig) -> Result<(), KeymapError> {
         self.keymap = config.compile()?;
         self.custom_keymap = true;
@@ -23,6 +129,48 @@ impl Shell {
             CommandContext::Rows
         };
         let registry = CommandRegistry::default();
+        if let Err(error) = registry.require(&id, context) {
+            return ShellAction::Error(error.to_string());
+        }
+        match id.as_str() {
+            "app.help" => {
+                self.show_help();
+                return ShellAction::Incomplete;
+            }
+            "app.command_line" => {
+                self.start_command();
+                return ShellAction::Incomplete;
+            }
+            "row.activate" => return self.feed_key(Key::Enter),
+            "focus.left" | "focus.right" | "focus.up" | "focus.down" => {
+                let next = match (id.as_str(), self.focus) {
+                    ("focus.left", Focus::RightPanel) | ("focus.right", Focus::Sidebar) => {
+                        Focus::Editor
+                    }
+                    ("focus.left", Focus::Editor) if self.has_sidebar() => Focus::Sidebar,
+                    ("focus.right", Focus::Editor) if self.has_right_panel() => Focus::RightPanel,
+                    _ => self.focus,
+                };
+                self.set_focus(next);
+                return ShellAction::FocusChanged(next);
+            }
+            _ => {}
+        }
+        let panel = match id.as_str() {
+            "panel.files" => Some(crate::navigator::NavigatorMode::Files),
+            "panel.sessions" => Some(crate::navigator::NavigatorMode::Sessions),
+            "panel.boards" => Some(crate::navigator::NavigatorMode::Boards),
+            "panel.outline" => Some(crate::navigator::NavigatorMode::Outline),
+            "panel.links" => Some(crate::navigator::NavigatorMode::Links),
+            "panel.commands" => Some(crate::navigator::NavigatorMode::Commands),
+            "style.text_color" if argument.is_empty() => {
+                Some(crate::navigator::NavigatorMode::Colors)
+            }
+            _ => None,
+        };
+        if let Some(mode) = panel {
+            return ShellAction::OpenNavigator(mode);
+        }
         let command = match registry.vim_command(&id, context) {
             Ok(c) => c,
             Err(e) => return ShellAction::Error(e.to_string()),
@@ -67,26 +215,19 @@ impl Shell {
 
     /// Dispatches a key event according to focus routing rules.
     pub fn feed_key(&mut self, key: Key) -> ShellAction {
-        if let Some(command) = &mut self.command {
-            match key {
-                Key::Esc => {
-                    self.command = None;
-                }
-                Key::Enter => {
-                    return ShellAction::Command(self.command.take().unwrap());
-                }
-                Key::Backspace => {
-                    command.pop();
-                }
-                Key::Char(ch) => {
-                    if command.len() + ch.len_utf8() > 65536 {
-                        return ShellAction::Error("Command text limit exceeded".into());
-                    }
-                    command.push(ch);
-                }
-                _ => {}
+        if self.which_key.is_visible()
+            && self.which_key.mode() == crate::overlays::WhichKeyMode::Help
+        {
+            if self.which_key.help.key(key) {
+                self.which_key.hide();
+                self.pending_prefix = None;
+                self.key_prefix.clear();
+                self.binding_prefix.clear();
             }
             return ShellAction::Incomplete;
+        }
+        if self.command().is_some() {
+            return self.command_key(key);
         }
         if self.flash.is_active() {
             match key {
@@ -132,91 +273,63 @@ impl Shell {
         }
         if key == Key::Char('?')
             && self.mode() == Mode::Normal
-            && self.command.is_none()
+            && self.command().is_none()
             && self.search_query().is_none()
         {
-            self.which_key
-                .show_help(crate::overlays::WhichKeyOverlay::default_help_categories());
+            self.show_help();
             return ShellAction::Incomplete;
         }
         if key == Key::Char(':') && (self.focus != Focus::Editor || self.mode() != Mode::Insert) {
-            self.command = Some(String::new());
-            self.which_key.hide();
+            self.start_command();
             return ShellAction::Incomplete;
         }
-        if key == Key::Ctrl('p')
-            && self.mode() == Mode::Normal
-            && self.command.is_none()
-            && self.search_query().is_none()
-        {
-            return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Commands);
+        if key == Key::Ctrl('p') && self.command().is_none() && self.search_query().is_none() {
+            let context = if self.focus == Focus::Editor {
+                CommandContext::Editor
+            } else {
+                CommandContext::Rows
+            };
+            return match self.keymap.lookup(self.mode(), &[key], context) {
+                BindingLookup::Complete(id) => self.execute_registered(id, String::new()),
+                _ => ShellAction::Ignored,
+            };
         }
         if let Some(Key::Char(' ')) = self.pending_prefix {
             self.pending_prefix = None;
             self.which_key.hide();
-            match key {
-                Key::Char('f') => {
-                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Files);
-                }
-                Key::Char('s') => {
-                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Sessions);
-                }
-                Key::Char('c') => {
-                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Commands);
-                }
-                Key::Char('b') => {
-                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Boards);
-                }
-                Key::Char('o') => {
-                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Outline);
-                }
-                Key::Char('l') => {
-                    return ShellAction::OpenNavigator(crate::navigator::NavigatorMode::Links);
-                }
-                Key::Esc => return ShellAction::Incomplete,
-                _ => {}
+            let context = if self.focus == Focus::Editor {
+                CommandContext::Editor
+            } else {
+                CommandContext::Rows
+            };
+            if let BindingLookup::Complete(id) =
+                self.keymap
+                    .lookup(self.mode(), &[Key::Char(' '), key], context)
+            {
+                return self.execute_registered(id, String::new());
             }
+            return ShellAction::Ignored;
         }
         if key == Key::Char(' ')
-            && self.mode() == Mode::Normal
-            && self.command.is_none()
+            && matches!(
+                self.mode(),
+                Mode::Normal | Mode::VisualChar | Mode::VisualLine
+            )
+            && self.command().is_none()
             && self.search_query().is_none()
         {
             self.pending_prefix = Some(Key::Char(' '));
             self.which_key.set_prefix_hints_with_title(
                 "<Space> Навигатор",
-                vec![
-                    truff_core::config::KeyHint {
-                        key: Key::Char('f'),
-                        description: "Файлы и папки".into(),
-                        is_prefix: false,
+                self.keymap.hints(
+                    self.mode(),
+                    &[Key::Char(' ')],
+                    if self.focus == Focus::Editor {
+                        CommandContext::Editor
+                    } else {
+                        CommandContext::Rows
                     },
-                    truff_core::config::KeyHint {
-                        key: Key::Char('s'),
-                        description: "Сессии и вкладки".into(),
-                        is_prefix: false,
-                    },
-                    truff_core::config::KeyHint {
-                        key: Key::Char('c'),
-                        description: "Все команды".into(),
-                        is_prefix: false,
-                    },
-                    truff_core::config::KeyHint {
-                        key: Key::Char('b'),
-                        description: "Kanban и задачи".into(),
-                        is_prefix: false,
-                    },
-                    truff_core::config::KeyHint {
-                        key: Key::Char('o'),
-                        description: "Структура (Outline)".into(),
-                        is_prefix: false,
-                    },
-                    truff_core::config::KeyHint {
-                        key: Key::Char('l'),
-                        description: "Ссылки (Backlinks)".into(),
-                        is_prefix: false,
-                    },
-                ],
+                ),
             );
             return ShellAction::Incomplete;
         }
@@ -224,39 +337,18 @@ impl Shell {
         if let Some(Key::Ctrl('w')) = self.pending_prefix {
             self.pending_prefix = None;
             self.which_key.hide();
+            let context = if self.focus == Focus::Editor {
+                CommandContext::Editor
+            } else {
+                CommandContext::Rows
+            };
+            if let BindingLookup::Complete(id) =
+                self.keymap
+                    .lookup(Mode::Normal, &[Key::Ctrl('w'), key], context)
+            {
+                return self.execute_registered(id, String::new());
+            }
             match key {
-                Key::Char('h') | Key::Left => {
-                    let next = match self.focus {
-                        Focus::RightPanel => Focus::Editor,
-                        Focus::Editor => {
-                            if self.has_sidebar() {
-                                Focus::Sidebar
-                            } else {
-                                Focus::Editor
-                            }
-                        }
-                        Focus::Sidebar => Focus::Sidebar,
-                        _ => Focus::Editor,
-                    };
-                    self.set_focus(next);
-                    return ShellAction::FocusChanged(self.focus);
-                }
-                Key::Char('l') | Key::Right => {
-                    let next = match self.focus {
-                        Focus::Sidebar => Focus::Editor,
-                        Focus::Editor => {
-                            if self.has_right_panel() {
-                                Focus::RightPanel
-                            } else {
-                                Focus::Editor
-                            }
-                        }
-                        Focus::RightPanel => Focus::RightPanel,
-                        _ => Focus::Editor,
-                    };
-                    self.set_focus(next);
-                    return ShellAction::FocusChanged(self.focus);
-                }
                 Key::Char('w') => {
                     let next = match self.focus {
                         Focus::Sidebar => Focus::Editor,
@@ -288,27 +380,16 @@ impl Shell {
             }
         }
 
-        if key == Key::Ctrl('w') {
+        if key == Key::Ctrl('w') && self.mode() == Mode::Normal {
             self.pending_prefix = Some(key);
+            let context = if self.focus == Focus::Editor {
+                CommandContext::Editor
+            } else {
+                CommandContext::Rows
+            };
             self.which_key.set_prefix_hints_with_title(
                 "<C-w> Окна и панели",
-                vec![
-                    truff_core::config::KeyHint {
-                        key: Key::Char('h'),
-                        description: "Левая панель (дерево)".into(),
-                        is_prefix: false,
-                    },
-                    truff_core::config::KeyHint {
-                        key: Key::Char('l'),
-                        description: "Правая панель (backlinks)".into(),
-                        is_prefix: false,
-                    },
-                    truff_core::config::KeyHint {
-                        key: Key::Char('w'),
-                        description: "Сменить панель".into(),
-                        is_prefix: false,
-                    },
-                ],
+                self.keymap.hints(Mode::Normal, &[key], context),
             );
             return ShellAction::Incomplete;
         }
@@ -361,15 +442,77 @@ impl Shell {
             self.binding_prefix.clear();
         }
 
+        if self.focus == Focus::Editor
+            && self.mode() == Mode::Normal
+            && self.command().is_none()
+            && self.search_query().is_none()
+            && !self.flash.is_active()
+            && !self.which_key.is_visible()
+            && self.binding_prefix.is_empty()
+            && self.pending_prefix.is_none()
+            && let Some(id) = self.single_binding(key)
+            && id.as_str().starts_with("flash.")
+        {
+            return ShellAction::RegisteredCommand {
+                id,
+                argument: String::new(),
+            };
+        }
+
         // 2. Route strictly according to active panel focus
         match self.focus {
             Focus::Editor => {
                 let Some(view_id) = self.workspace.active_view() else {
                     return ShellAction::Ignored;
                 };
+
+                if key == Key::CtrlEnter {
+                    let toggle_tx =
+                        self.workspace
+                            .editor_parts_mut(view_id)
+                            .and_then(|(buffer, view)| {
+                                truff_core::markdown::plan_toggle_task(buffer, view.head())
+                            });
+                    if let Some(tx) = toggle_tx {
+                        if let Err(e) = self.apply_transaction(tx) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        if let Err(e) = self.publish_vim_changes(view_id) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        return ShellAction::EditorEdit;
+                    }
+                    return ShellAction::Ignored;
+                }
+
+                if self.editor_vim.mode == Mode::Insert
+                    && matches!(key, Key::Enter | Key::Tab | Key::ShiftTab)
+                {
+                    let smart_tx = self.workspace.editor_parts_mut(view_id).and_then(
+                        |(buffer, view)| match key {
+                            Key::Enter => truff_core::markdown::plan_enter(buffer, view.head()),
+                            Key::Tab => truff_core::markdown::plan_tab(buffer, view.head()),
+                            Key::ShiftTab => {
+                                truff_core::markdown::plan_shift_tab(buffer, view.head())
+                            }
+                            _ => None,
+                        },
+                    );
+                    if let Some(tx) = smart_tx {
+                        if let Err(e) = self.apply_transaction(tx) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        if let Err(e) = self.publish_vim_changes(view_id) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        return ShellAction::EditorEdit;
+                    }
+                }
+
                 let Some((buffer, view)) = self.workspace.editor_parts_mut(view_id) else {
                     return ShellAction::Ignored;
                 };
+
                 let buffer_id = buffer.id();
                 let res = self.editor_vim.feed_key(
                     key,
@@ -404,6 +547,11 @@ impl Shell {
                         ShellAction::RegisteredCommand { id, argument }
                     }
                     InputResult::Action(action) => ShellAction::Core(action),
+                    InputResult::ScrollCursor(pos) => ShellAction::ScrollCursor(pos),
+                    InputResult::FollowLink => ShellAction::RegisteredCommand {
+                        id: truff_core::commands::CommandId::new("note.follow_link"),
+                        argument: String::new(),
+                    },
                     InputResult::Actions(actions) => {
                         if actions.len() == 2
                             && matches!(actions[0], Action::SaveBuffer(_))
@@ -428,7 +576,20 @@ impl Shell {
                     self.set_focus(Focus::Editor);
                     return ShellAction::FocusChanged(Focus::Editor);
                 }
-                if matches!(key, Key::Char('i' | 'a' | 'o' | 'I' | 'A' | 'O'))
+                if self.focus == Focus::Sidebar
+                    && self.row_vim.search_query().is_none()
+                    && self.row_vim.mode == Mode::Normal
+                    && let BindingLookup::Complete(id) =
+                        self.keymap
+                            .lookup(Mode::Normal, &[key], CommandContext::Rows)
+                    && matches!(
+                        id.as_str(),
+                        "file.create" | "folder.create" | "file.rename" | "file.trash"
+                    )
+                {
+                    return self.execute_registered(id, String::new());
+                }
+                if matches!(key, Key::Char('i' | 'o' | 'I' | 'O'))
                     && self.row_vim.search_query().is_none()
                 {
                     self.set_focus(Focus::Editor);
@@ -439,16 +600,6 @@ impl Shell {
                 } else {
                     &mut self.right_model
                 };
-                if key == Key::Char('d')
-                    && self.focus == Focus::Sidebar
-                    && self.row_vim.search_query().is_none()
-                {
-                    return model
-                        .selected_row()
-                        .and_then(|row| row.data.clone())
-                        .map(ShellAction::SidebarDeleteFile)
-                        .unwrap_or(ShellAction::Ignored);
-                }
                 if key == Key::Enter && self.row_vim.search_query().is_none() {
                     if let Some(row) = model.selected_row() {
                         if row.is_folder {
@@ -468,7 +619,7 @@ impl Shell {
                     _ => ShellAction::Incomplete,
                 }
             }
-            Focus::Navigator | Focus::CommandBar => {
+            Focus::Navigator | Focus::CommandBar | Focus::TOC | Focus::Wiki | Focus::Stream => {
                 if key == Key::Esc {
                     let prev = self.pop_focus();
                     return ShellAction::FocusChanged(prev);

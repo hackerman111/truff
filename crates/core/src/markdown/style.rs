@@ -9,6 +9,8 @@
 
 use std::ops::Range;
 
+use serde::{Deserialize, Serialize};
+
 use crate::text::Transaction;
 
 mod protection;
@@ -23,7 +25,7 @@ use self::tags::{
 pub use self::tags::{ColorSpan, color_spans};
 
 /// Supported Callout kinds following Obsidian conventions.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CalloutKind {
     Note,
     Warning,
@@ -192,20 +194,30 @@ pub fn wrap_callout(
     validate_protection(text, &range)?;
 
     let selected = &text[range.start..range.end];
+    let nl = if selected.contains("\r\n") || text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let mut out = String::with_capacity(selected.len() + 32);
     out.push_str("> [!");
     out.push_str(kind.tag());
-    out.push_str("]\n");
+    out.push(']');
+    out.push_str(nl);
 
     for line in selected.lines() {
         out.push_str("> ");
         out.push_str(line);
-        out.push('\n');
+        out.push_str(nl);
     }
 
     // If selected did not end with a newline, trim the trailing newline to preserve shape.
-    if !selected.ends_with('\n') && out.ends_with('\n') {
-        out.pop();
+    if !selected.ends_with('\n') {
+        if out.ends_with("\r\n") {
+            out.truncate(out.len() - 2);
+        } else if out.ends_with('\n') {
+            out.pop();
+        }
     }
 
     Ok(Transaction::replace(range, out))

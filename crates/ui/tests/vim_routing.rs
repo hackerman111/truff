@@ -194,3 +194,53 @@ fn remapped_binding_retains_count_and_registry_context() {
         ShellAction::Error(_)
     ));
 }
+
+#[test]
+fn flash_syntax_object_targets_ast_nodes_and_shortcuts() {
+    use truff_core::commands::CommandId;
+    use truff_ui::overlays::FlashKind;
+
+    let mut shell = Shell::new();
+    let text = "# Title\n\n- task 1\n- task 2\n\n```rust\nlet x = 42;\n```\n";
+    shell.set_editor_text(text);
+
+    // 1. Direct key 's' produces flash.jump_word in Normal Editor
+    let action_s = shell.feed_key(Key::Char('s'));
+    assert_eq!(
+        action_s,
+        ShellAction::RegisteredCommand {
+            id: CommandId::from_static("flash.jump_word"),
+            argument: String::new(),
+        }
+    );
+
+    // 2. Direct key 'S' produces flash.select_syntax_object in Normal Editor
+    let action_cap_s = shell.feed_key(Key::Char('S'));
+    assert_eq!(
+        action_cap_s,
+        ShellAction::RegisteredCommand {
+            id: CommandId::from_static("flash.select_syntax_object"),
+            argument: String::new(),
+        }
+    );
+
+    // 3. Activating SyntaxObject flash collects markdown AST targets
+    #[allow(clippy::single_range_in_vec_init)]
+    let target_ranges = [0..text.len()];
+    shell
+        .start_flash_ranges(&target_ranges, FlashKind::SyntaxObject)
+        .unwrap();
+    assert!(shell.flash().is_active());
+    let targets = shell.flash().targets();
+    assert!(
+        !targets.is_empty(),
+        "SyntaxObject flash must extract AST targets from MarkdownSnapshot"
+    );
+    let labels: Vec<_> = targets.iter().map(|t| t.label.clone()).collect();
+    assert!(!labels[0].is_empty());
+
+    // Selecting first target jumps/selects
+    let label = labels[0].clone();
+    keys(&mut shell, &label);
+    assert!(!shell.flash().is_active());
+}

@@ -1,6 +1,6 @@
 //! Stable command IDs shared by the keymap, command line and native controls.
 use super::{AppResult, Application};
-use truff_core::commands::{Action, CommandId};
+use truff_core::commands::CommandId;
 
 impl Application {
     pub(crate) fn registered_command(&mut self, id: &CommandId, argument: &str) -> AppResult<()> {
@@ -21,7 +21,7 @@ impl Application {
                 } else {
                     (index + views.len() - 1) % views.len()
                 };
-                self.dispatch(Action::FocusView(views[next].id()))
+                self.focus_view(views[next].id())
             }
             "buffer.select" => {
                 if argument.is_empty() {
@@ -47,7 +47,7 @@ impl Application {
                 if matches.len() != 1 {
                     return Err("Buffer selector must match exactly one view".into());
                 }
-                self.dispatch(Action::FocusView(matches[0]))
+                self.focus_view(matches[0])
             }
             _ => {
                 let name = match id.as_str() {

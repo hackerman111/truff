@@ -120,10 +120,14 @@ pub(super) fn refresh(
         }
     }
     for &path in &changed {
-        match read_file_with_limit(
-            &paths.resolve_path(Path::new(path))?,
-            DEFAULT_MAX_FILE_BYTES,
-        ) {
+        let resolved = match paths.resolve_path(Path::new(path)) {
+            Ok(p) => p,
+            Err(error) => {
+                let _ = events.send(CatalogEvent::Error(format!("{path}: {error}")));
+                continue;
+            }
+        };
+        match read_file_with_limit(&resolved, DEFAULT_MAX_FILE_BYTES) {
             Ok(text) => {
                 let (id, fingerprint, generation): (i64, String, i64) = tx.prepare_cached(
                     "SELECT id, fingerprint, index_generation FROM files WHERE relative_path=?1")?

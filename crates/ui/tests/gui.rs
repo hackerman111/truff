@@ -122,6 +122,96 @@ fn composition_and_paste_edit_the_workspace_once() {
 }
 
 #[test]
+fn navigator_file_loop_renames_links_and_requires_trash_confirmation() {
+    use truff_ui::navigator::{NavigatorAction, NavigatorMode};
+    let vault = std::env::temp_dir().join(format!(
+        "truff-p2-crud-{}-{}",
+        std::process::id(),
+        truff_core::ViewId::next()
+    ));
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("a.md"), "# Alpha\n").unwrap();
+    std::fs::write(vault.join("b.md"), "[[a]]\n").unwrap();
+    let mut application = Application::new();
+    application.open_vault(&vault).unwrap();
+    let (mut root, id) = window(application);
+    idle(&mut root, id);
+    root.app.open_navigator(NavigatorMode::Files);
+    root.app.navigator.set_query("a.md");
+    root.app
+        .handle_navigator_action(NavigatorAction::RenameFile {
+            path: "a.md".into(),
+        });
+    root.redraw();
+    root.redraw();
+    assert_eq!(
+        root.context.memory(|m| m.focused()),
+        Some(egui::Id::new("rename_path_input"))
+    );
+    root.frame(vec![
+        Event::Key {
+            key: egui::Key::A,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            },
+        },
+        Event::Paste("renamed.md".into()),
+        Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ]);
+    idle(&mut root, id);
+    assert!(
+        !root.app.dialogs.is_any_open(),
+        "{}",
+        root.app.application.status
+    );
+    assert!(root.app.navigator.is_open());
+    assert_eq!(root.app.navigator.query, "a.md");
+    assert!(!vault.join("a.md").exists());
+    assert!(vault.join("renamed.md").exists());
+    assert!(
+        std::fs::read_to_string(vault.join("b.md"))
+            .unwrap()
+            .contains("renamed")
+    );
+    assert_eq!(
+        root.app.application.active_relative_path().as_deref(),
+        Some("renamed.md")
+    );
+    root.app
+        .handle_navigator_action(NavigatorAction::DeleteFile {
+            path: "renamed.md".into(),
+        });
+    root.redraw();
+    named(&mut root, egui::Key::Escape);
+    assert!(vault.join("renamed.md").exists());
+    assert!(!root.app.application.file_operation_pending());
+    root.app
+        .handle_navigator_action(NavigatorAction::DeleteFile {
+            path: "renamed.md".into(),
+        });
+    root.redraw();
+    named(&mut root, egui::Key::Enter);
+    idle(&mut root, id);
+    assert!(!vault.join("renamed.md").exists());
+    assert!(root.app.navigator.is_open());
+    assert!(!root.app.dialogs.is_any_open());
+    close(&mut root, id);
+    drop(root);
+    std::fs::remove_dir_all(vault).unwrap();
+}
+
+#[test]
 fn window_keyboard_workflow_saves_renames_and_restores_real_files() {
     let vault = std::env::temp_dir().join(format!(
         "truff-gui-{}-{}",
@@ -436,6 +526,7 @@ fn test_create_note_and_folder_dialogs() {
     let (mut root, ()) = window(app);
     root.redraw();
 
+    idle(&mut root, ());
     // Trigger create file dialog and set input
     root.app.dialogs.file.open = true;
     root.app.dialogs.file.path = "nested/new_note.md".to_string();
@@ -446,22 +537,39 @@ fn test_create_note_and_folder_dialogs() {
         .application
         .create_note(&root.app.dialogs.file.path.clone())
         .unwrap();
+    idle(&mut root, ());
     assert!(target.join("nested/new_note.md").exists());
     assert_eq!(
         root.app.application.active_relative_path().as_deref(),
         Some("nested/new_note.md")
     );
 
-    // Test creating folder
+    // Test creating folder with initial note (default dialog behavior)
     root.app.dialogs.folder.open = true;
     root.app.dialogs.folder.path = "archive/sub".to_string();
+    root.app.dialogs.folder.create_initial_note = true;
+    root.redraw();
+
+    let note_path = format!("{}/index.md", root.app.dialogs.folder.path.trim());
+    root.app.application.create_note(&note_path).unwrap();
+    idle(&mut root, ());
+    assert!(target.join("archive/sub/index.md").exists());
+    assert_eq!(
+        root.app.application.active_relative_path().as_deref(),
+        Some("archive/sub/index.md")
+    );
+
+    // Test creating empty folder without initial note
+    root.app.dialogs.folder.open = true;
+    root.app.dialogs.folder.path = "empty_dir".to_string();
+    root.app.dialogs.folder.create_initial_note = false;
     root.redraw();
 
     root.app
         .application
         .create_folder(&root.app.dialogs.folder.path.clone())
         .unwrap();
-    assert!(target.join("archive/sub").is_dir());
+    assert!(target.join("empty_dir").is_dir());
 
     let _ = root.app.application.shutdown();
     let _ = std::fs::remove_dir_all(target);

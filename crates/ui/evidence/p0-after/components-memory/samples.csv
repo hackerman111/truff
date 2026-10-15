@@ -1,0 +1,13 @@
+scenario,metric,run_id,sample_idx,value,unit
+memory-retention,rss_initial_mib,1,0,9.3086,mib
+memory-retention,rss_steady_mib,1,0,23.8516,mib
+memory-retention,rss_delta_mib,1,0,14.5430,mib
+memory-retention,search_first_page_ms,1,0,0.1886,ms
+memory-retention,rss_initial_mib,2,0,26.3633,mib
+memory-retention,rss_steady_mib,2,0,26.1992,mib
+memory-retention,rss_delta_mib,2,0,0.0000,mib
+memory-retention,search_first_page_ms,2,0,0.1881,ms
+memory-retention,rss_initial_mib,3,0,26.1992,mib
+memory-retention,rss_steady_mib,3,0,26.1992,mib
+memory-retention,rss_delta_mib,3,0,0.0000,mib
+memory-retention,search_first_page_ms,3,0,0.1890,ms

@@ -1,0 +1,11 @@
+baseline_commit=d49e80433f20c88da74dd132674a912b0f8ee63c
+platform=Linux-7.2.9-arch1-1-x86_64-with-glibc2.44
+logical_cpus=12
+rustc 1.95.0 (59807616e 2026-04-14)
+probe_profile=release
+probe_screen_dp=1100x700
+probe_frames=5 warmup, 500 timed per workload
+components_profile=debug
+components_runs=3
+native_backend=Xvfb/X11, scale 1
+measurement_boundary=CPU egui; GPU/native input-to-present excluded

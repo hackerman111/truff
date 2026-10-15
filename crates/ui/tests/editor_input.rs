@@ -264,3 +264,68 @@ fn task_toggle_preserves_selection_and_can_be_undone() {
         .unwrap();
     assert_eq!(shell.editor_buffer().unwrap().revision(), revision);
 }
+
+#[test]
+fn test_smart_edit_enter_tab_shift_tab_and_undo() {
+    use truff_core::vim::{Key, Mode};
+
+    let mut shell = Shell::new();
+
+    // 1. Bullet list continuation
+    shell.set_editor_text("- first item");
+    // Enter insert mode at the end: 'A'
+    shell.feed_key(Key::Char('A'));
+    assert_eq!(shell.mode(), Mode::Insert);
+    shell.feed_key(Key::Enter);
+    assert_eq!(shell.editor_text(), "- first item\n- ");
+
+    // 2. Empty bullet item exit on Enter
+    shell.feed_key(Key::Enter);
+    assert_eq!(shell.editor_text(), "- first item\n");
+
+    // 3. Task list continuation produces unchecked task
+    shell.set_editor_text("- [x] completed task");
+    shell.feed_key(Key::Char('A'));
+    assert_eq!(shell.mode(), Mode::Insert);
+    shell.feed_key(Key::Enter);
+    assert_eq!(shell.editor_text(), "- [x] completed task\n- [ ] ");
+
+    // 4. Ordered list auto-numbering and sibling renumbering
+    shell.set_editor_text("1. first\n2. second\n");
+    // Place cursor at the end of line 1 (after "first")
+    if let Some(id) = shell.workspace().active_view() {
+        let pos = truff_core::text::BytePos::new("1. first".len());
+        shell
+            .workspace_mut()
+            .get_view_mut(id)
+            .unwrap()
+            .set_cursor(pos, pos);
+    }
+    shell.feed_key(Key::Char('i'));
+    shell.feed_key(Key::Enter);
+    assert_eq!(shell.editor_text(), "1. first\n2. \n2. second\n");
+
+    // 5. Smart Tab indents list marker
+    shell.set_editor_text("- item");
+    shell.feed_key(Key::Char('i'));
+    shell.feed_key(Key::Tab);
+    assert!(
+        shell.editor_text().starts_with("  - item")
+            || shell.editor_text().starts_with("    - item")
+            || shell.editor_text().starts_with("\t- item"),
+        "Tab should indent list item, got {:?}",
+        shell.editor_text()
+    );
+
+    // 6. Smart ShiftTab dedents list marker
+    shell.feed_key(Key::ShiftTab);
+    assert_eq!(shell.editor_text(), "- item");
+
+    // 7. Single undo restores state before ShiftTab, second undo restores state before Tab
+    shell.feed_key(Key::Esc);
+    assert_eq!(shell.mode(), Mode::Normal);
+    shell.feed_key(Key::Char('u'));
+    assert_eq!(shell.editor_text(), "  - item");
+    shell.feed_key(Key::Char('u'));
+    assert_eq!(shell.editor_text(), "- item");
+}

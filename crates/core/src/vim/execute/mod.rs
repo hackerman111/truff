@@ -148,4 +148,85 @@ impl VimState {
         }
         self.run_command(cmd, ctx)
     }
+
+    /// Returns `true` if Vim parser has a pending count, operator, motion prefix, colon, or search.
+    pub fn has_pending_input(&self) -> bool {
+        !self.parser.is_idle() || self.selected_reg.is_some()
+    }
+
+    /// Returns `true` when printable characters must be treated strictly as literal text input.
+    pub fn accepts_literal_text(
+        &self,
+        context: crate::commands::CommandContext,
+        ime_composing: bool,
+    ) -> bool {
+        ime_composing || (self.mode == Mode::Insert && context.is_editable_text())
+    }
+
+    /// Pure resolver for UI input routing: determines whether a key is literal text, IME,
+    /// field-local Esc, pending Vim state, or a contextual keymap command/prefix.
+    pub fn resolve_key_disposition(
+        &self,
+        key: Key,
+        prefix: &[Key],
+        context: crate::commands::CommandContext,
+        ime_composing: bool,
+        keymap: &crate::config::CompiledKeymap,
+    ) -> KeyDisposition {
+        if ime_composing {
+            return KeyDisposition::ImeComposing;
+        }
+        if self.mode == Mode::Insert && context.is_editable_text() {
+            return match key {
+                Key::Esc => KeyDisposition::ExitInsertInField,
+                Key::Char(c) => KeyDisposition::LiteralText(c),
+                other => KeyDisposition::InsertEditingKey(other),
+            };
+        }
+        if key == Key::Esc {
+            if !prefix.is_empty()
+                || self.has_pending_input()
+                || matches!(self.mode, Mode::VisualChar | Mode::VisualLine)
+            {
+                return KeyDisposition::CancelPendingOrVisual;
+            }
+            return KeyDisposition::CloseModalOrCancel;
+        }
+        if prefix.is_empty() && self.has_pending_input() {
+            return KeyDisposition::VimPending;
+        }
+        let mut seq = Vec::with_capacity(prefix.len() + 1);
+        seq.extend_from_slice(prefix);
+        seq.push(key);
+        match keymap.lookup(self.mode, &seq, context) {
+            crate::config::BindingLookup::Complete(id) => KeyDisposition::KeymapCommand(id),
+            crate::config::BindingLookup::Prefix => KeyDisposition::KeymapPrefix,
+            crate::config::BindingLookup::Missing => KeyDisposition::VimNormal,
+        }
+    }
+}
+
+/// Pure, side-effect-free decision describing how UI/input routing must treat a key event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyDisposition {
+    /// Active IME composition owns the key event (including Esc to cancel composition).
+    ImeComposing,
+    /// Printable character in an active `Insert` field must be committed as literal text.
+    LiteralText(char),
+    /// Non-character editing key (`Backspace`, `Enter`, `Tab`, `ShiftTab`, arrows) in `Insert` mode.
+    InsertEditingKey(Key),
+    /// `Esc` inside an `Insert` text field exits `Insert` -> `Normal` locally without closing outer modals.
+    ExitInsertInField,
+    /// `Esc` cancels pending Vim state/prefix or Visual mode without closing outer modals.
+    CancelPendingOrVisual,
+    /// `Esc` when already idle in `Normal` mode may be used by outer shell/modal to close.
+    CloseModalOrCancel,
+    /// Mid-sequence Vim state (pending operator, count, `f/t`, register, `:` or `/`) owns the key.
+    VimPending,
+    /// Matches a prefix in `CompiledKeymap` (triggers Which-Key / prefix buffering).
+    KeymapPrefix,
+    /// Matches a complete `CommandId` in `CompiledKeymap` for the current context.
+    KeymapCommand(crate::commands::CommandId),
+    /// Standard Normal/Visual Vim parser handling.
+    VimNormal,
 }

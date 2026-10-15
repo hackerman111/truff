@@ -9,7 +9,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
     egui::Panel::top("tabs")
         .frame(
             egui::Frame::new()
-                .fill(egui::Color32::from_rgb(0x20, 0x24, 0x2c))
+                .fill(color(theme.bg_panel))
                 .stroke(egui::Stroke::new(1.0, color(theme.border)))
                 .inner_margin(egui::Margin {
                     left: 8,
@@ -19,9 +19,10 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                 }),
         )
         .show(ui, |ui| {
-            ui.set_height(34.0);
+            ui.set_height(theme.geometry.tab_height);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
+                ui.spacing_mut().interact_size.y = theme.geometry.tab_height - 10.0;
                 let active_view_id = application.shell.workspace().active_view();
                 let mut views: Vec<_> = application.shell.workspace().views().values().collect();
                 views.sort_by_key(|v| v.id().get());
@@ -88,7 +89,8 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                             .inner_margin(egui::Margin::symmetric(10, 5));
 
                         let frame_resp = frame.show(ui, |ui| {
-                            ui.set_height(24.0);
+                            ui.set_height(theme.geometry.tab_height - 10.0);
+                            ui.spacing_mut().interact_size.y = theme.geometry.tab_height - 10.0;
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 6.0;
 
@@ -104,7 +106,14 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                                     1.4,
                                 );
 
-                                let rich = egui::RichText::new(title).size(12.0).color(text_color);
+                                let rich =
+                                    egui::RichText::new(if application.view_is_pinned(view_id) {
+                                        format!("• {title}")
+                                    } else {
+                                        title.to_owned()
+                                    })
+                                    .size(theme.geometry.ui_font_size)
+                                    .color(text_color);
                                 let resp = ui.selectable_label(false, rich);
 
                                 let (action_rect, action_resp) = ui.allocate_exact_size(
@@ -123,7 +132,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                                         ui.painter().rect_filled(
                                             action_rect,
                                             egui::CornerRadius::same(3),
-                                            egui::Color32::from_rgb(0x39, 0x43, 0x51),
+                                            color(theme.bg_tertiary),
                                         );
                                     }
                                     icons::render_icon(
@@ -172,12 +181,15 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                     }
                 }
 
-                if let Some(id) = switch_view {
-                    application.shell.workspace_mut().set_active_view(Some(id));
-                    application.shell.reset_editor_input();
+                if let Some(id) = switch_view
+                    && let Err(error) = application.focus_view(id)
+                {
+                    application.status = error.to_string();
                 }
-                if let Some(id) = close_view {
-                    let _ = application.dispatch(truff_core::commands::Action::CloseView(id));
+                if let Some(id) = close_view
+                    && let Err(error) = application.close_view(id)
+                {
+                    application.status = error.to_string();
                 }
             });
         });

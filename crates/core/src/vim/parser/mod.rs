@@ -1,6 +1,6 @@
 mod command;
 
-pub use command::{Command, InsertEntry, Operator, ParseResult};
+pub use command::{Command, InsertEntry, Operator, ParseResult, ScrollPosition};
 
 use super::motion::{Motion, TextObject, TextObjectKind, TextObjectTarget};
 use super::{Key, Mode};
@@ -279,6 +279,11 @@ impl VimParser {
                     Key::Char('l') => Some(TextObjectTarget::MarkdownLink),
                     Key::Char('h') => Some(TextObjectTarget::MarkdownHeading),
                     Key::Char('c') => Some(TextObjectTarget::MarkdownCodeBlock),
+                    Key::Char('S') => Some(TextObjectTarget::MarkdownSection),
+                    Key::Char('L') => Some(TextObjectTarget::MarkdownListItem),
+                    Key::Char('q') => Some(TextObjectTarget::MarkdownQuote),
+                    Key::Char('t') => Some(TextObjectTarget::MarkdownTableCell),
+                    Key::Char('T') => Some(TextObjectTarget::MarkdownTableRow),
                     _ => None,
                 };
 
@@ -414,6 +419,41 @@ impl VimParser {
                 self.reset();
                 ParseResult::Complete(Command::RepeatLastEdit)
             }
+            Key::Char('z') => {
+                if self.buffer.len() < 2 {
+                    return ParseResult::Incomplete;
+                }
+                match self.buffer[1] {
+                    Key::Char('z') => {
+                        self.reset();
+                        ParseResult::Complete(Command::ScrollCursor(ScrollPosition::Center))
+                    }
+                    Key::Char('t') => {
+                        self.reset();
+                        ParseResult::Complete(Command::ScrollCursor(ScrollPosition::Top))
+                    }
+                    Key::Char('b') => {
+                        self.reset();
+                        ParseResult::Complete(Command::ScrollCursor(ScrollPosition::Bottom))
+                    }
+                    _ => {
+                        self.reset();
+                        ParseResult::Invalid
+                    }
+                }
+            }
+            Key::Char('*') => {
+                self.reset();
+                ParseResult::Complete(Command::SearchWordUnderCursor { forward: true })
+            }
+            Key::Char('#') => {
+                self.reset();
+                ParseResult::Complete(Command::SearchWordUnderCursor { forward: false })
+            }
+            Key::Char('g') if self.buffer.len() >= 2 && self.buffer[1] == Key::Char('f') => {
+                self.reset();
+                ParseResult::Complete(Command::FollowLink)
+            }
             _ => match self.parse_motion() {
                 ParseMotionResult::Complete(motion) => {
                     self.reset();
@@ -437,6 +477,7 @@ impl VimParser {
         }
 
         match self.buffer[0] {
+            Key::Char('%') => ParseMotionResult::Complete(Motion::MatchingBracket),
             Key::Char('h') | Key::Left => ParseMotionResult::Complete(Motion::Left),
             Key::Char('j') | Key::Down => ParseMotionResult::Complete(Motion::Down),
             Key::Char('k') | Key::Up => ParseMotionResult::Complete(Motion::Up),

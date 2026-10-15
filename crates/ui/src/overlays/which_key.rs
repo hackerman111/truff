@@ -1,6 +1,16 @@
 use truff_core::config::KeyHint;
 
 mod help;
+mod help_state;
+pub(crate) use help_state::HelpItem;
+
+pub(crate) fn key_label(key: truff_core::vim::Key) -> String {
+    if key == truff_core::vim::Key::Char(' ') {
+        "Space".into()
+    } else {
+        key.to_string()
+    }
+}
 
 /// Display mode of WhichKey overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -27,6 +37,7 @@ pub struct WhichKeyOverlay {
     visible: bool,
     elapsed_ms: u64,
     delay_ms: u64,
+    pub(crate) help: help_state::HelpState,
 }
 
 impl Default for WhichKeyOverlay {
@@ -49,6 +60,7 @@ impl WhichKeyOverlay {
             visible: false,
             elapsed_ms: 0,
             delay_ms: Self::DEFAULT_DELAY_MS,
+            help: help_state::HelpState::default(),
         }
     }
 
@@ -97,6 +109,19 @@ impl WhichKeyOverlay {
         self.title = "Справка по горячим клавишам".to_string();
         self.hints.clear();
         self.categories = categories;
+        self.help = help_state::HelpState::default();
+        self.help.set_items(
+            self.categories
+                .iter()
+                .flat_map(|category| {
+                    category.hints.iter().map(|hint| HelpItem {
+                        category: category.name.clone(),
+                        keys: key_label(hint.key),
+                        description: hint.description.clone(),
+                    })
+                })
+                .collect(),
+        );
         self.visible = true;
     }
 
@@ -108,6 +133,7 @@ impl WhichKeyOverlay {
         self.title = String::new();
         self.mode = WhichKeyMode::Prefix;
         self.elapsed_ms = 0;
+        self.help = help_state::HelpState::default();
     }
 
     /// Advances the timer by `delta_ms`. Shows overlay if threshold is reached.

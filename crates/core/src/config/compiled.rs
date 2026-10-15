@@ -13,18 +13,27 @@ pub struct CompiledKeymap {
 #[derive(Debug, Clone)]
 struct CompiledBinding {
     binding: KeyBinding,
-    available: [bool; 3],
+    available: [bool; 7],
 }
 
 impl CompiledBinding {
     fn available_in(&self, context: CommandContext) -> bool {
-        self.available[match context {
+        self.available[Self::context_index(context)]
+    }
+
+    const fn context_index(context: CommandContext) -> usize {
+        match context {
             CommandContext::Editor => 0,
-            CommandContext::Rows => 1,
-            CommandContext::Global => 2,
-        }]
+            CommandContext::TextField => 1,
+            CommandContext::CommandLine => 2,
+            CommandContext::Rows => 3,
+            CommandContext::Navigator => 4,
+            CommandContext::Modal => 5,
+            CommandContext::Global => 6,
+        }
     }
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindingLookup {
     Complete(CommandId),
@@ -45,14 +54,14 @@ impl KeymapConfig {
                 let spec = registry
                     .get(&binding.command)
                     .map_err(KeymapError::Registry)?;
-                let global = spec.contexts.contains(&CommandContext::Global);
+                let mut available = [false; 7];
+                for ctx in CommandContext::ALL {
+                    available[CompiledBinding::context_index(ctx)] =
+                        ctx.matches_spec(&spec.contexts);
+                }
                 Ok(CompiledBinding {
                     binding: binding.clone(),
-                    available: [
-                        global || spec.contexts.contains(&CommandContext::Editor),
-                        global || spec.contexts.contains(&CommandContext::Rows),
-                        global,
-                    ],
+                    available,
                 })
             })
             .collect::<Result<Vec<_>, KeymapError>>()?;

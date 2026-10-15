@@ -11,4 +11,5 @@ pub mod rows;
 pub mod shell;
 pub mod theme;
 
+mod components;
 pub mod perf_scenarios;

@@ -81,8 +81,14 @@ impl MarkdownFacts {
                         code_ranges.push(start..range.end);
                     }
                 }
-                Event::Code(_) => {
+                Event::Code(code) => {
                     code_ranges.push(range);
+                    if let Some((_, _, ref mut h_text)) = current_heading {
+                        h_text.push_str(&code);
+                    }
+                    if let Some((_, _, ref mut l_text)) = current_link {
+                        l_text.push_str(&code);
+                    }
                 }
                 Event::Start(Tag::Heading { level, .. }) => {
                     let lvl = level as u8;

@@ -3,22 +3,19 @@ use crate::app::Application;
 use crate::theme::Theme;
 use eframe::egui;
 
-pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) {
+pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &Theme) {
     egui::Panel::bottom("status")
         .frame(
             egui::Frame::new()
-                .fill(color(theme.bg_tertiary))
+                .fill(color(theme.bg_panel))
                 .stroke(egui::Stroke::new(1.0, color(theme.border)))
                 .inner_margin(egui::Margin::symmetric(12, 4)),
         )
         .show(ui, |ui| {
-            if let Some(command) = application.shell.command() {
-                ui.label(
-                    egui::RichText::new(format!(":{command}"))
-                        .monospace()
-                        .color(color(theme.accent))
-                        .strong(),
-                );
+            ui.spacing_mut().interact_size.y = theme.geometry.status_height - 8.0;
+            ui.set_min_height(theme.geometry.status_height - 8.0);
+            if application.shell.command().is_some() {
+                super::command_bar::show(application, ui, theme);
             } else {
                 ui.horizontal(|ui| {
                     let mode = application.shell.mode();
@@ -34,6 +31,9 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                         crate::shell::Focus::RightPanel => "RightPanel",
                         crate::shell::Focus::Navigator => "Navigator",
                         crate::shell::Focus::CommandBar => "CommandBar",
+                        crate::shell::Focus::TOC => "TOC",
+                        crate::shell::Focus::Wiki => "Wiki",
+                        crate::shell::Focus::Stream => "Stream",
                     };
                     let (pill_bg, pill_fg) = match mode {
                         truff_core::vim::Mode::Insert => {
@@ -51,7 +51,7 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                         .show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new(mode_str)
-                                    .size(11.0)
+                                    .size(theme.geometry.ui_font_size - 2.0)
                                     .strong()
                                     .color(pill_fg),
                             );
@@ -59,21 +59,24 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                     ui.add_space(4.0);
                     ui.label(
                         egui::RichText::new(focus_str)
-                            .size(12.0)
+                            .size(theme.geometry.ui_font_size - 1.0)
                             .color(color(theme.text_muted)),
                     );
                     ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(&application.status)
-                            .size(12.0)
-                            .color(color(theme.text_muted)),
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&application.status)
+                                .size(theme.geometry.ui_font_size - 1.0)
+                                .color(color(theme.text_muted)),
+                        )
+                        .truncate(),
                     );
 
                     // Right-aligned cursor position and metadata
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Markdown · UTF-8")
-                                .size(12.0)
+                                .size(theme.geometry.ui_font_size - 1.0)
                                 .color(color(theme.text_muted)),
                         );
                         ui.add_space(8.0);
@@ -92,7 +95,7 @@ pub(super) fn show(application: &Application, ui: &mut egui::Ui, theme: &Theme) 
                         ui.label(
                             egui::RichText::new(cursor_str)
                                 .monospace()
-                                .size(12.0)
+                                .size(theme.geometry.ui_font_size - 1.0)
                                 .color(color(theme.text_muted)),
                         );
                     });

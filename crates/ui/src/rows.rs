@@ -1,5 +1,8 @@
 use std::ops::Range;
 
+mod scroll;
+pub(crate) use scroll::{Alignment, RowScroll, selected_rows};
+
 /// Virtualized list layout for high-performance row rendering.
 ///
 /// Ensures memory and widget allocation is bounded strictly by the viewport,
