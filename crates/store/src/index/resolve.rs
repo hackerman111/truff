@@ -101,9 +101,8 @@ pub struct BatchResolverCache {
 impl BatchResolverCache {
     /// Loads all file paths, stems and names from SQLite into memory for bulk resolution.
     pub fn load(conn: &Connection) -> rusqlite::Result<Self> {
-        let mut stmt = conn.prepare_cached(
-            "SELECT id, relative_path, file_stem, file_name FROM files",
-        )?;
+        let mut stmt =
+            conn.prepare_cached("SELECT id, relative_path, file_stem, file_name FROM files")?;
         let mut exact_paths = HashMap::new();
         let mut source_paths = HashMap::new();
         let mut stems: HashMap<String, Vec<FileId>> = HashMap::new();
@@ -148,7 +147,11 @@ impl BatchResolverCache {
         };
 
         // 1. Exact match by relative_path
-        if let Some(&id) = self.exact_paths.get(path_or_name).or_else(|| self.exact_paths.get(&with_md)) {
+        if let Some(&id) = self
+            .exact_paths
+            .get(path_or_name)
+            .or_else(|| self.exact_paths.get(&with_md))
+        {
             return FileFindResult::Found(id);
         }
 
@@ -165,7 +168,11 @@ impl BatchResolverCache {
                 } else {
                     format!("{resolved_str}.md")
                 };
-                if let Some(&id) = self.exact_paths.get(resolved_str.as_ref()).or_else(|| self.exact_paths.get(&resolved_with_md)) {
+                if let Some(&id) = self
+                    .exact_paths
+                    .get(resolved_str.as_ref())
+                    .or_else(|| self.exact_paths.get(&resolved_with_md))
+                {
                     return FileFindResult::Found(id);
                 }
             }

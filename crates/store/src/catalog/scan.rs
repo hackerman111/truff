@@ -68,7 +68,12 @@ pub(super) fn affected_files(
     if absolute.is_dir() {
         Ok(enumerate(&absolute)?
             .into_iter()
-            .map(|f| Path::new(path).join(f.relative_path).to_string_lossy().into_owned())
+            .map(|f| {
+                Path::new(path)
+                    .join(f.relative_path)
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect())
     } else {
         Ok(vec![path.to_owned()])
@@ -81,7 +86,10 @@ pub(super) fn rebuild(
     events: &CatalogReplies,
 ) -> Result<HashMap<String, FileId>, Box<dyn std::error::Error>> {
     let scanned_files = enumerate(paths.root())?;
-    let paths_list: Vec<String> = scanned_files.iter().map(|f| f.relative_path.clone()).collect();
+    let paths_list: Vec<String> = scanned_files
+        .iter()
+        .map(|f| f.relative_path.clone())
+        .collect();
     let _ = events.send(CatalogEvent::Files(paths_list.clone()));
     let existing = indexed_paths(db)?;
     let removed: Vec<_> = existing
@@ -268,7 +276,10 @@ pub(super) fn refresh_scanned(
         let resolved = match paths.resolve_path(Path::new(&file.relative_path)) {
             Ok(p) => p,
             Err(error) => {
-                let _ = events.send(CatalogEvent::Error(format!("{}: {error}", file.relative_path)));
+                let _ = events.send(CatalogEvent::Error(format!(
+                    "{}: {error}",
+                    file.relative_path
+                )));
                 continue;
             }
         };
@@ -308,7 +319,10 @@ pub(super) fn refresh_scanned(
                 modified_files.push(FileId(stored.id));
             }
             Err(error) => {
-                let _ = events.send(CatalogEvent::Error(format!("{}: {error}", file.relative_path)));
+                let _ = events.send(CatalogEvent::Error(format!(
+                    "{}: {error}",
+                    file.relative_path
+                )));
             }
         }
     }

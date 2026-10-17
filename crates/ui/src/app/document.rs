@@ -23,7 +23,12 @@ impl DocumentFacts {
         if buffer.byte_len() == 0 {
             return;
         }
-        let line_idx = buffer.line_of_byte(change.new_range.start.min(buffer.byte_len().saturating_sub(1)));
+        let line_idx = buffer.line_of_byte(
+            change
+                .new_range
+                .start
+                .min(buffer.byte_len().saturating_sub(1)),
+        );
         let line_start = buffer.byte_of_line(line_idx);
         let line_end = if line_idx + 1 < buffer.line_len() {
             buffer.byte_of_line(line_idx + 1)
@@ -42,7 +47,9 @@ impl DocumentFacts {
 
         if !touches_heading_syntax
             && change.new_range.len() + change.old_range.len() < 64
-            && !line_slice.chars().any(|c| matches!(c, '[' | ']' | '^' | '\n'))
+            && !line_slice
+                .chars()
+                .any(|c| matches!(c, '[' | ']' | '^' | '\n'))
         {
             let delta = change.new_range.len() as isize - change.old_range.len() as isize;
             if delta != 0 {
@@ -94,7 +101,12 @@ impl Application {
         let Some(cached) = &mut self.document_facts else {
             return;
         };
-        let Some(buffer) = self.shell.workspace().buffers().get_buffer(change.buffer_id) else {
+        let Some(buffer) = self
+            .shell
+            .workspace()
+            .buffers()
+            .get_buffer(change.buffer_id)
+        else {
             return;
         };
         cached.notify_buffer_change(buffer, change);

@@ -1,10 +1,10 @@
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs::{self, File};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use sha2::{Digest, Sha256};
 
 use truff_core::text::BufferId;
 use truff_core::workspace::buffers::{SnapshotKey, VaultEpoch};
@@ -137,7 +137,13 @@ impl RecoveryManager {
         rope: &truff_core::Rope,
         base_fingerprint: Option<&str>,
     ) -> Result<PathBuf, RecoveryError> {
-        self.write_snapshot_chunks(key, rel_path, rope.chunks(), rope.byte_len(), base_fingerprint)
+        self.write_snapshot_chunks(
+            key,
+            rel_path,
+            rope.chunks(),
+            rope.byte_len(),
+            base_fingerprint,
+        )
     }
 
     /// Atomically writes a durable recovery snapshot.

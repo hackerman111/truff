@@ -7,8 +7,7 @@ impl DisplayMap {
     /// Maps a source `BytePos` into a `VisualPos` with the specified affinity.
     pub fn source_to_visual(&self, pos: BytePos, affinity: Affinity) -> VisualPos {
         let source_offset = pos.get().min(self.source_text.len());
-        if self.mode == ProjectionMode::Source
-            || (self.chunks.len() == 1 && !self.chunks[0].hidden)
+        if self.mode == ProjectionMode::Source || (self.chunks.len() == 1 && !self.chunks[0].hidden)
         {
             return VisualPos(source_offset);
         }
@@ -63,8 +62,7 @@ impl DisplayMap {
     /// Maps a `VisualPos` back to a `SourceHit`.
     pub fn visual_to_source(&self, pos: VisualPos) -> SourceHit {
         let visual_offset = pos.get().min(self.visual_text().len());
-        if self.mode == ProjectionMode::Source
-            || (self.chunks.len() == 1 && !self.chunks[0].hidden)
+        if self.mode == ProjectionMode::Source || (self.chunks.len() == 1 && !self.chunks[0].hidden)
         {
             return SourceHit {
                 pos: BytePos(visual_offset),

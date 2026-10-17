@@ -297,8 +297,9 @@ impl ChangeSet {
                         break;
                     }
                     if pos <= change.old_range.end {
-                        mapped =
-                            Some(((change.old_range.start as isize + shift) as usize) + change.new_len);
+                        mapped = Some(
+                            ((change.old_range.start as isize + shift) as usize) + change.new_len,
+                        );
                     }
                     shift += change.delta();
                 }

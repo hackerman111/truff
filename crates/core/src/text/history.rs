@@ -61,8 +61,16 @@ impl HistoryGroup {
             + self.inverse_edits.capacity() * size_of::<SingleEdit>()
             + self.forward_batch_ends.capacity() * size_of::<u32>()
             + self.inverse_batch_ends.capacity() * size_of::<u32>()
-            + self.forward_edits.iter().map(|e| e.text.capacity()).sum::<usize>()
-            + self.inverse_edits.iter().map(|e| e.text.capacity()).sum::<usize>()
+            + self
+                .forward_edits
+                .iter()
+                .map(|e| e.text.capacity())
+                .sum::<usize>()
+            + self
+                .inverse_edits
+                .iter()
+                .map(|e| e.text.capacity())
+                .sum::<usize>()
     }
 
     pub fn push_batch(
@@ -112,9 +120,11 @@ impl HistoryGroup {
             compact_edit_text(edit);
         }
         self.forward_edits.extend(forward);
-        self.forward_batch_ends.push(self.forward_edits.len() as u32);
+        self.forward_batch_ends
+            .push(self.forward_edits.len() as u32);
         self.inverse_edits.extend(inverse);
-        self.inverse_batch_ends.push(self.inverse_edits.len() as u32);
+        self.inverse_batch_ends
+            .push(self.inverse_edits.len() as u32);
         self.size_in_bytes = size_of::<Self>() + self.heap_bytes();
     }
 

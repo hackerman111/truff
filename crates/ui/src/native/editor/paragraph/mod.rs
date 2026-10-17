@@ -95,7 +95,8 @@ impl Paragraph {
         if view_changed {
             self.display.update(None, cursor, selection);
         }
-        let projection_changed = mode_changed || old_visual_revision != self.display.visual_revision();
+        let projection_changed =
+            mode_changed || old_visual_revision != self.display.visual_revision();
         if !projection_changed
             && self.color == style.foreground
             && self.pixels_per_point == style.pixels_per_point
