@@ -15,6 +15,7 @@ pub(super) fn show(
 ) -> bool {
     let mut open_vault = false;
     for change in application.shell.take_buffer_changes() {
+        application.notify_buffer_change_for_facts(&change);
         if let Some(buffer) = application
             .shell
             .workspace()

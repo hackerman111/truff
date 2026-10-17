@@ -226,6 +226,8 @@ pub struct TocModel {
     pub sticky_breadcrumbs: Vec<String>,
     pub search_query: String,
     pub search_active: bool,
+    pub last_active_facts: Option<usize>,
+    pub last_active_path: Option<String>,
 }
 
 impl TocModel {
@@ -241,6 +243,19 @@ impl TocModel {
         active_path: Option<&str>,
         caret_byte: usize,
     ) {
+        let facts_ptr = facts.map(|f| f as *const DocFacts as usize);
+        let path_str = active_path.map(str::to_owned);
+
+        if self.last_active_facts == facts_ptr
+            && self.last_active_path == path_str
+            && !self.all_items.is_empty()
+        {
+            self.sync_caret(caret_byte, facts);
+            return;
+        }
+
+        self.last_active_facts = facts_ptr;
+        self.last_active_path = path_str;
         self.all_items.clear();
         let Some(buffer) = buffer else {
             self.refresh_visible();
@@ -341,6 +356,8 @@ impl TocModel {
         active_facts: Option<&DocFacts>,
     ) {
         self.scope = scope;
+        self.last_active_facts = None;
+        self.last_active_path = None;
         if scope == TocScope::ActiveFile {
             let caret = 0;
             self.rebuild_active_file(active_buffer, active_facts, active_path, caret);
@@ -446,6 +463,19 @@ impl TocModel {
     pub fn sync_caret(&mut self, caret_byte: usize, facts: Option<&DocFacts>) {
         let Some(facts) = facts else { return };
         let active_heading_idx = find_active_heading_index(facts, caret_byte);
+
+        if let Some(active_idx) = self.active_item_index {
+            let current_heading_idx = self.all_items[..=active_idx]
+                .iter()
+                .filter(|it| matches!(it.kind, TocItemKind::Heading { .. }))
+                .count()
+                .checked_sub(1);
+            if current_heading_idx == active_heading_idx {
+                return;
+            }
+        } else if active_heading_idx.is_none() {
+            return;
+        }
 
         let mut matched_idx = None;
         let mut count = 0;

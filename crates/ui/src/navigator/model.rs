@@ -16,6 +16,7 @@ pub struct NavigatorState {
     pub preview_visible: bool,
     pub actions_menu_open: bool,
     pub actions_menu_selected: usize,
+    pub last_filtered_query: String,
     pub(crate) search_page: usize,
     pub(crate) search_total: usize,
     pub(crate) results_query: Option<String>,
@@ -43,6 +44,7 @@ impl NavigatorState {
             preview_visible: true,
             actions_menu_open: false,
             actions_menu_selected: 0,
+            last_filtered_query: String::new(),
             search_page: 0,
             search_total: 0,
             results_query: None,
@@ -56,16 +58,22 @@ impl NavigatorState {
         &mut self,
         mode: NavigatorMode,
         context_title: impl Into<String>,
-        items: Vec<NavigatorItem>,
+        mut items: Vec<NavigatorItem>,
     ) {
         self.open = true;
         self.mode = mode;
         self.context_title = context_title.into();
         self.query.clear();
+        self.last_filtered_query.clear();
         self.results_query = None;
         self.search_page = 0;
         self.search_total = 0;
         self.search_mode = false;
+        for item in &mut items {
+            if item.char_mask == 0 {
+                item.update_char_mask();
+            }
+        }
         self.items = items;
         self.actions_menu_open = false;
         self.actions_menu_selected = 0;
@@ -84,6 +92,7 @@ impl NavigatorState {
         self.search_mode = false;
         self.actions_menu_open = false;
         self.query = String::new();
+        self.last_filtered_query.clear();
         self.context_title = String::new();
         self.items = Vec::new();
         self.filtered_indices = Vec::new();
@@ -119,6 +128,7 @@ impl NavigatorState {
         }
         let q = lowercase(self.query.trim());
         if q.is_empty() || matches!(self.mode, NavigatorMode::Content | NavigatorMode::Mixed) {
+            self.last_filtered_query.clear();
             let mut hidden_below = None;
             self.filtered_indices = self
                 .items
@@ -137,11 +147,31 @@ impl NavigatorState {
                 })
                 .collect();
         } else {
-            let mut scored: Vec<(usize, i32)> = self
-                .items
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, item)| {
+            let q_mask = compute_char_mask(&q);
+            let incremental = !self.last_filtered_query.is_empty()
+                && q.starts_with(&self.last_filtered_query)
+                && !self.filtered_indices.is_empty();
+
+            if !incremental {
+                for item in &mut self.items {
+                    item.update_char_mask();
+                }
+            }
+
+            let candidate_indices: Vec<usize> = if incremental {
+                self.filtered_indices.clone()
+            } else {
+                (0..self.items.len()).collect()
+            };
+
+            let mut scored: Vec<(usize, i32)> = candidate_indices
+                .into_iter()
+                .filter_map(|idx| {
+                    let item = &self.items[idx];
+                    if item.char_mask != 0 && (item.char_mask & q_mask) != q_mask {
+                        return None;
+                    }
+
                     let title_lower = lowercase(item.display_title());
                     let score = if title_lower == q {
                         200
@@ -167,6 +197,7 @@ impl NavigatorState {
 
             scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             self.filtered_indices = scored.into_iter().map(|(idx, _)| idx).collect();
+            self.last_filtered_query = q.into_owned();
         }
 
         if self.filtered_indices.is_empty() {

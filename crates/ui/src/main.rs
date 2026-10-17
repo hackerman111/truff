@@ -28,7 +28,39 @@ fn print_help() {
     println!("  --help, -h           Show this help message");
 }
 
+#[cfg(target_os = "linux")]
+fn configure_linux_egl_vendor_if_needed() {
+    if std::env::var_os("__EGL_VENDOR_LIBRARY_FILENAMES").is_none() {
+        let nvidia_loaded = Path::new("/proc/driver/nvidia/version").exists()
+            || Path::new("/sys/module/nvidia").exists();
+        let nvidia_icd = Path::new("/usr/share/glvnd/egl_vendor.d/10_nvidia.json");
+        if nvidia_loaded && nvidia_icd.is_file() {
+            let has_intel_or_amd = (0..8).any(|i| {
+                let card = format!("/sys/class/drm/card{i}/device/vendor");
+                if let Ok(v) = std::fs::read_to_string(&card) {
+                    let v = v.trim();
+                    v == "0x8086" || v == "0x1002"
+                } else {
+                    false
+                }
+            });
+            if !has_intel_or_amd {
+                // SAFETY: Called early in main before graphics initialization while single-threaded.
+                unsafe {
+                    std::env::set_var(
+                        "__EGL_VENDOR_LIBRARY_FILENAMES",
+                        "/usr/share/glvnd/egl_vendor.d/10_nvidia.json",
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn main() {
+    #[cfg(target_os = "linux")]
+    configure_linux_egl_vendor_if_needed();
+
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
@@ -181,6 +213,9 @@ fn main() {
             .with_app_id("truff")
             .with_inner_size([1100.0, 700.0])
             .with_min_inner_size([640.0, 400.0]),
+        depth_buffer: 0,
+        stencil_buffer: 0,
+        multisampling: 0,
         ..Default::default()
     };
     if let Err(error) = eframe::run_native(

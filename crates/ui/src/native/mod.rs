@@ -197,6 +197,18 @@ impl NativeApp {
             }
             self.stream.open(&self.application);
         }
+        for change in self.application.shell.take_buffer_changes() {
+            self.application.notify_buffer_change_for_facts(&change);
+            if let Some(buffer) = self
+                .application
+                .shell
+                .workspace()
+                .buffers()
+                .get_buffer(change.buffer_id)
+            {
+                self.editor.apply_change(buffer, &change);
+            }
+        }
         self.sync_toc();
 
         if !self.application.focus_mode {

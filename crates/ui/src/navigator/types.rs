@@ -150,6 +150,30 @@ pub struct NavigatorItem {
     pub preview: Option<Box<str>>,
     pub disabled_reason: Option<Box<str>>,
     pub payload: NavigatorItemPayload,
+    pub char_mask: u64,
+}
+
+#[inline]
+pub fn compute_char_mask(s: &str) -> u64 {
+    let mut mask = 0u64;
+    for c in s.chars() {
+        for lower_c in c.to_lowercase() {
+            let bit = match lower_c {
+                'a'..='z' => (lower_c as u32) - ('a' as u32),
+                '0'..='9' => 26 + (lower_c as u32) - ('0' as u32),
+                '_' => 36,
+                '-' => 37,
+                '/' | '\\' => 38,
+                '.' => 39,
+                ' ' => 40,
+                'а'..='я' => 41 + (((lower_c as u32) - ('а' as u32)) % 22),
+                'ё' => 63,
+                _ => continue,
+            };
+            mask |= 1u64 << bit;
+        }
+    }
+    mask
 }
 
 fn file_name_start(path: &str) -> usize {
@@ -161,6 +185,17 @@ fn file_name_start(path: &str) -> usize {
 }
 
 impl NavigatorItem {
+    pub fn update_char_mask(&mut self) {
+        let mut mask = compute_char_mask(self.display_title());
+        if let Some(sub) = self.display_subtitle() {
+            mask |= compute_char_mask(sub);
+        }
+        if let Some(cat) = self.category.as_deref() {
+            mask |= compute_char_mask(cat);
+        }
+        self.char_mask = mask;
+    }
+
     pub fn new_file(
         id: u64,
         name: &str,
@@ -175,7 +210,7 @@ impl NavigatorItem {
             name.into()
         };
 
-        Self {
+        let mut item = Self {
             id,
             title,
             subtitle: None,
@@ -190,7 +225,10 @@ impl NavigatorItem {
                 path: relative_path,
                 is_dir,
             },
-        }
+            char_mask: 0,
+        };
+        item.update_char_mask();
+        item
     }
 
     pub fn display_title(&self) -> &str {
@@ -240,7 +278,7 @@ impl NavigatorItem {
             subtitle.push_str(&format!(" · {p}"));
         }
 
-        Self {
+        let mut item = Self {
             id,
             title: title.into_boxed_str(),
             subtitle: Some(subtitle.into_boxed_str()),
@@ -252,11 +290,14 @@ impl NavigatorItem {
             preview: None,
             disabled_reason: None,
             payload: NavigatorItemPayload::Buffer { buffer_id, path },
-        }
+            char_mask: 0,
+        };
+        item.update_char_mask();
+        item
     }
 
     pub fn new_link(id: u64, title: &str, target: String) -> Self {
-        Self {
+        let mut item = Self {
             id,
             title: title.into(),
             subtitle: None,
@@ -268,7 +309,10 @@ impl NavigatorItem {
             preview: Some(target.clone().into_boxed_str()),
             disabled_reason: None,
             payload: NavigatorItemPayload::Link { target },
-        }
+            char_mask: 0,
+        };
+        item.update_char_mask();
+        item
     }
 
     pub fn new_command(
@@ -279,7 +323,7 @@ impl NavigatorItem {
         category: Cow<'static, str>,
         shortcut: Option<String>,
     ) -> Self {
-        Self {
+        let mut item = Self {
             id,
             title: title.into_boxed_str(),
             subtitle: None,
@@ -291,13 +335,16 @@ impl NavigatorItem {
             preview: Some(description.into_boxed_str()),
             disabled_reason: None,
             payload: NavigatorItemPayload::Command { command_id },
-        }
+            char_mask: 0,
+        };
+        item.update_char_mask();
+        item
     }
 
     pub fn new_heading(id: u64, line: usize, level: usize, text: String) -> Self {
         let prefix = "#".repeat(level);
         let title = format!("{prefix} {text}");
-        Self {
+        let mut item = Self {
             id,
             title: title.into_boxed_str(),
             subtitle: Some(format!("Строка {line}").into_boxed_str()),
@@ -311,7 +358,10 @@ impl NavigatorItem {
             ),
             disabled_reason: None,
             payload: NavigatorItemPayload::Heading { line, level, text },
-        }
+            char_mask: 0,
+        };
+        item.update_char_mask();
+        item
     }
 
     pub fn new_task(id: u64, line: usize, checked: bool, text: String) -> Self {
@@ -320,7 +370,7 @@ impl NavigatorItem {
         } else {
             "Не выполнено"
         };
-        Self {
+        let mut item = Self {
             id,
             title: text.into_boxed_str(),
             subtitle: Some(state.into()),
@@ -334,7 +384,10 @@ impl NavigatorItem {
             ),
             disabled_reason: None,
             payload: NavigatorItemPayload::Task { line, checked },
-        }
+            char_mask: 0,
+        };
+        item.update_char_mask();
+        item
     }
 }
 

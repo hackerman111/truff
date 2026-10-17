@@ -5,6 +5,9 @@ use super::wiki::WikiAction;
 
 impl NativeApp {
     pub fn sync_toc(&mut self) {
+        if !self.toc.is_open && !self.toc.is_pinned {
+            return;
+        }
         let active_path = self.application.active_relative_path();
         let facts = self.application.document_facts();
         let buffer = self.application.shell.editor_buffer();
