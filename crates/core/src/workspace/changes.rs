@@ -94,7 +94,7 @@ impl Workspace {
         for batch in changes.batches().filter(|batch| !batch.is_empty()) {
             let start = batch.iter().map(|c| c.old_range.start).min().unwrap_or(0);
             let old_end = batch.iter().map(|c| c.old_range.end).max().unwrap_or(start);
-            let delta: isize = batch.iter().map(|c| c.delta).sum();
+            let delta: isize = batch.iter().map(|c| c.delta()).sum();
             let notice = BufferChange {
                 buffer_id,
                 revision,

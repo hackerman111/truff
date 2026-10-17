@@ -58,9 +58,10 @@ pub struct MarkdownFacts;
 impl MarkdownFacts {
     /// Extracts headings, links, and block IDs from markdown text.
     pub fn extract(text: &str) -> Result<DocFacts, MarkdownError> {
-        let mut code_ranges: Vec<Range<usize>> = Vec::new();
-        let mut headings: Vec<HeadingFact> = Vec::new();
-        let mut standard_links: Vec<LinkOccurrence> = Vec::new();
+        let est_cap = (text.len() / 1024).clamp(8, 2048);
+        let mut code_ranges: Vec<Range<usize>> = Vec::with_capacity(est_cap);
+        let mut headings: Vec<HeadingFact> = Vec::with_capacity(est_cap);
+        let mut standard_links: Vec<LinkOccurrence> = Vec::with_capacity(est_cap);
 
         // 1. Pass 1: Extract code ranges, headings, and standard markdown links via pulldown-cmark
         let mut options = Options::all();
@@ -139,9 +140,10 @@ impl MarkdownFacts {
         }
 
         // 2. Pass 2: Extract Wiki-links `[[...]]` with code block and escape exclusion
-        let mut wiki_links: Vec<LinkOccurrence> = Vec::new();
+        let mut wiki_links: Vec<LinkOccurrence> = Vec::with_capacity(est_cap);
         let bytes = text.as_bytes();
         let mut i = 0;
+        let mut code_cursor = CodeRangeCursor::new(&code_ranges);
         while i < bytes.len() {
             if i + 1 < bytes.len() && bytes[i] == b'[' && bytes[i + 1] == b'[' {
                 // Check if escaped: \[[
@@ -151,8 +153,7 @@ impl MarkdownFacts {
                 }
 
                 // Check if inside any code range
-                let is_inside_code = in_code(&code_ranges, i);
-                if is_inside_code {
+                if code_cursor.contains(i) {
                     i += 2;
                     continue;
                 }
@@ -173,28 +174,22 @@ impl MarkdownFacts {
             i += 1;
         }
 
-        // 3. Combine and sort all links chronologically by byte position, assigning ordinal
-        let mut all_links: Vec<LinkOccurrence> =
-            Vec::with_capacity(standard_links.len() + wiki_links.len());
-        all_links.extend(standard_links);
-        all_links.extend(wiki_links);
-        all_links.sort_by_key(|l| l.range.start);
-        for (idx, link) in all_links.iter_mut().enumerate() {
-            link.ordinal = idx;
-        }
+        // 3. Combine already sorted links chronologically by byte position, assigning ordinal in O(L)
+        let all_links = merge_sorted_links(standard_links, wiki_links);
 
         // 4. Pass 3: Extract block IDs `^block-id`
         let mut blocks: Vec<BlockFact> = Vec::new();
         let mut byte_offset = 0;
+        let mut block_cursor = CodeRangeCursor::new(&code_ranges);
         for line in text.lines() {
             let line_len = line.len();
             let line_start = byte_offset;
             let line_end = byte_offset + line_len;
 
             // Check if line is inside a code block
-            let inside_code = in_code(&code_ranges, line_start) || in_code(&code_ranges, line_end);
+            let inside_code = block_cursor.contains_range_boundary(line_start, line_end);
             if !inside_code && let Some(hat_pos) = line.rfind('^') {
-                let candidate = &line[hat_pos + 1..].trim();
+                let candidate = line[hat_pos + 1..].trim();
                 if !candidate.is_empty()
                     && candidate
                         .chars()
@@ -225,12 +220,96 @@ impl MarkdownFacts {
             blocks,
         })
     }
+
+    /// Fast-path extraction of headings only (used for outline and TOC navigation).
+    pub fn extract_headings_only(text: &str) -> Result<Vec<HeadingFact>, MarkdownError> {
+        let mut headings = Vec::new();
+        let options = Options::empty();
+        let parser = Parser::new_ext(text, options).into_offset_iter();
+        let mut current_heading: Option<(u8, usize, String)> = None;
+
+        for (event, range) in parser {
+            match event {
+                Event::Start(Tag::Heading { level, .. }) => {
+                    current_heading = Some((level as u8, range.start, String::new()));
+                }
+                Event::End(TagEnd::Heading(_)) => {
+                    if let Some((level, start, heading_text)) = current_heading.take() {
+                        let trimmed = heading_text.trim().to_string();
+                        let anchor = slugify(&trimmed);
+                        headings.push(HeadingFact {
+                            level,
+                            text: trimmed,
+                            anchor,
+                            range: start..range.end,
+                        });
+                    }
+                }
+                Event::Text(txt) | Event::Code(txt) => {
+                    if let Some((_, _, ref mut h_text)) = current_heading {
+                        h_text.push_str(&txt);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(headings)
+    }
 }
 
-// Parser events produce disjoint source ranges in ascending order.
-fn in_code(ranges: &[Range<usize>], pos: usize) -> bool {
-    let index = ranges.partition_point(|range| range.end <= pos);
-    ranges.get(index).is_some_and(|range| range.contains(&pos))
+struct CodeRangeCursor<'a> {
+    ranges: &'a [Range<usize>],
+    idx: usize,
+}
+
+impl<'a> CodeRangeCursor<'a> {
+    #[inline]
+    fn new(ranges: &'a [Range<usize>]) -> Self {
+        Self { ranges, idx: 0 }
+    }
+
+    #[inline]
+    fn contains(&mut self, pos: usize) -> bool {
+        while self.idx < self.ranges.len() && self.ranges[self.idx].end <= pos {
+            self.idx += 1;
+        }
+        self.idx < self.ranges.len() && self.ranges[self.idx].contains(&pos)
+    }
+
+    #[inline]
+    fn contains_range_boundary(&mut self, start: usize, end: usize) -> bool {
+        while self.idx < self.ranges.len() && self.ranges[self.idx].end <= start {
+            self.idx += 1;
+        }
+        if self.idx >= self.ranges.len() {
+            return false;
+        }
+        self.ranges[self.idx].contains(&start) || self.ranges[self.idx].contains(&end)
+    }
+}
+
+fn merge_sorted_links(
+    standard: Vec<LinkOccurrence>,
+    wiki: Vec<LinkOccurrence>,
+) -> Vec<LinkOccurrence> {
+    let mut merged = Vec::with_capacity(standard.len() + wiki.len());
+    let mut std_it = standard.into_iter().peekable();
+    let mut wiki_it = wiki.into_iter().peekable();
+
+    while let (Some(s), Some(w)) = (std_it.peek(), wiki_it.peek()) {
+        if s.range.start <= w.range.start {
+            merged.push(std_it.next().unwrap());
+        } else {
+            merged.push(wiki_it.next().unwrap());
+        }
+    }
+    merged.extend(std_it);
+    merged.extend(wiki_it);
+
+    for (idx, link) in merged.iter_mut().enumerate() {
+        link.ordinal = idx;
+    }
+    merged
 }
 
 fn slugify(text: &str) -> String {

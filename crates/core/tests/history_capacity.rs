@@ -36,3 +36,33 @@ fn ordinary_and_empty_inserts_keep_their_text_roundtrip() {
     empty.redo().unwrap();
     assert_eq!(empty.as_str(), "");
 }
+
+#[test]
+fn coalesces_insert_run_and_preserves_grouped_undo_redo() {
+    use truff_core::UndoGroup;
+
+    let mut buffer = Buffer::new(BufferId::new(9004));
+    let group = UndoGroup::next();
+    for ch in "Hello, World! 🚀 Привет!".chars() {
+        let mut s = String::new();
+        s.push(ch);
+        buffer
+            .apply(Transaction::insert(buffer.byte_len(), s).with_undo_group(group))
+            .unwrap();
+    }
+    assert_eq!(buffer.as_str(), "Hello, World! 🚀 Привет!");
+    let top = buffer.history().peek_undo().unwrap();
+    assert_eq!(top.forward_batch_ends.len(), 1);
+    assert_eq!(top.forward_edits.len(), 1);
+    assert_eq!(top.forward_edits[0].text, "Hello, World! 🚀 Привет!");
+    assert_eq!(top.inverse_edits[0].range, 0..buffer.byte_len());
+    assert!(buffer.history().total_bytes() < 4 * 1024);
+
+    let undo_changes = buffer.undo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "");
+    assert_eq!(undo_changes.len(), 1);
+
+    let redo_changes = buffer.redo().unwrap().unwrap();
+    assert_eq!(buffer.as_str(), "Hello, World! 🚀 Привет!");
+    assert_eq!(redo_changes.len(), 1);
+}

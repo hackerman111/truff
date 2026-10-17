@@ -111,6 +111,8 @@ pub(crate) fn eval_delimited_object_range(
     )
 }
 
+const MAX_DELIMITER_SEARCH_RADIUS: usize = 64 * 1024;
+
 fn find_pair(
     buffer: &Buffer,
     pos: usize,
@@ -123,7 +125,12 @@ fn find_pair(
     let (start, end) = if open == close {
         (buffer.byte_of_line(line), line_content_end(buffer, line))
     } else {
-        (0, buffer.byte_len())
+        let min_start = buffer.floor_char_boundary(pos.saturating_sub(MAX_DELIMITER_SEARCH_RADIUS));
+        let max_end = buffer.floor_char_boundary(
+            pos.saturating_add(MAX_DELIMITER_SEARCH_RADIUS)
+                .min(buffer.byte_len()),
+        );
+        (min_start, max_end)
     };
     let prefix = buffer.slice(start..pos);
     let mut cursor = pos;

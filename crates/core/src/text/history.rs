@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::mem::size_of;
 
-use super::edit::{SingleEdit, Transaction, UndoGroup};
+use super::edit::{CursorMeta, SingleEdit, UndoGroup};
 
 mod registers;
 pub use registers::{Register, RegisterKind, Registers};
@@ -9,33 +9,31 @@ pub use registers::{Register, RegisterKind, Registers};
 /// Default memory limit for undo/redo history per buffer: 8 MiB.
 pub const DEFAULT_MAX_HISTORY_BYTES: usize = 8 * 1024 * 1024;
 
-fn tx_heap_bytes(tx: &Transaction) -> usize {
-    tx.edits.capacity() * size_of::<SingleEdit>()
-        + tx.edits
-            .iter()
-            .map(|edit| edit.text.capacity())
-            .sum::<usize>()
-}
-
-fn compact_transaction(tx: &mut Transaction) {
-    for edit in &mut tx.edits {
-        if edit.text.capacity() > edit.text.len().saturating_mul(2)
-            && edit.text.capacity() - edit.text.len() >= 4096
-        {
-            edit.text.shrink_to_fit();
-        }
+fn compact_edit_text(edit: &mut SingleEdit) {
+    if edit.text.capacity() > edit.text.len().saturating_mul(2)
+        && edit.text.capacity() - edit.text.len() >= 4096
+    {
+        edit.text.shrink_to_fit();
     }
 }
 
-/// A group of transactions applied under the same `UndoGroup`.
+/// A group of edits applied under the same `UndoGroup`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryGroup {
     /// Identifier of this undo group.
     pub group_id: UndoGroup,
-    /// Forward transactions in chronological order.
-    pub forward: Vec<Transaction>,
-    /// Inverse transactions in chronological order; replay backwards for undo.
-    pub inverse: Vec<Transaction>,
+    /// Forward edits in execution order.
+    pub forward_edits: Vec<SingleEdit>,
+    /// Boundaries of transaction batches in `forward_edits`.
+    pub forward_batch_ends: Vec<u32>,
+    /// Inverse edits in execution order.
+    pub inverse_edits: Vec<SingleEdit>,
+    /// Boundaries of transaction batches in `inverse_edits`.
+    pub inverse_batch_ends: Vec<u32>,
+    /// Cursor metadata before edits were applied.
+    pub cursor_before: Option<CursorMeta>,
+    /// Cursor metadata after edits were applied.
+    pub cursor_after: Option<CursorMeta>,
     /// Estimated memory usage in bytes.
     pub size_in_bytes: usize,
     before_state: u64,
@@ -46,24 +44,106 @@ impl HistoryGroup {
     fn new(group_id: UndoGroup, before_state: u64, after_state: u64) -> Self {
         Self {
             group_id,
-            forward: Vec::new(),
-            inverse: Vec::new(),
+            forward_edits: Vec::new(),
+            forward_batch_ends: Vec::new(),
+            inverse_edits: Vec::new(),
+            inverse_batch_ends: Vec::new(),
+            cursor_before: None,
+            cursor_after: None,
             size_in_bytes: size_of::<Self>(),
             before_state,
             after_state,
         }
     }
 
-    fn add(&mut self, mut forward_tx: Transaction, mut inverse_tx: Transaction) {
-        compact_transaction(&mut forward_tx);
-        compact_transaction(&mut inverse_tx);
-        let payload = tx_heap_bytes(&forward_tx) + tx_heap_bytes(&inverse_tx);
-        let old_capacity = self.forward.capacity() + self.inverse.capacity();
-        self.forward.push(forward_tx);
-        self.inverse.push(inverse_tx);
-        self.size_in_bytes += payload
-            + (self.forward.capacity() + self.inverse.capacity() - old_capacity)
-                * size_of::<Transaction>();
+    fn heap_bytes(&self) -> usize {
+        self.forward_edits.capacity() * size_of::<SingleEdit>()
+            + self.inverse_edits.capacity() * size_of::<SingleEdit>()
+            + self.forward_batch_ends.capacity() * size_of::<u32>()
+            + self.inverse_batch_ends.capacity() * size_of::<u32>()
+            + self.forward_edits.iter().map(|e| e.text.capacity()).sum::<usize>()
+            + self.inverse_edits.iter().map(|e| e.text.capacity()).sum::<usize>()
+    }
+
+    pub fn push_batch(
+        &mut self,
+        mut forward: Vec<SingleEdit>,
+        mut inverse: Vec<SingleEdit>,
+        cursor: Option<CursorMeta>,
+    ) {
+        if self.cursor_before.is_none() {
+            self.cursor_before = cursor;
+        }
+        self.cursor_after = cursor;
+
+        // Fast path: coalescing sequential single-character insertions (Insert run)
+        if forward.len() == 1 && inverse.len() == 1 {
+            let f_new = &forward[0];
+            let i_new = &inverse[0];
+            if f_new.range.is_empty() && !f_new.text.is_empty() && i_new.text.is_empty() {
+                let prev_batch_start = if self.forward_batch_ends.len() >= 2 {
+                    self.forward_batch_ends[self.forward_batch_ends.len() - 2] as usize
+                } else {
+                    0
+                };
+                if self.forward_edits.len() == prev_batch_start + 1
+                    && self.inverse_edits.len() == prev_batch_start + 1
+                {
+                    let last_f = &mut self.forward_edits[prev_batch_start];
+                    let last_i = &mut self.inverse_edits[prev_batch_start];
+                    if last_f.range.is_empty()
+                        && last_i.text.is_empty()
+                        && f_new.range.start == last_f.range.start + last_f.text.len()
+                    {
+                        let old_cap = last_f.text.capacity();
+                        last_f.text.push_str(&f_new.text);
+                        last_i.range.end += f_new.text.len();
+                        self.size_in_bytes += last_f.text.capacity().saturating_sub(old_cap);
+                        return;
+                    }
+                }
+            }
+        }
+
+        for edit in &mut forward {
+            compact_edit_text(edit);
+        }
+        for edit in &mut inverse {
+            compact_edit_text(edit);
+        }
+        self.forward_edits.extend(forward);
+        self.forward_batch_ends.push(self.forward_edits.len() as u32);
+        self.inverse_edits.extend(inverse);
+        self.inverse_batch_ends.push(self.inverse_edits.len() as u32);
+        self.size_in_bytes = size_of::<Self>() + self.heap_bytes();
+    }
+
+    pub fn forward_batches(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &[SingleEdit]> + ExactSizeIterator + '_ {
+        (0..self.forward_batch_ends.len()).map(move |i| {
+            let start = if i == 0 {
+                0
+            } else {
+                self.forward_batch_ends[i - 1] as usize
+            };
+            let end = self.forward_batch_ends[i] as usize;
+            &self.forward_edits[start..end]
+        })
+    }
+
+    pub fn inverse_batches(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &[SingleEdit]> + ExactSizeIterator + '_ {
+        (0..self.inverse_batch_ends.len()).map(move |i| {
+            let start = if i == 0 {
+                0
+            } else {
+                self.inverse_batch_ends[i - 1] as usize
+            };
+            let end = self.inverse_batch_ends[i] as usize;
+            &self.inverse_edits[start..end]
+        })
     }
 }
 
@@ -144,8 +224,14 @@ impl History {
         !self.redo_stack.is_empty()
     }
 
-    /// Records a forward transaction and its inverse under a given `UndoGroup`.
-    pub fn record(&mut self, group_id: UndoGroup, forward: Transaction, inverse: Transaction) {
+    /// Records forward edits and their inverse under a given `UndoGroup`.
+    pub fn record(
+        &mut self,
+        group_id: UndoGroup,
+        forward: Vec<SingleEdit>,
+        inverse: Vec<SingleEdit>,
+        cursor: Option<CursorMeta>,
+    ) {
         // Redo stack is invalidated on any new user edit
         for group in self.redo_stack.drain(..) {
             self.total_bytes = self.total_bytes.saturating_sub(group.size_in_bytes);
@@ -165,16 +251,16 @@ impl History {
             && before_state != self.savepoint_state
         {
             let old_size = top.size_in_bytes;
-            top.add(forward, inverse);
+            top.push_batch(forward, inverse, cursor);
             top.after_state = self.current_state;
-            let delta = top.size_in_bytes - old_size;
+            let delta = top.size_in_bytes.saturating_sub(old_size);
             self.total_bytes += delta;
             self.enforce_memory_limit();
             return;
         }
 
         let mut group = HistoryGroup::new(group_id, before_state, self.current_state);
-        group.add(forward, inverse);
+        group.push_batch(forward, inverse, cursor);
         self.total_bytes += group.size_in_bytes;
         self.undo_stack.push_back(group);
 
@@ -190,7 +276,8 @@ impl History {
         Some(group)
     }
 
-    pub(crate) fn peek_undo(&self) -> Option<&HistoryGroup> {
+    /// Peeks at the top undo group without popping.
+    pub fn peek_undo(&self) -> Option<&HistoryGroup> {
         self.undo_stack.back()
     }
 
@@ -211,7 +298,8 @@ impl History {
         Some(group)
     }
 
-    pub(crate) fn peek_redo(&self) -> Option<&HistoryGroup> {
+    /// Peeks at the top redo group without popping.
+    pub fn peek_redo(&self) -> Option<&HistoryGroup> {
         self.redo_stack.back()
     }
 

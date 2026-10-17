@@ -114,18 +114,14 @@ impl IncrementalSyntaxTree {
         old_range: Range<usize>,
         new_range: Range<usize>,
     ) {
-        let point = |rope: &crop::Rope, offset: usize| {
-            let row = rope.line_of_byte(offset);
-            tree_sitter::Point::new(row, offset - rope.byte_of_line(row))
-        };
         if let Some(tree) = &mut self.tree {
             tree.edit(&InputEdit {
                 start_byte: old_range.start,
                 old_end_byte: old_range.end,
                 new_end_byte: new_range.end,
-                start_position: point(old, old_range.start),
-                old_end_position: point(old, old_range.end),
-                new_end_position: point(new, new_range.end),
+                start_position: rope_byte_to_point(old, old_range.start),
+                old_end_position: rope_byte_to_point(old, old_range.end),
+                new_end_position: rope_byte_to_point(new, new_range.end),
             });
         }
         self.parse_rope(new);
@@ -156,5 +152,17 @@ impl IncrementalSyntaxTree {
             .clone()
             .expect("IncrementalSyntaxTree has not been initialized with text");
         SyntaxSnapshot::new(tree)
+    }
+}
+
+/// Converts a byte offset within a Rope to a Tree-sitter Point (row, column) in O(log N).
+#[inline]
+pub fn rope_byte_to_point(rope: &crop::Rope, byte_offset: usize) -> tree_sitter::Point {
+    let clamped = byte_offset.min(rope.byte_len());
+    let row = rope.line_of_byte(clamped);
+    let line_start = rope.byte_of_line(row);
+    tree_sitter::Point {
+        row,
+        column: clamped - line_start,
     }
 }

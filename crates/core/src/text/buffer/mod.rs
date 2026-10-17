@@ -330,19 +330,8 @@ impl Buffer {
 
         let undo_group = tx.undo_group.unwrap_or_else(UndoGroup::next);
 
-        let forward_tx = Transaction {
-            edits: normalized_edits,
-            cursor: tx.cursor,
-            undo_group: Some(undo_group),
-        };
-
-        let inverse_tx = Transaction {
-            edits: inverse_edits,
-            cursor: tx.cursor,
-            undo_group: Some(undo_group),
-        };
-
-        self.history.record(undo_group, forward_tx, inverse_tx);
+        self.history
+            .record(undo_group, normalized_edits, inverse_edits, tx.cursor);
         self.revision += 1;
 
         Ok(ChangeSet::new(changes))
@@ -353,8 +342,8 @@ impl Buffer {
         let Some(history_group) = self.history.peek_undo() else {
             return Ok(None);
         };
-        let count = history_group.inverse.len();
-        let (rope, changes) = self.stage_history(history_group.inverse.iter().rev())?;
+        let count = history_group.inverse_batch_ends.len();
+        let (rope, changes) = self.stage_history(history_group.inverse_batches().rev())?;
         let history_group = self.history.pop_undo().expect("peeked undo group exists");
         self.rope = rope;
         self.revision += count as u64;
@@ -367,8 +356,8 @@ impl Buffer {
         let Some(history_group) = self.history.peek_redo() else {
             return Ok(None);
         };
-        let count = history_group.forward.len();
-        let (rope, changes) = self.stage_history(history_group.forward.iter())?;
+        let count = history_group.forward_batch_ends.len();
+        let (rope, changes) = self.stage_history(history_group.forward_batches())?;
         let history_group = self.history.pop_redo().expect("peeked redo group exists");
         self.rope = rope;
         self.revision += count as u64;
@@ -495,20 +484,20 @@ impl Buffer {
 
     fn stage_history<'a>(
         &self,
-        transactions: impl Iterator<Item = &'a Transaction>,
+        batches: impl Iterator<Item = &'a [SingleEdit]>,
     ) -> Result<(crop::Rope, ChangeSet), EditError> {
         // Rope clones share unchanged storage; failed replay discards only edited paths.
         let mut rope = self.rope.clone();
         let mut changes = ChangeSet::default();
-        for tx in transactions {
-            Self::validate_edits(&rope, self.max_file_bytes, &tx.edits)?;
+        for batch in batches {
+            Self::validate_edits(&rope, self.max_file_bytes, batch)?;
             changes.append_batch(ChangeSet::new(
-                tx.edits
+                batch
                     .iter()
                     .map(|edit| Change::new(edit.range.clone(), edit.text.len()))
                     .collect(),
             ));
-            for edit in tx.edits.iter().rev() {
+            for edit in batch.iter().rev() {
                 rope.replace(edit.range.clone(), &edit.text);
             }
         }

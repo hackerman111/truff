@@ -26,4 +26,4 @@ pub use style::{
     CalloutKind, ColorSpan, StyleError, apply_highlight, apply_text_color, color_spans,
     remove_style, wrap_callout,
 };
-pub use syntax::{IncrementalSyntaxTree, SyntaxSnapshot};
+pub use syntax::{IncrementalSyntaxTree, SyntaxSnapshot, rope_byte_to_point};

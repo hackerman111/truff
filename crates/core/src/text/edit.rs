@@ -127,19 +127,24 @@ pub struct Change {
     pub old_range: Range<usize>,
     /// Length of the new replacement text in bytes.
     pub new_len: usize,
-    /// Net difference in byte length (`new_len as isize - old_len as isize`).
-    pub delta: isize,
+    /// Cumulative shift before this edit in a sorted, disjoint batch.
+    pub prefix_shift: isize,
 }
 
 impl Change {
     /// Constructs a new `Change`.
     pub fn new(old_range: Range<usize>, new_len: usize) -> Self {
-        let delta = (new_len as isize) - (old_range.len() as isize);
         Self {
             old_range,
             new_len,
-            delta,
+            prefix_shift: 0,
         }
+    }
+
+    /// Net difference in byte length (`new_len as isize - old_len as isize`).
+    #[inline(always)]
+    pub const fn delta(&self) -> isize {
+        self.new_len as isize - (self.old_range.end - self.old_range.start) as isize
     }
 }
 
@@ -158,37 +163,64 @@ pub struct ChangeSet {
     /// coordinate spaces; use `batches()` or `map_pos()` to consume them.
     changes: Vec<Change>,
     batch_ends: Vec<usize>,
-    // Shift before each edit in large, sorted, disjoint batches. Small or
-    // externally constructed overlapping batches retain the linear fallback.
-    prefix_shifts: Vec<isize>,
+    // When true, all batches are disjoint and sorted, allowing O(log K) binary search.
+    is_indexed: bool,
 }
 
 impl ChangeSet {
     /// Creates a `ChangeSet` from a list of changes.
-    pub fn new(changes: Vec<Change>) -> Self {
-        let mut prefix_shifts = Vec::new();
-        if changes.len() >= 32
-            && changes
-                .iter()
-                .all(|change| change.old_range.start <= change.old_range.end)
-            && changes
-                .windows(2)
-                .all(|pair| pair[0].old_range.end <= pair[1].old_range.start)
-        {
-            let mut shift = 0;
-            prefix_shifts = changes
-                .iter()
-                .map(|change| {
-                    let before = shift;
-                    shift += change.delta;
-                    before
-                })
-                .collect();
+    pub fn new(mut changes: Vec<Change>) -> Self {
+        if changes.is_empty() {
+            return Self::default();
+        }
+        let mut shift = 0isize;
+        let mut is_indexed = true;
+        let mut prev_end = 0usize;
+        for (i, change) in changes.iter_mut().enumerate() {
+            if change.old_range.start > change.old_range.end {
+                is_indexed = false;
+                break;
+            }
+            if i > 0 && change.old_range.start < prev_end {
+                is_indexed = false;
+            }
+            change.prefix_shift = shift;
+            shift += change.delta();
+            prev_end = change.old_range.end;
         }
         Self {
             changes,
             batch_ends: Vec::new(),
-            prefix_shifts,
+            is_indexed,
+        }
+    }
+
+    /// Creates a `ChangeSet` from a slice of edits without cloning strings.
+    pub fn from_edits(edits: &[SingleEdit]) -> Self {
+        let mut changes: Vec<Change> = edits
+            .iter()
+            .map(|e| Change {
+                old_range: e.range.clone(),
+                new_len: e.text.len(),
+                prefix_shift: 0,
+            })
+            .collect();
+        changes.sort_unstable_by_key(|c| c.old_range.start);
+        let mut cumulative: isize = 0;
+        let mut disjoint = true;
+        let mut prev_end = 0usize;
+        for (i, c) in changes.iter_mut().enumerate() {
+            if i > 0 && c.old_range.start < prev_end {
+                disjoint = false;
+            }
+            c.prefix_shift = cumulative;
+            cumulative += c.delta();
+            prev_end = c.old_range.end;
+        }
+        Self {
+            changes,
+            batch_ends: Vec::new(),
+            is_indexed: disjoint,
         }
     }
 
@@ -218,20 +250,15 @@ impl ChangeSet {
             *self = batch;
             return;
         }
+        if batch.changes.is_empty() {
+            return;
+        }
         let offset = self.changes.len();
         self.batch_ends.push(offset);
         self.batch_ends
             .extend(batch.batch_ends.into_iter().map(|end| offset + end));
-        if !self.prefix_shifts.is_empty() || !batch.prefix_shifts.is_empty() {
-            self.prefix_shifts.resize(self.changes.len(), isize::MIN);
-            if batch.prefix_shifts.is_empty() {
-                self.prefix_shifts
-                    .resize(self.changes.len() + batch.changes.len(), isize::MIN);
-            } else {
-                self.prefix_shifts.extend(batch.prefix_shifts);
-            }
-        }
         self.changes.extend(batch.changes);
+        self.is_indexed = self.is_indexed && batch.is_indexed;
     }
 
     /// Returns `true` if no edits were applied.
@@ -246,40 +273,37 @@ impl ChangeSet {
 
     /// Re-maps a byte offset from the pre-edit coordinate space to the post-edit coordinate space.
     pub fn map_pos(&self, pos: usize) -> usize {
-        let mut offset = 0;
         self.batches().fold(pos, |pos, batch| {
-            let indexed = self
-                .prefix_shifts
-                .get(offset)
-                .is_some_and(|&shift| shift != isize::MIN);
-            let shifts = self.prefix_shifts.get(offset..offset + batch.len());
-            offset += batch.len();
-            if indexed {
+            if batch.is_empty() {
+                return pos;
+            }
+            if self.is_indexed {
                 let end = batch.partition_point(|change| change.old_range.start <= pos);
                 if end == 0 {
                     return pos;
                 }
                 let change = &batch[end - 1];
-                let shift = shifts.expect("indexed batch has a shift per edit")[end - 1];
-                return if pos <= change.old_range.end {
+                let shift = change.prefix_shift;
+                if pos <= change.old_range.end {
                     (change.old_range.start as isize + shift) as usize + change.new_len
                 } else {
-                    (pos as isize + shift + change.delta) as usize
-                };
-            }
-            let mut shift = 0isize;
-            let mut mapped = None;
-            for change in batch {
-                if pos < change.old_range.start {
-                    break;
+                    (pos as isize + shift + change.delta()) as usize
                 }
-                if pos <= change.old_range.end {
-                    mapped =
-                        Some(((change.old_range.start as isize + shift) as usize) + change.new_len);
+            } else {
+                let mut shift = 0isize;
+                let mut mapped = None;
+                for change in batch {
+                    if pos < change.old_range.start {
+                        break;
+                    }
+                    if pos <= change.old_range.end {
+                        mapped =
+                            Some(((change.old_range.start as isize + shift) as usize) + change.new_len);
+                    }
+                    shift += change.delta();
                 }
-                shift += change.delta;
+                mapped.unwrap_or((pos as isize + shift) as usize)
             }
-            mapped.unwrap_or((pos as isize + shift) as usize)
         })
     }
 }

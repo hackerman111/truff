@@ -16,7 +16,7 @@ fn indexed_mapping_matches_linear_mapping_at_adjacent_boundaries() {
             if pos <= edit.old_range.end {
                 mapped = Some((edit.old_range.start as isize + shift) as usize + edit.new_len);
             }
-            shift += edit.delta;
+            shift += edit.delta();
         }
         assert_eq!(
             changes.map_pos(pos),
