@@ -90,13 +90,12 @@ impl Paragraph {
     ) -> bool {
         let mode_changed = self.display.mode() != style.projection;
         let view_changed = !self.display.matches_view(cursor, selection) || mode_changed;
-        let old_projection = view_changed.then(|| self.display.visual_text().to_owned());
+        let old_visual_revision = self.display.visual_revision();
         self.display.set_mode(style.projection);
-        self.display.update(None, cursor, selection);
-        let projection_changed = mode_changed
-            || old_projection
-                .as_deref()
-                .is_some_and(|old| old != self.display.visual_text());
+        if view_changed {
+            self.display.update(None, cursor, selection);
+        }
+        let projection_changed = mode_changed || old_visual_revision != self.display.visual_revision();
         if !projection_changed
             && self.color == style.foreground
             && self.pixels_per_point == style.pixels_per_point

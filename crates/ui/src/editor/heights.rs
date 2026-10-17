@@ -22,6 +22,7 @@ pub struct HeightIndex {
     blocks: Vec<BlockInfo>,
     sums: Vec<f64>,
     default_line_height: f32,
+    measured_limit: usize,
 }
 
 impl Default for HeightIndex {
@@ -37,6 +38,7 @@ impl HeightIndex {
             blocks: Vec::new(),
             sums: Vec::new(),
             default_line_height,
+            measured_limit: 0,
         }
     }
 
@@ -87,6 +89,7 @@ impl HeightIndex {
                 revision: 0,
             });
         }
+        self.measured_limit = 0;
         self.rebuild_sums();
     }
 
@@ -103,6 +106,7 @@ impl HeightIndex {
             block.height = self.default_line_height;
             block.is_measured = false;
         }
+        self.measured_limit = 0;
         self.rebuild_sums();
     }
 
@@ -112,6 +116,13 @@ impl HeightIndex {
             for index in old {
                 self.update_block_height(index, self.default_line_height, None);
                 self.blocks[index].is_measured = false;
+            }
+            if self.measured_limit > 0 && !self.blocks[self.measured_limit - 1].is_measured {
+                self.measured_limit = self.blocks[..self.measured_limit]
+                    .iter()
+                    .rposition(|b| b.is_measured)
+                    .map_or(0, |p| p + 1);
+                self.rebuild_sums();
             }
             return;
         }
@@ -123,20 +134,41 @@ impl HeightIndex {
             revision: 0,
         })
         .take(count);
-        self.blocks.splice(old, replacement);
+        let old_limit = self.measured_limit;
+        self.blocks.splice(old.clone(), replacement);
+        if old_limit == 0 || old.start >= old_limit {
+            return;
+        }
+        let search_end = (old_limit + count).min(self.blocks.len());
+        self.measured_limit = self.blocks[..search_end]
+            .iter()
+            .rposition(|b| b.is_measured)
+            .map_or(0, |p| p + 1);
         self.rebuild_sums();
     }
 
     fn rebuild_sums(&mut self) {
+        let count = self.measured_limit.min(self.blocks.len());
         self.sums.clear();
-        self.sums.resize(self.blocks.len() + 1, 0.0);
-        for index in 1..self.sums.len() {
+        self.sums.resize(count + 1, 0.0);
+        for index in 1..=count {
             self.sums[index] += f64::from(self.blocks[index - 1].height);
             let parent = index + (index & index.wrapping_neg());
-            if parent < self.sums.len() {
+            if parent <= count {
                 self.sums[parent] += self.sums[index];
             }
         }
+    }
+
+    #[inline]
+    fn fenwick_prefix(&self, count: usize) -> f32 {
+        let mut index = count.min(self.sums.len().saturating_sub(1));
+        let mut sum = 0.0;
+        while index > 0 {
+            sum += self.sums[index];
+            index &= index - 1;
+        }
+        sum as f32
     }
 
     /// Number of blocks in the index.
@@ -163,13 +195,14 @@ impl HeightIndex {
 
     /// Returns the top y coordinate of `block_index`.
     pub fn y_for_block(&self, block_index: usize) -> f32 {
-        let mut index = block_index.min(self.blocks.len());
-        let mut sum = 0.0;
-        while index > 0 {
-            sum += self.sums[index];
-            index &= index - 1;
+        let limit = self.measured_limit.min(self.blocks.len());
+        let clamped = block_index.min(self.blocks.len());
+        if clamped <= limit {
+            self.fenwick_prefix(clamped)
+        } else {
+            let base = self.fenwick_prefix(limit);
+            base + ((clamped - limit) as f32) * self.default_line_height
         }
-        sum as f32
     }
 
     /// Finds which block is located at coordinate `y`, returning `(block_index, local_y_within_block)`.
@@ -178,9 +211,22 @@ impl HeightIndex {
             return (0, 0.0);
         }
 
+        let limit = self.measured_limit.min(self.blocks.len());
+        let measured_y = self.fenwick_prefix(limit);
+        if limit == 0 || y >= measured_y {
+            let extra = if self.default_line_height > 0.0 {
+                ((y - measured_y).max(0.0) / self.default_line_height).floor() as usize
+            } else {
+                0
+            };
+            let index = (limit + extra).min(self.blocks.len() - 1);
+            let block_y = self.y_for_block(index);
+            return (index, (y - block_y).max(0.0));
+        }
+
         let mut index = 0;
         let mut sum = 0.0;
-        let mut step = self.blocks.len().next_power_of_two();
+        let mut step = limit.next_power_of_two();
         while step > 0 {
             let next = index + step;
             if next < self.sums.len() && sum + self.sums[next] <= f64::from(y) {
@@ -214,10 +260,16 @@ impl HeightIndex {
         let delta = new_height - old_height;
         self.blocks[block_index].height = new_height;
         self.blocks[block_index].is_measured = true;
-        let mut index = block_index + 1;
-        while index < self.sums.len() {
-            self.sums[index] += f64::from(delta);
-            index += index & index.wrapping_neg();
+
+        if block_index >= self.measured_limit {
+            self.measured_limit = block_index + 1;
+            self.rebuild_sums();
+        } else {
+            let mut index = block_index + 1;
+            while index < self.sums.len() {
+                self.sums[index] += f64::from(delta);
+                index += index & index.wrapping_neg();
+            }
         }
 
         if let Some(anc) = anchor

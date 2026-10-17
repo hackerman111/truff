@@ -28,6 +28,7 @@ pub struct DisplayMap {
     selection: Option<(BytePos, BytePos)>,
     chunks: Vec<DisplayChunk>,
     visual_text: Option<Box<str>>,
+    visual_revision: u64,
     colors: Vec<truff_core::markdown::style::ColorSpan>,
     styles: Vec<StyledSpan>,
     markers: Vec<(Range<usize>, Option<Range<usize>>)>,
@@ -58,6 +59,7 @@ impl DisplayMap {
             selection: None,
             chunks: Vec::new(),
             visual_text: None,
+            visual_revision: 0,
             colors,
             styles: Vec::new(),
             markers: Vec::new(),
@@ -67,6 +69,11 @@ impl DisplayMap {
         map.scan_markers();
         map.rebuild();
         map
+    }
+
+    /// Monotonic revision of the projected visual text representation.
+    pub fn visual_revision(&self) -> u64 {
+        self.visual_revision
     }
 
     /// Returns the current projection mode.
@@ -88,6 +95,7 @@ impl DisplayMap {
         self.source_text = text.to_string();
         self.colors = truff_core::markdown::style::color_spans(text);
         self.scan_markers();
+        self.visual_revision = self.visual_revision.wrapping_add(1);
         self.rebuild();
     }
 
@@ -107,7 +115,7 @@ impl DisplayMap {
                 || !self
                     .chunks
                     .iter()
-                    .any(|chunk| chunk.hidden && chunk.source_range == list.range)
+                    .any(|chunk| chunk.hidden && chunk.source_range() == list.range)
             {
                 return None;
             }

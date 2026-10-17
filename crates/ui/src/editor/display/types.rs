@@ -84,14 +84,28 @@ pub struct SourceHit {
 /// An atomic chunk of text in the display projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DisplayChunk {
-    /// Byte range in the source text.
-    pub source_range: Range<usize>,
-    /// Whether this chunk represents a Markdown syntax marker.
+    pub source_start: u32,
+    pub source_end: u32,
+    pub visual_start: u32,
+    pub visual_len: u32,
+    pub enclosing_start: u32,
+    pub enclosing_end: u32,
     pub is_marker: bool,
-    /// The associated span range that owns this marker (e.g. the bold span `6..15`).
-    pub enclosing_span: Option<Range<usize>>,
-    /// Whether this chunk is currently hidden in the visual projection.
     pub hidden: bool,
-    /// Length of this chunk in visual characters/bytes.
-    pub visual_len: usize,
+}
+
+impl DisplayChunk {
+    #[inline(always)]
+    pub fn source_range(&self) -> Range<usize> {
+        (self.source_start as usize)..(self.source_end as usize)
+    }
+
+    #[inline(always)]
+    pub fn enclosing_span(&self) -> Option<Range<usize>> {
+        if self.enclosing_start == u32::MAX {
+            None
+        } else {
+            Some((self.enclosing_start as usize)..(self.enclosing_end as usize))
+        }
+    }
 }

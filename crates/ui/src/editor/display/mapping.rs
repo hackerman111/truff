@@ -7,44 +7,54 @@ impl DisplayMap {
     /// Maps a source `BytePos` into a `VisualPos` with the specified affinity.
     pub fn source_to_visual(&self, pos: BytePos, affinity: Affinity) -> VisualPos {
         let source_offset = pos.get().min(self.source_text.len());
-        if self.mode == ProjectionMode::Source {
+        if self.mode == ProjectionMode::Source
+            || (self.chunks.len() == 1 && !self.chunks[0].hidden)
+        {
             return VisualPos(source_offset);
+        }
+        if self.chunks.is_empty() {
+            return VisualPos(0);
         }
 
         let mut current_visual = 0;
         for chunk in &self.chunks {
-            if source_offset < chunk.source_range.start {
+            let chunk_source_start = chunk.source_start as usize;
+            let chunk_source_end = chunk.source_end as usize;
+            let chunk_visual_len = chunk.visual_len as usize;
+            let chunk_visual_start = chunk.visual_start as usize;
+
+            if source_offset < chunk_source_start {
                 break;
             }
 
-            if chunk.source_range.contains(&source_offset) {
+            if source_offset >= chunk_source_start && source_offset < chunk_source_end {
                 if chunk.hidden {
                     return match affinity {
-                        Affinity::Left => VisualPos(current_visual),
-                        Affinity::Right => VisualPos(current_visual + chunk.visual_len),
+                        Affinity::Left => VisualPos(chunk_visual_start),
+                        Affinity::Right => VisualPos(chunk_visual_start + chunk_visual_len),
                     };
                 } else {
-                    let offset_in_chunk = source_offset - chunk.source_range.start;
-                    return VisualPos(current_visual + offset_in_chunk);
+                    let offset_in_chunk = source_offset - chunk_source_start;
+                    return VisualPos(chunk_visual_start + offset_in_chunk);
                 }
             }
 
-            if source_offset == chunk.source_range.end {
+            if source_offset == chunk_source_end {
                 if chunk.hidden {
                     // Pos is at end of hidden chunk
                     match affinity {
-                        Affinity::Left => return VisualPos(current_visual + chunk.visual_len),
+                        Affinity::Left => return VisualPos(chunk_visual_start + chunk_visual_len),
                         Affinity::Right => {} // continue to see if next chunk is visible
                     }
                 } else {
                     // Pos is at end of visible chunk
                     if affinity == Affinity::Left {
-                        return VisualPos(current_visual + chunk.visual_len);
+                        return VisualPos(chunk_visual_start + chunk_visual_len);
                     }
                 }
             }
 
-            current_visual += chunk.visual_len;
+            current_visual = chunk_visual_start + chunk_visual_len;
         }
 
         VisualPos(current_visual)
@@ -53,47 +63,49 @@ impl DisplayMap {
     /// Maps a `VisualPos` back to a `SourceHit`.
     pub fn visual_to_source(&self, pos: VisualPos) -> SourceHit {
         let visual_offset = pos.get().min(self.visual_text().len());
-        if self.mode == ProjectionMode::Source {
+        if self.mode == ProjectionMode::Source
+            || (self.chunks.len() == 1 && !self.chunks[0].hidden)
+        {
             return SourceHit {
                 pos: BytePos(visual_offset),
                 affinity: Affinity::Left,
                 in_marker: false,
             };
         }
+        if self.chunks.is_empty() {
+            return SourceHit {
+                pos: BytePos(self.source_text.len()),
+                affinity: Affinity::Right,
+                in_marker: false,
+            };
+        }
 
-        let mut current_visual = 0;
-        for chunk in &self.chunks {
+        let idx = self.chunks.partition_point(|chunk| {
+            (chunk.visual_start + chunk.visual_len) as usize <= visual_offset
+        });
+
+        if idx < self.chunks.len() {
+            let chunk = &self.chunks[idx];
+            let chunk_v_start = chunk.visual_start as usize;
+            let chunk_v_len = chunk.visual_len as usize;
+            let chunk_v_end = chunk_v_start + chunk_v_len;
+
             if chunk.hidden {
-                if visual_offset >= current_visual
-                    && visual_offset < current_visual + chunk.visual_len
-                {
+                if visual_offset >= chunk_v_start && visual_offset < chunk_v_end {
                     return SourceHit {
-                        pos: BytePos(chunk.source_range.start),
+                        pos: BytePos(chunk.source_start as usize),
                         affinity: Affinity::Left,
                         in_marker: true,
                     };
                 }
-                current_visual += chunk.visual_len;
-                continue;
-            }
-
-            let chunk_visual_end = current_visual + chunk.visual_len;
-            if visual_offset >= current_visual && visual_offset < chunk_visual_end {
-                let offset_in_chunk = visual_offset - current_visual;
+            } else if visual_offset >= chunk_v_start && visual_offset < chunk_v_end {
+                let offset_in_chunk = visual_offset - chunk_v_start;
                 return SourceHit {
-                    pos: BytePos(chunk.source_range.start + offset_in_chunk),
+                    pos: BytePos(chunk.source_start as usize + offset_in_chunk),
                     affinity: Affinity::Left,
                     in_marker: chunk.is_marker,
                 };
             }
-
-            if visual_offset == chunk_visual_end {
-                // At the boundary of this chunk
-                current_visual = chunk_visual_end;
-                continue;
-            }
-
-            current_visual = chunk_visual_end;
         }
 
         // At end of text

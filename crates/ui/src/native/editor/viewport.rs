@@ -369,8 +369,18 @@ impl EditorWidget {
                 self.painted_lines.end = line + 1;
                 self.visible.end = entry.range.end;
             }
-            if intersects_viewport
-                && let Some(caret) = entry.paint(
+            if intersects_viewport {
+                let line_flash = if flash.is_empty() {
+                    &[][..]
+                } else {
+                    let start_idx =
+                        flash.partition_point(|t| t.source_range.start < entry.range.start);
+                    let end_idx = flash[start_idx..]
+                        .partition_point(|t| t.source_range.start < entry.range.end)
+                        + start_idx;
+                    &flash[start_idx..end_idx]
+                };
+                if let Some(caret) = entry.paint(
                     &painter,
                     origin,
                     &ParagraphView {
@@ -379,12 +389,12 @@ impl EditorWidget {
                         cursor: (line == cursor_line).then_some(cursor),
                         mode,
                         preedit,
-                        flash,
+                        flash: line_flash,
                         content_width,
                     },
-                )
-            {
-                self.cursor_rect = Some(caret);
+                ) {
+                    self.cursor_rect = Some(caret);
+                }
             }
             if intersects_viewport
                 && (!self.input_blocked && (response.clicked() || response.dragged()))
