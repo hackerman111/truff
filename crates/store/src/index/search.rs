@@ -96,11 +96,6 @@ pub fn execute_search(conn: &Connection, query: &SearchQuery) -> rusqlite::Resul
         });
     }
 
-    let total_matches: i64 = conn
-        .prepare_cached("SELECT count(*) FROM notes_fts WHERE notes_fts MATCH ?1")?
-        .query_row(params![fts_query], |row| row.get::<_, i64>(0))?;
-    let total_matches = total_matches as usize;
-
     let page_size = query.page_size.clamp(1, DEFAULT_MAX_SEARCH_PAGE_SIZE);
     let Some(offset) = query
         .page
@@ -110,7 +105,7 @@ pub fn execute_search(conn: &Connection, query: &SearchQuery) -> rusqlite::Resul
         return Ok(SearchPage {
             query_id: query.id,
             page: query.page,
-            total_matches,
+            total_matches: 0,
             results: Vec::new(),
         });
     };
@@ -141,6 +136,23 @@ pub fn execute_search(conn: &Connection, query: &SearchQuery) -> rusqlite::Resul
     for item in rows {
         results.push(item?);
     }
+
+    let offset_usize = offset as usize;
+    let total_matches = if results.len() < page_size {
+        if offset == 0 || !results.is_empty() {
+            offset_usize + results.len()
+        } else {
+            let count: i64 = conn
+                .prepare_cached("SELECT count(*) FROM notes_fts WHERE notes_fts MATCH ?1")?
+                .query_row(params![fts_query], |row| row.get::<_, i64>(0))?;
+            count as usize
+        }
+    } else {
+        let count: i64 = conn
+            .prepare_cached("SELECT count(*) FROM notes_fts WHERE notes_fts MATCH ?1")?
+            .query_row(params![fts_query], |row| row.get::<_, i64>(0))?;
+        count as usize
+    };
 
     Ok(SearchPage {
         query_id: query.id,

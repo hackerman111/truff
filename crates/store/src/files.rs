@@ -114,16 +114,38 @@ pub fn read_file_with_limit(path: &Path, max_bytes: usize) -> Result<String, Fil
 /// 4. Synchronize parent directory to persist directory entry on Unix.
 ///
 /// Returns the computed fingerprint of the written content.
+/// Atomically writes content from a rope to a file without full string allocation.
+pub fn write_rope_atomically(
+    path: &Path,
+    rope: &truff_core::Rope,
+    create_only: bool,
+) -> Result<String, FileError> {
+    write_chunks(path, rope.chunks(), create_only)
+}
+
 pub fn atomic_write_file(path: &Path, content: &str) -> Result<String, FileError> {
-    write_file(path, content, false)
+    write_chunks(path, [content], false)
 }
 
 /// Publishes a new file without replacing a racing existing destination.
 pub fn atomic_create_file(path: &Path, content: &str) -> Result<String, FileError> {
-    write_file(path, content, true)
+    write_chunks(path, [content], true)
 }
 
-fn write_file(path: &Path, content: &str, create_only: bool) -> Result<String, FileError> {
+#[allow(dead_code)]
+pub(crate) fn write_file_atomically(
+    path: &Path,
+    content: &str,
+    create_only: bool,
+) -> Result<String, FileError> {
+    write_chunks(path, [content], create_only)
+}
+
+fn write_chunks<'a>(
+    path: &Path,
+    chunks: impl IntoIterator<Item = &'a str>,
+    create_only: bool,
+) -> Result<String, FileError> {
     let parent = path.parent().ok_or(FileError::InvalidParentDir)?;
     for ancestor in path.ancestors() {
         if fs::symlink_metadata(ancestor).is_ok_and(|meta| meta.file_type().is_symlink()) {
@@ -147,8 +169,10 @@ fn write_file(path: &Path, content: &str, create_only: bool) -> Result<String, F
 
     let tmp_path = parent.join(format!(".{file_name}.{pid}_{counter}.tmp"));
 
+    let mut hasher = Sha256::new();
+    let mut total_len = 0usize;
     let write_res = (|| -> Result<(), io::Error> {
-        let mut file = File::options()
+        let file = File::options()
             .write(true)
             .create_new(true)
             .open(&tmp_path)?;
@@ -164,8 +188,16 @@ fn write_file(path: &Path, content: &str, create_only: bool) -> Result<String, F
         }
         #[cfg(test)]
         fault(WriteStage::Write)?;
-        file.write_all(content.as_bytes())?;
-        file.flush()?;
+
+        let mut writer = io::BufWriter::with_capacity(64 * 1024, file);
+        for chunk in chunks {
+            writer.write_all(chunk.as_bytes())?;
+            hasher.update(chunk.as_bytes());
+            total_len += chunk.len();
+        }
+        writer.flush()?;
+        let file = writer.into_inner().map_err(|e| e.into_error())?;
+
         #[cfg(test)]
         fault(WriteStage::Sync)?;
         file.sync_all()?;
@@ -195,7 +227,7 @@ fn write_file(path: &Path, content: &str, create_only: bool) -> Result<String, F
         return Err(FileError::Io(e));
     }
 
-    Ok(compute_fingerprint(content.as_bytes()))
+    Ok(format!("{:x}:{total_len}", hasher.finalize()))
 }
 
 #[cfg(test)]

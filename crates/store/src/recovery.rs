@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use sha2::{Digest, Sha256};
 
 use truff_core::text::BufferId;
 use truff_core::workspace::buffers::{SnapshotKey, VaultEpoch};
@@ -55,6 +56,7 @@ pub struct RecoveryManager {
     recovery_dir: PathBuf,
     vault_root: Option<PathBuf>,
     max_storage_bytes: usize,
+    storage_cache: std::sync::Mutex<Option<u64>>,
 }
 
 impl RecoveryManager {
@@ -69,6 +71,7 @@ impl RecoveryManager {
             recovery_dir,
             vault_root,
             max_storage_bytes,
+            storage_cache: std::sync::Mutex::new(None),
         }
     }
 
@@ -94,6 +97,25 @@ impl RecoveryManager {
 
     /// Computes total bytes currently occupied by all snapshots in the recovery directory.
     pub fn current_storage_bytes(&self) -> io::Result<u64> {
+        if let Err(e) = self.validate_internal_directory() {
+            if let Ok(mut guard) = self.storage_cache.lock() {
+                *guard = None;
+            }
+            return Err(e);
+        }
+        if let Ok(guard) = self.storage_cache.lock()
+            && let Some(total) = *guard
+        {
+            return Ok(total);
+        }
+        let total = self.recompute_storage_bytes()?;
+        if let Ok(mut guard) = self.storage_cache.lock() {
+            *guard = Some(total);
+        }
+        Ok(total)
+    }
+
+    fn recompute_storage_bytes(&self) -> io::Result<u64> {
         let mut total = 0u64;
         self.validate_internal_directory()?;
         let entries = match fs::read_dir(&self.recovery_dir) {
@@ -107,12 +129,34 @@ impl RecoveryManager {
         Ok(total)
     }
 
+    /// Atomically writes a durable recovery snapshot from a rope without full String allocation.
+    pub fn write_snapshot_rope(
+        &self,
+        key: SnapshotKey,
+        rel_path: &str,
+        rope: &truff_core::Rope,
+        base_fingerprint: Option<&str>,
+    ) -> Result<PathBuf, RecoveryError> {
+        self.write_snapshot_chunks(key, rel_path, rope.chunks(), rope.byte_len(), base_fingerprint)
+    }
+
     /// Atomically writes a durable recovery snapshot.
     pub fn write_snapshot(
         &self,
         key: SnapshotKey,
         rel_path: &str,
         content: &str,
+        base_fingerprint: Option<&str>,
+    ) -> Result<PathBuf, RecoveryError> {
+        self.write_snapshot_chunks(key, rel_path, [content], content.len(), base_fingerprint)
+    }
+
+    fn write_snapshot_chunks<'a>(
+        &self,
+        key: SnapshotKey,
+        rel_path: &str,
+        chunks: impl IntoIterator<Item = &'a str> + Clone,
+        content_len: usize,
         base_fingerprint: Option<&str>,
     ) -> Result<PathBuf, RecoveryError> {
         self.validate_internal_directory()?;
@@ -131,12 +175,16 @@ impl RecoveryManager {
             }
         }
 
-        if rel_path.contains(['\n', '\r']) || content.len() > crate::files::DEFAULT_MAX_FILE_BYTES {
+        if rel_path.contains(['\n', '\r']) || content_len > crate::files::DEFAULT_MAX_FILE_BYTES {
             return Err(RecoveryError::CorruptedSnapshot(
                 "invalid path or oversized content".into(),
             ));
         }
-        let checksum = crate::files::compute_fingerprint(content.as_bytes());
+        let mut hasher = Sha256::new();
+        for chunk in chunks.clone() {
+            hasher.update(chunk.as_bytes());
+        }
+        let checksum = format!("{:x}:{}", hasher.finalize(), content_len);
         let header = format!(
             "TRUFF_SNAP_V2\nepoch:{}\nbuffer_id:{}\nrevision:{}\nrel_path:{}\nbase_fp:{}\ncontent_len:{}\nchecksum:{}\n---DATA---\n",
             key.epoch.0,
@@ -144,7 +192,7 @@ impl RecoveryManager {
             key.revision,
             rel_path,
             base_fingerprint.unwrap_or(""),
-            content.len(),
+            content_len,
             checksum
         );
         if header.len() > 16 * 1024 {
@@ -160,15 +208,16 @@ impl RecoveryManager {
         if let Ok(existing) = self.try_read_snapshot(&target_path)
             && existing.key == key
             && existing.rel_path == rel_path
-            && existing.content == content
+            && existing.content.len() == content_len
             && existing.base_fingerprint.as_deref() == base_fingerprint
+            && crate::files::compute_fingerprint(existing.content.as_bytes()) == checksum
         {
             File::open(&target_path)?.sync_all()?;
             #[cfg(unix)]
             File::open(&self.recovery_dir)?.sync_all()?;
             return Ok(target_path);
         }
-        let size = header.len() + content.len();
+        let size = header.len() + content_len;
         // Never evict the sole valid unsaved copy to admit a new checkpoint.
         // With two durable copies it is safe to retire the older one first.
         let mut valid = self.valid_snapshots(key.buffer_id)?;
@@ -193,15 +242,19 @@ impl RecoveryManager {
             .join(format!(".{target_name}.{pid}_{id}.tmp"));
 
         let write_res = (|| -> Result<(), io::Error> {
-            let mut file = File::options()
+            let file = File::options()
                 .write(true)
                 .create_new(true)
                 .open(&tmp_path)?;
             #[cfg(test)]
             crate::files::fault(crate::files::WriteStage::Write)?;
-            file.write_all(header.as_bytes())?;
-            file.write_all(content.as_bytes())?;
-            file.flush()?;
+            let mut writer = io::BufWriter::with_capacity(64 * 1024, file);
+            writer.write_all(header.as_bytes())?;
+            for chunk in chunks {
+                writer.write_all(chunk.as_bytes())?;
+            }
+            writer.flush()?;
+            let file = writer.into_inner().map_err(|e| e.into_error())?;
             #[cfg(test)]
             crate::files::fault(crate::files::WriteStage::Sync)?;
             file.sync_all()?;
@@ -223,6 +276,9 @@ impl RecoveryManager {
 
         if let Err(e) = write_res {
             let _ = fs::remove_file(&tmp_path);
+            if let Ok(mut guard) = self.storage_cache.lock() {
+                *guard = None;
+            }
             return Err(RecoveryError::Io(e));
         }
 
@@ -231,7 +287,11 @@ impl RecoveryManager {
         valid.sort_by_key(|(_, key)| (key.epoch, key.revision));
         let mut removed = false;
         while valid.len() > 2 {
-            fs::remove_file(valid.remove(0).0)?;
+            let (p, _) = valid.remove(0);
+            if let Ok(meta) = fs::metadata(&p) {
+                storage = storage.saturating_sub(meta.len());
+            }
+            fs::remove_file(p)?;
             removed = true;
         }
         // Invalid remnants cannot serve as the previous copy and must not consume the budget.
@@ -244,7 +304,11 @@ impl RecoveryManager {
                 && name.ends_with(".snap")
                 && !valid.iter().any(|(path, _)| *path == entry.path())
             {
-                fs::remove_file(entry.path())?;
+                let p = entry.path();
+                if let Ok(meta) = fs::metadata(&p) {
+                    storage = storage.saturating_sub(meta.len());
+                }
+                fs::remove_file(p)?;
                 removed = true;
             }
         }
@@ -253,6 +317,9 @@ impl RecoveryManager {
             // The rename is already durable. A second directory sync is needed
             // only when cleanup subsequently changed directory entries.
             File::open(&self.recovery_dir)?.sync_all()?;
+        }
+        if let Ok(mut guard) = self.storage_cache.lock() {
+            *guard = Some(storage.saturating_add(size as u64));
         }
         Ok(target_path)
     }

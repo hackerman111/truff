@@ -12,7 +12,7 @@ pub mod search;
 pub mod update;
 
 pub use backlinks::{BacklinkOccurrence, BacklinkPage};
-pub use resolve::{FileId, Resolution, Resolver, Target, slugify};
+pub use resolve::{BatchResolverCache, FileId, Resolution, Resolver, Target, slugify};
 pub use search::{
     DEFAULT_MAX_SEARCH_PAGE_SIZE, SearchPage, SearchQuery, SearchResult, SearchSession,
     escape_fts5_query,

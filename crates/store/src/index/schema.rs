@@ -25,9 +25,31 @@ pub(super) fn initialize(conn: &mut Connection) -> rusqlite::Result<()> {
              ALTER TABLE files ADD COLUMN file_name TEXT NOT NULL DEFAULT '';",
         )?;
     }
+
+    let has_mtime: bool = {
+        let mut pragma = tx.prepare("PRAGMA table_info(files)")?;
+        let columns = pragma.query_map([], |row| row.get::<_, String>(1))?;
+        let mut found = false;
+        for col in columns {
+            if col? == "mtime_ns" {
+                found = true;
+                break;
+            }
+        }
+        found
+    };
+
+    if !has_mtime {
+        tx.execute_batch(
+            "ALTER TABLE files ADD COLUMN mtime_ns INTEGER NOT NULL DEFAULT -1;
+             ALTER TABLE files ADD COLUMN file_size INTEGER NOT NULL DEFAULT -1;",
+        )?;
+    }
+
     tx.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_files_stem ON files(file_stem);
-         CREATE INDEX IF NOT EXISTS idx_files_name ON files(file_name);",
+        "CREATE INDEX IF NOT EXISTS idx_files_stem ON files(file_stem, relative_path, id);
+         CREATE INDEX IF NOT EXISTS idx_files_name ON files(file_name, relative_path, id);
+         CREATE INDEX IF NOT EXISTS idx_files_title ON files(title, relative_path, id);",
     )?;
 
     {
@@ -67,8 +89,16 @@ pub(super) fn initialize(conn: &mut Connection) -> rusqlite::Result<()> {
     }
 
     let version: i64 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version < 4 {
-        tx.execute_batch("PRAGMA user_version = 4;")?;
+    if version < 5 {
+        tx.execute_batch(
+            "DROP INDEX IF EXISTS idx_files_stem;
+             DROP INDEX IF EXISTS idx_files_name;
+             CREATE INDEX IF NOT EXISTS idx_files_stem ON files(file_stem, relative_path, id);
+             CREATE INDEX IF NOT EXISTS idx_files_name ON files(file_name, relative_path, id);
+             CREATE INDEX IF NOT EXISTS idx_files_title ON files(title, relative_path, id);
+             CREATE INDEX IF NOT EXISTS idx_links_unresolved ON links(raw_target) WHERE resolved_file_id IS NULL;
+             PRAGMA user_version = 5;",
+        )?;
     }
 
     tx.commit()

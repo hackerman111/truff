@@ -88,15 +88,150 @@ pub enum Resolution {
     StaleIndex,
 }
 
+use std::collections::HashMap;
+
+/// Preloaded cache of file paths and stems for fast batch resolution in memory.
+#[derive(Debug, Default, Clone)]
+pub struct BatchResolverCache {
+    exact_paths: HashMap<String, FileId>,
+    source_paths: HashMap<FileId, String>,
+    stems: HashMap<String, Vec<FileId>>,
+}
+
+impl BatchResolverCache {
+    /// Loads all file paths, stems and names from SQLite into memory for bulk resolution.
+    pub fn load(conn: &Connection) -> rusqlite::Result<Self> {
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, relative_path, file_stem, file_name FROM files",
+        )?;
+        let mut exact_paths = HashMap::new();
+        let mut source_paths = HashMap::new();
+        let mut stems: HashMap<String, Vec<FileId>> = HashMap::new();
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                FileId(row.get(0)?),
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, rel_path, stem, name) = row?;
+            exact_paths.insert(rel_path.clone(), id);
+            source_paths.insert(id, rel_path);
+            if !stem.is_empty() {
+                let entry = stems.entry(stem).or_default();
+                if !entry.contains(&id) {
+                    entry.push(id);
+                }
+            }
+            if !name.is_empty() {
+                let entry = stems.entry(name).or_default();
+                if !entry.contains(&id) {
+                    entry.push(id);
+                }
+            }
+        }
+        Ok(Self {
+            exact_paths,
+            source_paths,
+            stems,
+        })
+    }
+
+    /// Fast in-memory resolution of a note reference without SQLite FFI queries.
+    pub(crate) fn find_file(&self, source: FileId, path_or_name: &str) -> FileFindResult {
+        let with_md = if path_or_name.ends_with(".md") {
+            path_or_name.to_string()
+        } else {
+            format!("{path_or_name}.md")
+        };
+
+        // 1. Exact match by relative_path
+        if let Some(&id) = self.exact_paths.get(path_or_name).or_else(|| self.exact_paths.get(&with_md)) {
+            return FileFindResult::Found(id);
+        }
+
+        // 2. Exact match relative to source file's directory
+        if source.0 > 0
+            && let Some(source_rel) = self.source_paths.get(&source)
+        {
+            let source_path = Path::new(source_rel);
+            if let Some(parent) = source_path.parent() {
+                let resolved = normalize_path(&parent.join(path_or_name));
+                let resolved_str = resolved.to_string_lossy();
+                let resolved_with_md = if resolved_str.ends_with(".md") {
+                    resolved_str.to_string()
+                } else {
+                    format!("{resolved_str}.md")
+                };
+                if let Some(&id) = self.exact_paths.get(resolved_str.as_ref()).or_else(|| self.exact_paths.get(&resolved_with_md)) {
+                    return FileFindResult::Found(id);
+                }
+            }
+        }
+
+        // 3. Basename matching
+        let target_stem = if let Some(stripped) = path_or_name.strip_suffix(".md") {
+            stripped
+        } else {
+            path_or_name
+        };
+
+        let mut matches = Vec::new();
+        if let Some(ids) = self.stems.get(target_stem) {
+            for &id in ids {
+                if !matches.contains(&id) {
+                    matches.push(id);
+                }
+            }
+        }
+        if target_stem != path_or_name
+            && let Some(ids) = self.stems.get(path_or_name)
+        {
+            for &id in ids {
+                if !matches.contains(&id) {
+                    matches.push(id);
+                }
+            }
+        }
+        if let Some(ids) = self.stems.get(&with_md) {
+            for &id in ids {
+                if !matches.contains(&id) {
+                    matches.push(id);
+                }
+            }
+        }
+
+        if matches.is_empty() {
+            FileFindResult::Missing
+        } else if matches.len() == 1 {
+            FileFindResult::Found(matches[0])
+        } else {
+            matches.sort_unstable();
+            FileFindResult::Ambiguous(matches)
+        }
+    }
+}
+
 /// Link and target resolver backed by SQLite index.
 pub struct Resolver<'a> {
     conn: &'a Connection,
+    cache: Option<&'a BatchResolverCache>,
 }
 
 impl<'a> Resolver<'a> {
     /// Creates a resolver borrowing an SQLite connection.
     pub fn new(conn: &'a Connection) -> Self {
-        Self { conn }
+        Self { conn, cache: None }
+    }
+
+    /// Creates a resolver with a preloaded batch cache for in-memory resolution.
+    pub fn with_cache(conn: &'a Connection, cache: &'a BatchResolverCache) -> Self {
+        Self {
+            conn,
+            cache: Some(cache),
+        }
     }
 
     /// Resolves a `Target` originating from `source` file against indexed files.
@@ -148,6 +283,9 @@ impl<'a> Resolver<'a> {
     }
 
     fn find_file(&self, source: FileId, path_or_name: &str) -> rusqlite::Result<FileFindResult> {
+        if let Some(cache) = self.cache {
+            return Ok(cache.find_file(source, path_or_name));
+        }
         let with_md = if path_or_name.ends_with(".md") {
             path_or_name.to_string()
         } else {
@@ -277,7 +415,7 @@ impl<'a> Resolver<'a> {
     }
 }
 
-enum FileFindResult {
+pub(crate) enum FileFindResult {
     Found(FileId),
     Missing,
     Ambiguous(Vec<FileId>),

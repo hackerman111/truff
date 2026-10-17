@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS links (
 );
 
 CREATE INDEX IF NOT EXISTS idx_links_resolved ON links(resolved_file_id);
+CREATE INDEX IF NOT EXISTS idx_links_unresolved ON links(raw_target) WHERE resolved_file_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_headings_anchor ON headings(file_id, anchor);
 CREATE INDEX IF NOT EXISTS idx_blocks_anchor ON blocks(file_id, block_anchor);
 
