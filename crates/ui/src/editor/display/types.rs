@@ -33,6 +33,7 @@ pub enum InlineStyle {
     Link,
     TextColor([u8; 4]),
     Highlight([u8; 4]),
+    Math,
 }
 
 /// A formatted inline span with source byte range and style.

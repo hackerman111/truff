@@ -24,6 +24,9 @@ pub struct FlashOverlay {
     targets: Vec<FlashTarget>,
     query: String,
     active: bool,
+    search_prompt: String,
+    waiting_search_chars: bool,
+    search_windows: Vec<(std::ops::Range<usize>, String)>,
 }
 
 impl FlashOverlay {
@@ -43,6 +46,25 @@ impl FlashOverlay {
         self.active
     }
 
+    /// Whether Flash is waiting for 2 search characters before assigning labels.
+    pub fn is_waiting_search_chars(&self) -> bool {
+        self.waiting_search_chars
+    }
+
+    /// Current 2-character search query.
+    pub fn search_prompt(&self) -> &str {
+        &self.search_prompt
+    }
+
+    /// Remove a character from search prompt on Backspace.
+    pub fn backspace(&mut self) {
+        if self.waiting_search_chars {
+            self.search_prompt.pop();
+        } else if !self.query.is_empty() {
+            self.query.pop();
+        }
+    }
+
     /// Current active flash targets.
     pub fn targets(&self) -> &[FlashTarget] {
         &self.targets
@@ -53,6 +75,16 @@ impl FlashOverlay {
         &self.query
     }
 
+    /// Activates Flash in 2-character Neovim mode: waits for 2 chars then labels occurrences.
+    pub fn activate_search(&mut self, windows: Vec<(std::ops::Range<usize>, String)>) {
+        self.targets.clear();
+        self.query.clear();
+        self.search_prompt.clear();
+        self.search_windows = windows;
+        self.waiting_search_chars = true;
+        self.active = true;
+    }
+
     /// Activates the Flash overlay by generating targets ONLY for the visible viewport text.
     ///
     /// GUARANTEE: Targets are strictly extracted from `visible_text` (viewport) with source ranges
@@ -60,14 +92,20 @@ impl FlashOverlay {
     pub fn activate(&mut self, visible_text: &str, viewport_start_offset: usize) {
         self.targets = Self::generate_targets(visible_text, viewport_start_offset);
         self.query.clear();
+        self.search_prompt.clear();
+        self.waiting_search_chars = false;
+        self.search_windows.clear();
         self.active = !self.targets.is_empty();
     }
 
     /// Cancels and deactivates Flash navigation.
     pub fn cancel(&mut self) {
         self.active = false;
+        self.waiting_search_chars = false;
         self.targets.clear();
         self.query.clear();
+        self.search_prompt.clear();
+        self.search_windows.clear();
     }
 
     /// Feeds an input character.
@@ -77,6 +115,51 @@ impl FlashOverlay {
     /// If no targets match the prefix, cancels and returns `None`.
     pub fn feed_char(&mut self, ch: char) -> Option<std::ops::Range<usize>> {
         if !self.active {
+            return None;
+        }
+
+        if self.waiting_search_chars {
+            self.search_prompt.push(ch);
+            if self.search_prompt.chars().count() < 2 {
+                return None;
+            }
+            // 2 characters typed: search in windows for matches (case-insensitive)
+            let query = self.search_prompt.to_lowercase();
+            let mut candidates = Vec::new();
+            for (window_range, text) in &self.search_windows {
+                let text_lower = text.to_lowercase();
+                let mut start_idx = 0;
+                while let Some(pos) = text_lower[start_idx..].find(&query) {
+                    let match_idx = start_idx + pos;
+                    let match_len = query.len();
+                    let source_start = window_range.start + match_idx;
+                    let source_end = source_start + match_len;
+                    let word_end = text[match_idx..]
+                        .find(|c: char| !c.is_alphanumeric() && c != '_')
+                        .map_or(text.len(), |e| match_idx + e);
+                    let candidate_text = text[match_idx..word_end].to_string();
+                    candidates.push((source_start..source_end, candidate_text));
+                    if candidates.len() >= 100 {
+                        break;
+                    }
+                    start_idx = match_idx + match_len.max(1);
+                    if start_idx >= text.len() {
+                        break;
+                    }
+                }
+                if candidates.len() >= 100 {
+                    break;
+                }
+            }
+
+            if candidates.is_empty() {
+                self.cancel();
+                return None;
+            }
+
+            self.targets = Self::label_candidates(candidates);
+            self.waiting_search_chars = false;
+            self.query.clear();
             return None;
         }
 
@@ -128,6 +211,9 @@ impl FlashOverlay {
     ) {
         self.targets = Self::label_candidates(candidates);
         self.query.clear();
+        self.search_prompt.clear();
+        self.waiting_search_chars = false;
+        self.search_windows.clear();
         self.active = !self.targets.is_empty();
     }
 

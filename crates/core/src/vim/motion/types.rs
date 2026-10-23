@@ -37,6 +37,8 @@ pub enum Motion {
     ParagraphForward,
     CurrentLine,
     MatchingBracket,
+    NextHeading,
+    PrevHeading,
 }
 
 /// Type of text object boundary.

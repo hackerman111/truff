@@ -54,7 +54,9 @@ impl VaultDialog {
             self.completion = None;
             self.was_open = true;
         }
-        context.request_repaint_after(Duration::from_millis(500));
+        if context.input(|i| i.focused) {
+            context.request_repaint_after(Duration::from_millis(500));
+        }
 
         if self.open {
             let mut close_dialog = false;

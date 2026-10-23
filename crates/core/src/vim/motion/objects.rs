@@ -82,7 +82,7 @@ pub fn eval_text_object_range(
         | TextObjectTarget::MarkdownListItem
         | TextObjectTarget::MarkdownQuote
         | TextObjectTarget::MarkdownTableCell
-        | TextObjectTarget::MarkdownTableRow => None,
+        | TextObjectTarget::MarkdownTableRow => eval_markdown_object_range(buffer, current, obj),
         TextObjectTarget::Paragraph => Some(paragraph_range(buffer, current, obj.kind)),
         TextObjectTarget::Sentence => Some(sentence_range(buffer, current, obj.kind)),
     }
@@ -237,4 +237,146 @@ fn sentence_range(buffer: &Buffer, pos: usize, kind: TextObjectKind) -> Range<us
         }
     }
     start..end
+}
+
+fn eval_markdown_object_range(
+    buffer: &Buffer,
+    pos: usize,
+    obj: TextObject,
+) -> Option<Range<usize>> {
+    let snapshot = crate::markdown::MarkdownSnapshot::from_buffer(buffer);
+    match obj.target {
+        TextObjectTarget::MarkdownHeading => {
+            let (i, h) = snapshot
+                .facts
+                .headings
+                .iter()
+                .enumerate()
+                .rfind(|(_, h)| h.range.start <= pos)?;
+            let next_pos = snapshot
+                .facts
+                .headings
+                .get(i + 1)
+                .map_or(buffer.byte_len(), |next| next.range.start);
+            let text = buffer.as_str();
+            let heading_rest = &text[h.range.end..next_pos];
+            let after_heading = if heading_rest.starts_with("\r\n") {
+                h.range.end + 2
+            } else if heading_rest.starts_with('\n') {
+                h.range.end + 1
+            } else {
+                h.range.end
+            };
+            let body_start = after_heading.min(next_pos);
+            match obj.kind {
+                TextObjectKind::Inner => Some(body_start..next_pos),
+                TextObjectKind::Around => Some(h.range.start..next_pos),
+            }
+        }
+        TextObjectTarget::MarkdownSection => {
+            let sec = snapshot
+                .sections
+                .iter()
+                .filter(|s| s.full_range.contains(&pos) || s.heading_range.contains(&pos))
+                .min_by_key(|s| s.full_range.len())
+                .or_else(|| {
+                    snapshot
+                        .sections
+                        .iter()
+                        .rfind(|s| s.full_range.start <= pos)
+                })?;
+            match obj.kind {
+                TextObjectKind::Inner => Some(sec.body_range.clone()),
+                TextObjectKind::Around => Some(sec.full_range.clone()),
+            }
+        }
+        TextObjectTarget::MarkdownListItem => {
+            if let Some(task) = snapshot.tasks.iter().find(|t| t.line_range.contains(&pos)) {
+                return match obj.kind {
+                    TextObjectKind::Inner => Some(task.content_range.clone()),
+                    TextObjectKind::Around => Some(task.line_range.clone()),
+                };
+            }
+            let text = buffer.as_str();
+            let line_start = text[..pos].rfind('\n').map_or(0, |i| i + 1);
+            let line_end = text[pos..].find('\n').map_or(text.len(), |i| pos + i);
+            let line = &text[line_start..line_end];
+            let trimmed = line.trim_start();
+            let marker_len = line.len() - trimmed.len();
+            if trimmed.starts_with(['-', '*', '+'])
+                || trimmed.chars().next().is_some_and(|c| c.is_ascii_digit())
+            {
+                let content_start = line_start + marker_len + 2.min(trimmed.len());
+                match obj.kind {
+                    TextObjectKind::Inner => Some(content_start..line_end),
+                    TextObjectKind::Around => Some(line_start..line_end),
+                }
+            } else {
+                Some(line_start..line_end)
+            }
+        }
+        TextObjectTarget::MarkdownTableCell => {
+            for table in &snapshot.tables {
+                for row in &table.rows {
+                    for cell in &row.cells {
+                        if cell.contains(&pos) || (pos == cell.end && pos == buffer.byte_len()) {
+                            let slice = buffer.slice(cell.clone()).to_string();
+                            let trimmed = slice.trim();
+                            let start_offset = slice.find(trimmed).unwrap_or(0);
+                            return match obj.kind {
+                                TextObjectKind::Inner => Some(
+                                    (cell.start + start_offset)
+                                        ..(cell.start + start_offset + trimmed.len()),
+                                ),
+                                TextObjectKind::Around => Some(cell.clone()),
+                            };
+                        }
+                    }
+                }
+            }
+            None
+        }
+        TextObjectTarget::MarkdownTableRow => {
+            for table in &snapshot.tables {
+                for row in &table.rows {
+                    if row.range.contains(&pos) {
+                        return Some(row.range.clone());
+                    }
+                }
+            }
+            None
+        }
+        TextObjectTarget::MarkdownQuote => {
+            if let Some(callout) = snapshot.callouts.iter().find(|c| c.range.contains(&pos)) {
+                return match obj.kind {
+                    TextObjectKind::Inner => Some(callout.content_range.clone()),
+                    TextObjectKind::Around => Some(callout.range.clone()),
+                };
+            }
+            if let Some(quote) = snapshot.quotes.iter().find(|q| q.contains(&pos)) {
+                return Some(quote.clone());
+            }
+            None
+        }
+        TextObjectTarget::MarkdownCodeBlock => {
+            if let Some(cb) = snapshot
+                .code_blocks
+                .iter()
+                .find(|cb| cb.range.contains(&pos))
+            {
+                return match obj.kind {
+                    TextObjectKind::Inner => Some(cb.content_range.clone()),
+                    TextObjectKind::Around => Some(cb.range.clone()),
+                };
+            }
+            None
+        }
+        TextObjectTarget::MarkdownLink => {
+            if let Some(link) = snapshot.facts.links.iter().find(|l| l.range.contains(&pos)) {
+                return Some(link.range.clone());
+            }
+            None
+        }
+        _ => None,
+    }
 }

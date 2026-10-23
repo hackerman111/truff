@@ -138,7 +138,7 @@ impl NativeApp {
         tabs::show(&mut self.application, ui, &theme);
         self.application.refresh_command_completions();
         status::show(&mut self.application, ui, &theme);
-        if self.application.vault_path().is_none() {
+        if self.application.vault_path().is_none() && context.input(|i| i.focused) {
             self.recent_vaults.refresh();
             context.request_repaint_after(recent::RecentVaults::INTERVAL);
         }

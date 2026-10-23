@@ -244,3 +244,33 @@ fn flash_syntax_object_targets_ast_nodes_and_shortcuts() {
     keys(&mut shell, &label);
     assert!(!shell.flash().is_active());
 }
+
+#[test]
+fn test_neovim_2char_flash_search() {
+    let mut shell = Shell::new();
+    shell.set_editor_text("apple banana apricot berry");
+    #[allow(clippy::single_range_in_vec_init)]
+    let ranges = [0..26];
+    shell.start_flash_search_ranges(&ranges).unwrap();
+    assert!(shell.flash().is_active());
+    assert!(shell.flash().is_waiting_search_chars());
+    assert_eq!(shell.flash().targets().len(), 0); // No word labels before 2 chars!
+
+    // Type 1st char 'a'
+    shell.feed_key(truff_core::vim::Key::Char('a'));
+    assert!(shell.flash().is_waiting_search_chars());
+    assert_eq!(shell.flash().targets().len(), 0);
+
+    // Type 2nd char 'p' -> matches "apple" (0..2) and "apricot" (13..15)
+    shell.feed_key(truff_core::vim::Key::Char('p'));
+    assert!(!shell.flash().is_waiting_search_chars());
+    assert_eq!(shell.flash().targets().len(), 2);
+    assert_eq!(shell.flash().targets()[0].source_range, 0..2);
+    assert_eq!(shell.flash().targets()[1].source_range, 13..15);
+
+    // Press label for second match ('s')
+    let label = shell.flash().targets()[1].label.chars().next().unwrap();
+    shell.feed_key(truff_core::vim::Key::Char(label));
+    assert!(!shell.flash().is_active());
+    assert_eq!(shell.editor_view().unwrap().head().get(), 13);
+}

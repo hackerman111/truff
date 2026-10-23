@@ -52,6 +52,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                     for view in views {
                         let view_id = view.id();
                         let is_active = Some(view_id) == active_view_id;
+                        let is_pinned = application.view_is_pinned(view_id);
                         let buffer_id = view.buffer_id();
                         let entry = application.shell.workspace().buffers().get(buffer_id);
                         let title = entry
@@ -79,10 +80,14 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
 
                         let frame = egui::Frame::new()
                             .fill(tab_bg)
-                            .stroke(egui::Stroke::NONE)
+                            .stroke(if is_active {
+                                egui::Stroke::new(1.0, color(theme.border_subtle))
+                            } else {
+                                egui::Stroke::NONE
+                            })
                             .corner_radius(egui::CornerRadius {
-                                nw: 4,
-                                ne: 4,
+                                nw: 6,
+                                ne: 6,
                                 sw: 0,
                                 se: 0,
                             })
@@ -100,20 +105,26 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                                 );
                                 icons::render_icon(
                                     ui.painter(),
-                                    icons::Icon::File,
+                                    if is_pinned {
+                                        icons::Icon::Pin
+                                    } else {
+                                        icons::Icon::File
+                                    },
                                     icon_rect,
-                                    text_color,
+                                    if is_active || is_pinned {
+                                        color(theme.accent)
+                                    } else {
+                                        text_color
+                                    },
                                     1.4,
                                 );
 
-                                let rich =
-                                    egui::RichText::new(if application.view_is_pinned(view_id) {
-                                        format!("• {title}")
-                                    } else {
-                                        title.to_owned()
-                                    })
+                                let mut rich = egui::RichText::new(title)
                                     .size(theme.geometry.ui_font_size)
                                     .color(text_color);
+                                if is_active {
+                                    rich = rich.strong();
+                                }
                                 let resp = ui.selectable_label(false, rich);
 
                                 let (action_rect, action_resp) = ui.allocate_exact_size(
@@ -168,8 +179,8 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                             let rect = frame_resp.response.rect;
                             ui.painter().line_segment(
                                 [
-                                    egui::pos2(rect.left(), rect.bottom()),
-                                    egui::pos2(rect.right(), rect.bottom()),
+                                    egui::pos2(rect.left() + 4.0, rect.top() + 0.5),
+                                    egui::pos2(rect.right() - 4.0, rect.top() + 0.5),
                                 ],
                                 egui::Stroke::new(2.0, color(theme.accent)),
                             );

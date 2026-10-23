@@ -237,6 +237,9 @@ impl Shell {
                     self.key_prefix.clear();
                     self.which_key.hide();
                 }
+                Key::Backspace if self.flash.is_waiting_search_chars() => {
+                    self.flash.backspace();
+                }
                 Key::Char(ch) => {
                     if let Some(mut range) = self.flash.feed_char(ch) {
                         use truff_core::vim::{TextObject, TextObjectKind, TextObjectTarget};

@@ -216,14 +216,34 @@ impl Application {
             .map(|path| path.to_string_lossy().into_owned())
     }
 
+    pub fn has_any_dirty_buffer(&self) -> bool {
+        self.paths.is_some()
+            && self
+                .shell
+                .workspace()
+                .buffers()
+                .entries()
+                .any(|entry| entry.buffer().is_some_and(|b| b.is_dirty()))
+    }
+
     pub fn is_path_dirty(&self, rel_path: &str) -> bool {
         let Some(paths) = &self.paths else {
             return false;
         };
-        let abs = path_completion::normalize_path(&paths.root().join(rel_path));
-        if !abs.starts_with(paths.root()) {
-            return false;
-        }
+        let joined = paths.root().join(rel_path);
+        let abs = if rel_path.contains("..")
+            || rel_path.starts_with("./")
+            || rel_path.contains("/./")
+            || rel_path.contains('\\')
+        {
+            let norm = path_completion::normalize_path(&joined);
+            if !norm.starts_with(paths.root()) {
+                return false;
+            }
+            norm
+        } else {
+            joined
+        };
         self.shell
             .workspace()
             .buffers()

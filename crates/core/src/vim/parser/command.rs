@@ -90,6 +90,10 @@ pub enum Command {
         forward: bool,
     },
     FollowLink,
+    SetMark(char),
+    JumpToMark(char),
+    JumpBack,
+    JumpForward,
 }
 
 /// Viewport alignment target for `zz`, `zt`, `zb`.

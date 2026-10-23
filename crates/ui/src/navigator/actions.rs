@@ -198,6 +198,12 @@ impl NavigatorState {
                         NavigatorAction::DeleteFile { path: path.clone() }
                     },
                 });
+                acts.push(QuickAction {
+                    key: "y".to_string(),
+                    label: "Скопировать путь".to_string(),
+                    description: format!("Скопировать путь {}", path),
+                    action: NavigatorAction::CopyPath { path: path.clone() },
+                });
                 acts
             }
             NavigatorItemPayload::View { view_id, .. } => vec![
@@ -327,6 +333,12 @@ mod tests {
         assert_eq!(
             state.quick_action("↵"),
             NavigatorAction::OpenFile {
+                path: "docs/Note.md".into()
+            }
+        );
+        assert_eq!(
+            state.quick_action("y"),
+            NavigatorAction::CopyPath {
                 path: "docs/Note.md".into()
             }
         );

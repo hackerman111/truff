@@ -40,22 +40,82 @@ pub(super) fn show(
                 ui.spacing_mut().interact_size.y = row_height - theme.spacing_xs * 2.0;
                 ui.spacing_mut().item_spacing = egui::vec2(theme.spacing_sm, 0.0);
                 ui.horizontal(|ui| {
+                    if state.jump_labels_active {
+                        const LABELS: &[char] = &[
+                            'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'q', 'w', 'e', 'r', 't',
+                            'y', 'u', 'i', 'o', 'p', 'z', 'x', 'c', 'v', 'b', 'n', 'm',
+                        ];
+                        let visible_start = state.scroll.visible_range.start;
+                        let badge = index
+                            .checked_sub(visible_start)
+                            .and_then(|i| LABELS.get(i).copied());
+                        if let Some(ch) = badge {
+                            ui.label(
+                                egui::RichText::new(format!("[{ch}]"))
+                                    .monospace()
+                                    .strong()
+                                    .color(color(theme.accent_primary)),
+                            );
+                        }
+                    }
                     ui.add_space(
                         (item.depth as f32 * theme.spacing_md).min(ui.available_width() * 0.25),
                     );
-                    let icon = if item.is_folder {
-                        if item.is_collapsed { "▸" } else { "▾" }
-                    } else {
-                        match item.payload {
-                            NavigatorItemPayload::Command { .. } => "⌘",
-                            NavigatorItemPayload::Heading { .. } => "#",
-                            NavigatorItemPayload::Task { checked: true, .. } => "☑",
-                            NavigatorItemPayload::Task { checked: false, .. } => "☐",
-                            NavigatorItemPayload::Link { .. } => "↗",
-                            _ => "·",
+                    let swatch_color = match item.payload {
+                        NavigatorItemPayload::Color { hex }
+                        | NavigatorItemPayload::Highlight { hex } => {
+                            egui::Color32::from_hex(hex).ok()
                         }
+                        _ => None,
                     };
-                    ui.label(egui::RichText::new(icon).color(color(theme.text_muted)));
+                    if let Some(c) = swatch_color {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, c);
+                        ui.painter().rect_stroke(
+                            rect,
+                            2.0,
+                            egui::Stroke::new(1.0, color(theme.border_subtle)),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else {
+                        use crate::native::icons::{Icon, render_icon};
+                        let (icon, icon_color) = if item.is_folder {
+                            (
+                                if item.is_collapsed {
+                                    Icon::Folder
+                                } else {
+                                    Icon::FolderOpen
+                                },
+                                color(theme.accent_primary),
+                            )
+                        } else {
+                            match item.payload {
+                                NavigatorItemPayload::Command { .. } => {
+                                    (Icon::Command, color(theme.accent_primary))
+                                }
+                                NavigatorItemPayload::Heading { .. } => {
+                                    (Icon::Hash, color(theme.accent_primary))
+                                }
+                                NavigatorItemPayload::Task { checked: true, .. } => {
+                                    (Icon::CheckSquare, color(theme.callout_tip))
+                                }
+                                NavigatorItemPayload::Task { checked: false, .. } => {
+                                    (Icon::Square, color(theme.text_muted))
+                                }
+                                NavigatorItemPayload::Link { .. } => {
+                                    (Icon::Link, color(theme.accent_primary))
+                                }
+                                NavigatorItemPayload::Vault { .. } => {
+                                    (Icon::Vault, color(theme.accent_primary))
+                                }
+                                _ => (Icon::File, color(theme.text_muted)),
+                            }
+                        };
+                        let (icon_rect, _) =
+                            ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                        render_icon(ui.painter(), icon, icon_rect, icon_color, 1.35);
+                    }
                     let shortcut_width = if item.shortcut.is_some() { 64.0 } else { 0.0 };
                     ui.vertical(|ui| {
                         ui.set_width((ui.available_width() - shortcut_width).max(1.0));

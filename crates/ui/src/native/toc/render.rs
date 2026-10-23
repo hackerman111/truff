@@ -50,12 +50,8 @@ pub fn render_toc_dock(
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if widgets::icon_button(
-                    ui,
-                    icons::Icon::MoreHorizontal,
-                    "Открепить во плавающее окно",
-                )
-                .clicked()
+                if widgets::icon_button(ui, icons::Icon::Pin, "Открепить в плавающее окно")
+                    .clicked()
                 {
                     action = Some(TocAction::TogglePin);
                 }
@@ -150,7 +146,13 @@ pub fn render_toc_overlay(
                     if widgets::icon_button(ui, icons::Icon::Close, "Закрыть (Esc)").clicked() {
                         action = Some(TocAction::Close);
                     }
-                    if widgets::icon_button(ui, icons::Icon::MoreHorizontal, "📌 Закрепить в боковую панель").clicked() {
+                    if widgets::icon_button(
+                        ui,
+                        icons::Icon::Pin,
+                        "Закрепить в боковую панель",
+                    )
+                    .clicked()
+                    {
                         action = Some(TocAction::TogglePin);
                     }
                 });

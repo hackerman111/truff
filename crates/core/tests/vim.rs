@@ -365,3 +365,99 @@ fn test_visual_line_indent_multibyte_without_trailing_newline() {
     assert_eq!(vim.mode, Mode::Normal);
     assert_eq!(buffer.as_str(), format!("    {text}"));
 }
+
+#[test]
+fn test_p2_structural_text_objects_marks_and_motions() {
+    // 1. Marks and jump to mark
+    let text = "First line\nSecond line\nThird line";
+    let (mut buffer, mut view) = setup_editor(text);
+    let mut vim = VimState::new();
+
+    // Move to "Second line" (pos 11)
+    view.set_cursor(BytePos::new(11), BytePos::new(11));
+    // Set mark 'a'
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char('m'), Key::Char('a')],
+    );
+    // Move to 0
+    view.set_cursor(BytePos::new(0), BytePos::new(0));
+    assert_eq!(view.head().get(), 0);
+    // Jump to mark 'a'
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char('\''), Key::Char('a')],
+    );
+    assert_eq!(view.head().get(), 11, "Must jump back to mark 'a'");
+
+    // 2. Heading motions `]h` and `[h`
+    let doc = "# First\nBody 1\n## Second\nBody 2\n### Third\nBody 3";
+    let (mut buffer, mut view) = setup_editor(doc);
+    let mut vim = VimState::new();
+    view.set_cursor(BytePos::new(0), BytePos::new(0));
+
+    // Next heading `]h` -> moves to "## Second" (pos 15)
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char(']'), Key::Char('h')],
+    );
+    assert_eq!(view.head().get(), 15, "']h' moves to next heading");
+
+    // Next heading `]h` -> moves to "### Third" (pos 32)
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char(']'), Key::Char('h')],
+    );
+    assert_eq!(view.head().get(), 32, "']h' moves to third heading");
+
+    // Prev heading `[h` -> moves back to "## Second" (pos 15)
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char('['), Key::Char('h')],
+    );
+    assert_eq!(view.head().get(), 15, "'[h' moves to previous heading");
+
+    // 3. Structural text object: `dih` (delete inner heading/section)
+    let section_doc = "# Title\nSection body to remove.\n## Next\nOther";
+    let (mut buffer, mut view) = setup_editor(section_doc);
+    let mut vim = VimState::new();
+    view.set_cursor(BytePos::new(12), BytePos::new(12)); // inside "Section body to remove."
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char('d'), Key::Char('i'), Key::Char('h')],
+    );
+    assert_eq!(
+        buffer.as_str(),
+        "# Title\n## Next\nOther",
+        "'dih' deletes section body"
+    );
+
+    // 4. Structural text object: `daL` (delete around list item)
+    let list_doc = "- Item 1\n- Item 2 to delete\n- Item 3";
+    let (mut buffer, mut view) = setup_editor(list_doc);
+    let mut vim = VimState::new();
+    let pos = list_doc.find("Item 2").unwrap();
+    view.set_cursor(BytePos::new(pos), BytePos::new(pos));
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char('d'), Key::Char('a'), Key::Char('L')],
+    );
+    assert!(
+        !buffer.as_str().contains("Item 2"),
+        "'daL' deletes list item"
+    );
+}

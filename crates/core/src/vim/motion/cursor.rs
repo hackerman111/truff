@@ -200,6 +200,35 @@ pub fn eval_motion(
         Motion::MatchingBracket => {
             current = find_matching_bracket(buffer, current);
         }
+        Motion::NextHeading | Motion::PrevHeading => {
+            let forward = *motion == Motion::NextHeading;
+            let slice = buffer.as_str();
+            let mut line_starts = Vec::new();
+            line_starts.push(0);
+            for (i, b) in slice.bytes().enumerate() {
+                if b == b'\n' && i + 1 < slice.len() {
+                    line_starts.push(i + 1);
+                }
+            }
+            let cur_line = line_starts
+                .partition_point(|&s| s <= current)
+                .saturating_sub(1);
+            if forward {
+                for &start in &line_starts[cur_line + 1..] {
+                    if slice[start..].trim_start().starts_with('#') {
+                        current = start;
+                        break;
+                    }
+                }
+            } else {
+                for &start in line_starts[..cur_line].iter().rev() {
+                    if slice[start..].trim_start().starts_with('#') {
+                        current = start;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     (BytePos::new(snap_grapheme(buffer, current)), new_find)
@@ -238,7 +267,13 @@ pub fn eval_operator_motion_range(
     };
     if matches!(
         motion,
-        Motion::Up | Motion::Down | Motion::FirstLine | Motion::LastLine | Motion::Line(_)
+        Motion::Up
+            | Motion::Down
+            | Motion::FirstLine
+            | Motion::LastLine
+            | Motion::Line(_)
+            | Motion::NextHeading
+            | Motion::PrevHeading
     ) {
         let first = buffer.line_of_byte(pos.get().min(dest.get()));
         let last = buffer.line_of_byte(pos.get().max(dest.get()));

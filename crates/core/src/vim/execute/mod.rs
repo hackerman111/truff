@@ -37,6 +37,7 @@ pub struct VimState {
     syntax_revision: Option<u64>,
     syntax_objects: Vec<SyntaxObjectRange>,
     replaying_edit: bool,
+    marks: HashMap<char, usize>,
 }
 impl Default for VimState {
     fn default() -> Self {
@@ -63,6 +64,7 @@ impl Default for VimState {
             syntax_revision: None,
             syntax_objects: Vec::new(),
             replaying_edit: false,
+            marks: HashMap::new(),
         }
     }
 }

@@ -27,6 +27,10 @@ impl NativeApp {
             self.application.status = error.to_string();
         }
         let (context_title, items) = self.navigator_items(mode);
+        self.navigator.vault_root = self
+            .application
+            .vault_path()
+            .map(std::path::Path::to_path_buf);
         self.navigator.open_mode(mode, context_title, items);
         self.navigator_revision = self.application.catalog_revision();
     }
@@ -58,6 +62,11 @@ impl NativeApp {
                 item.is_collapsed = collapsed;
             }
         }
+        self.navigator.vault_root = self
+            .application
+            .vault_path()
+            .map(std::path::Path::to_path_buf);
+        self.navigator.cached_preview = None;
         self.navigator.context_title = title;
         self.navigator.items = items;
         self.navigator.recompute_filter();
@@ -201,6 +210,11 @@ impl NativeApp {
             NavigatorAction::Close => {
                 self.navigator.close();
                 self.application.shell.pop_focus();
+            }
+            NavigatorAction::CopyPath { path } => {
+                self.navigator.close();
+                self.application.shell.pop_focus();
+                self.application.status = format!("Скопирован путь: {path}");
             }
             NavigatorAction::OpenFile { path } => {
                 self.navigator.close();

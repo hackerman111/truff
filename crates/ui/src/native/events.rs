@@ -172,18 +172,27 @@ impl NativeApp {
                 if id.as_str().starts_with("flash.") =>
             {
                 use crate::overlays::FlashKind;
-                let kind = match id.as_str() {
-                    "flash.jump_word" => FlashKind::Word,
-                    "flash.select_sentence" => FlashKind::Sentence,
-                    "flash.select_paragraph" => FlashKind::Paragraph,
-                    _ => FlashKind::SyntaxObject,
-                };
-                if let Err(error) = self
-                    .application
-                    .shell
-                    .start_flash_ranges(&self.editor.visible_source_windows(), kind)
-                {
-                    self.application.status = error.to_string();
+                if id.as_str() == "flash.jump_word" {
+                    if let Err(error) = self
+                        .application
+                        .shell
+                        .start_flash_search_ranges(&self.editor.visible_source_windows())
+                    {
+                        self.application.status = error.to_string();
+                    }
+                } else {
+                    let kind = match id.as_str() {
+                        "flash.select_sentence" => FlashKind::Sentence,
+                        "flash.select_paragraph" => FlashKind::Paragraph,
+                        _ => FlashKind::SyntaxObject,
+                    };
+                    if let Err(error) = self
+                        .application
+                        .shell
+                        .start_flash_ranges(&self.editor.visible_source_windows(), kind)
+                    {
+                        self.application.status = error.to_string();
+                    }
                 }
             }
             ShellAction::RegisteredCommand { id, argument }

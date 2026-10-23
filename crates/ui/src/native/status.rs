@@ -62,24 +62,67 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                             .size(theme.geometry.ui_font_size - 1.0)
                             .color(color(theme.text_muted)),
                     );
-                    ui.add_space(6.0);
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&application.status)
-                                .size(theme.geometry.ui_font_size - 1.0)
-                                .color(color(theme.text_muted)),
-                        )
-                        .truncate(),
-                    );
+                    ui.add_space(4.0);
+                    let is_dirty = application
+                        .shell
+                        .editor_buffer()
+                        .is_some_and(|b| b.is_dirty());
+                    let (save_text, save_color) = if is_dirty {
+                        ("Modified", color(theme.callout_warning))
+                    } else {
+                        ("Saved", color(theme.callout_tip))
+                    };
+                    egui::Frame::new()
+                        .fill(color(theme.bg_secondary))
+                        .stroke(egui::Stroke::new(1.0, color(theme.border_subtle)))
+                        .corner_radius(egui::CornerRadius::same(3))
+                        .inner_margin(egui::Margin::symmetric(6, 2))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(save_text)
+                                    .size(theme.geometry.ui_font_size - 2.0)
+                                    .strong()
+                                    .color(save_color),
+                            );
+                        });
+                    if !application.status.is_empty() {
+                        ui.add_space(6.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&application.status)
+                                    .size(theme.geometry.ui_font_size - 1.0)
+                                    .color(color(theme.text_muted)),
+                            )
+                            .truncate(),
+                        );
+                    }
 
-                    // Right-aligned cursor position and metadata
+                    // Right-aligned cursor position, projection mode, and metadata
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Markdown · UTF-8")
                                 .size(theme.geometry.ui_font_size - 1.0)
                                 .color(color(theme.text_muted)),
                         );
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
+                        let proj_label = match application.projection() {
+                            crate::editor::ProjectionMode::LivePreview => "Live Preview",
+                            crate::editor::ProjectionMode::Reading => "Reading",
+                            crate::editor::ProjectionMode::Source => "Source",
+                        };
+                        egui::Frame::new()
+                            .fill(color(theme.bg_secondary))
+                            .stroke(egui::Stroke::new(1.0, color(theme.border_subtle)))
+                            .corner_radius(egui::CornerRadius::same(3))
+                            .inner_margin(egui::Margin::symmetric(6, 1))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(proj_label)
+                                        .size(theme.geometry.ui_font_size - 2.0)
+                                        .color(color(theme.accent)),
+                                );
+                            });
+                        ui.add_space(6.0);
                         let cursor_str = if let Some(view) = application.shell.editor_view()
                             && let Some(buffer) = application.shell.editor_buffer()
                         {

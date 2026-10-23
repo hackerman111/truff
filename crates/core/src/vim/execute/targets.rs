@@ -33,24 +33,24 @@ impl VimState {
                 | crate::vim::motion::TextObjectTarget::MarkdownTableCell
                 | crate::vim::motion::TextObjectTarget::MarkdownTableRow
         ) {
-            if self.syntax_revision != Some(buffer.revision()) {
-                return Err("Syntax object ranges unavailable at this revision".into());
+            if self.syntax_revision == Some(buffer.revision())
+                && let Some(r) = self
+                    .syntax_objects
+                    .iter()
+                    .filter(|r| {
+                        r.target == obj.target
+                            && r.around.start <= position.get()
+                            && position.get() < r.around.end
+                    })
+                    .min_by_key(|r| r.around.len())
+            {
+                return Ok(if obj.kind == crate::vim::motion::TextObjectKind::Inner {
+                    r.inner.clone()
+                } else {
+                    r.around.clone()
+                });
             }
-            self.syntax_objects
-                .iter()
-                .filter(|r| {
-                    r.target == obj.target
-                        && r.around.start <= position.get()
-                        && position.get() < r.around.end
-                })
-                .min_by_key(|r| r.around.len())
-                .map(|r| {
-                    if obj.kind == crate::vim::motion::TextObjectKind::Inner {
-                        r.inner.clone()
-                    } else {
-                        r.around.clone()
-                    }
-                })
+            eval_text_object_range(buffer, position, obj)
                 .ok_or_else(|| "Syntax object target unavailable".into())
         } else {
             eval_text_object_range(buffer, position, obj)

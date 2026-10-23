@@ -72,7 +72,9 @@ pub fn render_note_stream(
                     if widgets::icon_button(ui, icons::Icon::Close, "Закрыть (Esc)").clicked() {
                         action = Some(StreamAction::Close);
                     }
-                    if widgets::primary_button(ui, "➕ Новая запись (a)").clicked() {
+                    if widgets::primary_button_with_icon(ui, icons::Icon::Plus, "Новая запись (a)")
+                        .clicked()
+                    {
                         action = Some(StreamAction::CreateNewNote);
                     }
                 });
@@ -140,7 +142,13 @@ pub fn render_note_stream(
                             .color(color(theme.text_muted)),
                     );
                     ui.add_space(8.0);
-                    if widgets::primary_button(ui, "➕ Создать новую запись в ленту").clicked() {
+                    if widgets::primary_button_with_icon(
+                        ui,
+                        icons::Icon::Plus,
+                        "Создать новую запись в ленту",
+                    )
+                    .clicked()
+                    {
                         action = Some(StreamAction::CreateNewNote);
                     }
                 });

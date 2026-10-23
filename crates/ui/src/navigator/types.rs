@@ -155,17 +155,44 @@ pub struct NavigatorItem {
 
 #[inline]
 pub fn compute_char_mask(s: &str) -> u64 {
+    if s.is_ascii() {
+        let mut mask = 0u64;
+        for &b in s.as_bytes() {
+            let lower = b.to_ascii_lowercase();
+            let bit = match lower {
+                b'a'..=b'z' => (lower - b'a') as u32,
+                b'0'..=b'9' => 26 + (lower - b'0') as u32,
+                b'_' => 36,
+                b'-' => 37,
+                b'/' | b'\\' => 38,
+                b'.' => 39,
+                b' ' => 40,
+                _ => continue,
+            };
+            mask |= 1u64 << bit;
+        }
+        return mask;
+    }
+
     let mut mask = 0u64;
     for c in s.chars() {
+        if c.is_ascii() {
+            let lower = (c as u8).to_ascii_lowercase();
+            let bit = match lower {
+                b'a'..=b'z' => (lower - b'a') as u32,
+                b'0'..=b'9' => 26 + (lower - b'0') as u32,
+                b'_' => 36,
+                b'-' => 37,
+                b'/' | b'\\' => 38,
+                b'.' => 39,
+                b' ' => 40,
+                _ => continue,
+            };
+            mask |= 1u64 << bit;
+            continue;
+        }
         for lower_c in c.to_lowercase() {
             let bit = match lower_c {
-                'a'..='z' => (lower_c as u32) - ('a' as u32),
-                '0'..='9' => 26 + (lower_c as u32) - ('0' as u32),
-                '_' => 36,
-                '-' => 37,
-                '/' | '\\' => 38,
-                '.' => 39,
-                ' ' => 40,
                 'а'..='я' => 41 + (((lower_c as u32) - ('а' as u32)) % 22),
                 'ё' => 63,
                 _ => continue,
@@ -174,6 +201,23 @@ pub fn compute_char_mask(s: &str) -> u64 {
         }
     }
     mask
+}
+
+#[inline]
+fn category_char_mask(cat: &str) -> u64 {
+    const FILES_MASK: u64 = (1u64 << (41 + ((('ф' as u32) - ('а' as u32)) % 22)))
+        | (1u64 << 41)
+        | (1u64 << (41 + ((('й' as u32) - ('а' as u32)) % 22)))
+        | (1u64 << (41 + ((('л' as u32) - ('а' as u32)) % 22)))
+        | (1u64 << (41 + ((('ы' as u32) - ('а' as u32)) % 22)));
+    const FOLDER_MASK: u64 = (1u64 << (41 + ((('п' as u32) - ('а' as u32)) % 22)))
+        | (1u64 << 41)
+        | (1u64 << (41 + ((('к' as u32) - ('а' as u32)) % 22)));
+    match cat {
+        "Файлы" => FILES_MASK,
+        "Папка" => FOLDER_MASK,
+        _ => compute_char_mask(cat),
+    }
 }
 
 fn file_name_start(path: &str) -> usize {
@@ -186,12 +230,20 @@ fn file_name_start(path: &str) -> usize {
 
 impl NavigatorItem {
     pub fn update_char_mask(&mut self) {
-        let mut mask = compute_char_mask(self.display_title());
-        if let Some(sub) = self.display_subtitle() {
-            mask |= compute_char_mask(sub);
-        }
+        let mut mask = if self.title.is_empty()
+            && self.subtitle.is_none()
+            && let NavigatorItemPayload::File { path, .. } = &self.payload
+        {
+            compute_char_mask(path)
+        } else {
+            let mut m = compute_char_mask(self.display_title());
+            if let Some(sub) = self.display_subtitle() {
+                m |= category_char_mask(sub);
+            }
+            m
+        };
         if let Some(cat) = self.category.as_deref() {
-            mask |= compute_char_mask(cat);
+            mask |= category_char_mask(cat);
         }
         self.char_mask = mask;
     }
@@ -440,6 +492,9 @@ pub enum NavigatorAction {
         path: String,
         byte: usize,
     },
+    CopyPath {
+        path: String,
+    },
     ApplyColor {
         hex: &'static str,
     },
@@ -484,6 +539,7 @@ impl NavigatorAction {
                 | Self::OpenLink { .. }
                 | Self::OpenVault { .. }
                 | Self::OpenLocation { .. }
+                | Self::CopyPath { .. }
                 | Self::ApplyColor { .. }
                 | Self::ApplyHighlight { .. }
                 | Self::ApplyCallout { .. }

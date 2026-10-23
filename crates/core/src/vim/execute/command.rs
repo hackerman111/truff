@@ -374,6 +374,37 @@ impl VimState {
             Command::ColonCommand(cmd) => self.colon_command(&cmd, ctx),
             Command::ScrollCursor(pos) => InputResult::ScrollCursor(pos),
             Command::FollowLink => InputResult::FollowLink,
+            Command::SetMark(c) => {
+                if let InputContext::Editor { view, .. } = ctx {
+                    self.marks.insert(c.to_ascii_lowercase(), view.head().get());
+                }
+                InputResult::Consumed
+            }
+            Command::JumpToMark(c) => {
+                if let InputContext::Editor { view, .. } = ctx
+                    && let Some(&pos) = self.marks.get(&c.to_ascii_lowercase())
+                {
+                    let p = BytePos::new(pos);
+                    view.set_cursor_with_jump(p, p);
+                }
+                InputResult::Consumed
+            }
+            Command::JumpBack => {
+                if let InputContext::Editor { view, .. } = ctx
+                    && let Some((anchor, head)) = view.jump_history_mut().jump_back()
+                {
+                    view.set_cursor(anchor, head);
+                }
+                InputResult::Consumed
+            }
+            Command::JumpForward => {
+                if let InputContext::Editor { view, .. } = ctx
+                    && let Some((anchor, head)) = view.jump_history_mut().jump_forward()
+                {
+                    view.set_cursor(anchor, head);
+                }
+                InputResult::Consumed
+            }
             Command::SearchWordUnderCursor { forward } => {
                 let maybe_query = if let InputContext::Editor { buffer, view, .. } = &mut ctx {
                     let pos = view.head();

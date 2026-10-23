@@ -135,52 +135,130 @@ fn show_help(shell: &mut Shell, context: &egui::Context) {
             let row_height = theme.geometry.list_row_height;
             let stride = row_height + ui.spacing().item_spacing.y;
             let count = help.filtered.len();
-            let mut area = egui::ScrollArea::vertical()
-                .id_salt("help_items")
-                .max_height(height)
-                .auto_shrink([false, false]);
-            if let Some(offset) = help.scroll.prepare(help.selected, count, stride, height) {
-                area = area.vertical_scroll_offset(offset);
-            }
-            let output = area.show_rows(ui, row_height, count, |ui, rows| {
-                for index in rows {
-                    let item = &help.items[help.filtered[index]];
-                    let selected = index == help.selected;
-                    let response =
-                        crate::components::list_row(ui, row_height, selected, &theme, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add_sized(
-                                    [140.0_f32.min(ui.available_width() * 0.3), 30.0],
-                                    egui::Label::new(
-                                        egui::RichText::new(&item.keys)
-                                            .monospace()
-                                            .color(color(theme.accent_primary)),
-                                    )
-                                    .truncate(),
-                                );
-                                ui.vertical(|ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new(&item.description)
-                                                .size(theme.geometry.ui_font_size)
-                                                .color(color(theme.text_primary)),
-                                        )
-                                        .truncate(),
-                                    );
+            let width = ui.available_width();
+            let gap = theme.spacing_md;
+            let list_width = (width - gap) * 0.55;
+            let detail_width = (width - gap - list_width).max(1.0);
+
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(list_width, height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        let mut area = egui::ScrollArea::vertical()
+                            .id_salt("help_items")
+                            .max_height(height)
+                            .auto_shrink([false, false]);
+                        if let Some(offset) = help.scroll.prepare(help.selected, count, stride, height) {
+                            area = area.vertical_scroll_offset(offset);
+                        }
+                        let output = area.show_rows(ui, row_height, count, |ui, rows| {
+                            for index in rows {
+                                let item = &help.items[help.filtered[index]];
+                                let selected = index == help.selected;
+                                let response =
+                                    crate::components::list_row(ui, row_height, selected, &theme, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.add_sized(
+                                                [90.0_f32.min(ui.available_width() * 0.35), 24.0],
+                                                egui::Label::new(
+                                                    egui::RichText::new(&item.keys)
+                                                        .monospace()
+                                                        .strong()
+                                                        .color(color(theme.accent_primary)),
+                                                )
+                                                .truncate(),
+                                            );
+                                            ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(&item.description)
+                                                        .size(theme.geometry.ui_font_size)
+                                                        .color(color(theme.text_primary)),
+                                                )
+                                                .truncate(),
+                                            );
+                                        });
+                                    });
+                                if response.clicked() {
+                                    help.selected = index;
+                                }
+                            }
+                        });
+                        help.scroll.observe(&output);
+                    },
+                );
+                ui.separator();
+                ui.allocate_ui_with_layout(
+                    egui::vec2(detail_width, height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        if let Some(&sel_idx) = help.filtered.get(help.selected) {
+                            let item = &help.items[sel_idx];
+                            egui::Frame::new()
+                                .fill(color(theme.bg_secondary))
+                                .corner_radius(egui::CornerRadius::same(6))
+                                .stroke(egui::Stroke::new(1.0, color(theme.border_subtle)))
+                                .inner_margin(egui::Margin::same(12))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        egui::Frame::new()
+                                            .fill(color(theme.accent_primary))
+                                            .corner_radius(egui::CornerRadius::same(4))
+                                            .inner_margin(egui::Margin::symmetric(8, 4))
+                                            .show(ui, |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&item.keys)
+                                                        .monospace()
+                                                        .strong()
+                                                        .color(color(theme.bg_primary)),
+                                                );
+                                            });
+                                        ui.add_space(4.0);
+                                        ui.label(
+                                            egui::RichText::new(&item.category)
+                                                .size(theme.geometry.ui_font_size - 1.0)
+                                                .color(color(theme.text_muted)),
+                                        );
+                                    });
+                                    ui.add_space(theme.spacing_md);
                                     ui.label(
-                                        egui::RichText::new(&item.category)
-                                            .size(theme.geometry.ui_font_size - 2.0)
-                                            .color(color(theme.text_muted)),
+                                        egui::RichText::new(&item.description)
+                                            .size(theme.geometry.ui_font_size + 2.0)
+                                            .strong()
+                                            .color(color(theme.text_primary)),
+                                    );
+                                    ui.add_space(theme.spacing_md);
+                                    ui.separator();
+                                    ui.add_space(theme.spacing_sm);
+                                    ui.label(
+                                        egui::RichText::new("Использование в Truff:")
+                                            .strong()
+                                            .color(color(theme.accent_primary)),
+                                    );
+                                    ui.add_space(theme.spacing_xs);
+                                    let hint_text = match item.keys.as_str() {
+                                        "s" => "Neovim Flash: нажмите s, затем введите 2 символа для быстрой подсветки совпадений буквами и прыжка.",
+                                        "d" => "Оператор удаления: dd — удалить строку, dih — удалить тело раздела под заголовком, daL — удалить пункт списка.",
+                                        "c" => "Оператор изменения: cc — изменить строку, ciL — изменить текст пункта списка.",
+                                        "y" => "Оператор копирования: yy — копировать строку, yah — копировать заголовок с содержимым.",
+                                        "]h" => "Переход к следующему Markdown заголовку документа.",
+                                        "[h" => "Переход к предыдущему Markdown заголовку документа.",
+                                        "m" => "Установка локальной метки: ma установит метку 'a' на текущей позиции.",
+                                        "'" => "Переход к метке: 'a переместит курсор на позицию метки 'a'.",
+                                        "Ctrl-o" => "Jumplist: переход назад по истории позиций курсора.",
+                                        "Ctrl-i" => "Jumplist: переход вперёд по истории позиций курсора.",
+                                        "Space" | " " => "Префикс быстрых команд (Which-Key). Открывает контекстное меню действий.",
+                                        _ => "Нажмите указанную клавишу в Normal режиме для выполнения действия.",
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(hint_text)
+                                            .color(color(theme.text_secondary)),
                                     );
                                 });
-                            });
-                        });
-                    if response.clicked() {
-                        help.selected = index;
-                    }
-                }
+                        }
+                    },
+                );
             });
-            help.scroll.observe(&output);
             ui.separator();
             ui.label(
                 egui::RichText::new(format!(

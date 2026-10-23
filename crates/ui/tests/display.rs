@@ -471,3 +471,91 @@ fn styled_spans_in_display_map() {
     });
     assert!(has_highlight, "Missing highlight styled span");
 }
+
+#[test]
+fn test_thematic_break_highlight_and_math() {
+    // 1. Thematic break `---` rendering
+    let text = "---";
+    let mut display = DisplayMap::new(text, ProjectionMode::LivePreview);
+    display.set_cursor(BytePos::new(100)); // cursor off line
+    assert!(
+        display.is_rule_hidden(),
+        "Thematic break --- should project as hidden rule"
+    );
+
+    display.set_cursor(BytePos::new(1)); // cursor touching line
+    assert_eq!(
+        display.visual_text(),
+        "---",
+        "Thematic break should reveal source --- when cursor touches"
+    );
+
+    // 2. Obsidian ==highlight==
+    let text_hl = "hello ==world== test";
+    let mut display_hl = DisplayMap::new(text_hl, ProjectionMode::LivePreview);
+    display_hl.set_cursor(BytePos::new(0));
+    assert_eq!(
+        display_hl.visual_text(),
+        "hello world test",
+        "== markers should hide in preview"
+    );
+    assert!(
+        display_hl
+            .styled_spans()
+            .iter()
+            .any(|s| matches!(s.style, InlineStyle::Highlight(_)))
+    );
+
+    display_hl.set_cursor(BytePos::new(8)); // inside "world"
+    assert!(
+        display_hl.visual_text().contains("==world=="),
+        "== markers reveal when cursor touches"
+    );
+
+    // 3. LaTeX math $...$
+    let text_math = "formula $x + y = z$ end";
+    let mut display_math = DisplayMap::new(text_math, ProjectionMode::LivePreview);
+    display_math.set_cursor(BytePos::new(0));
+    assert_eq!(
+        display_math.visual_text(),
+        "formula x + y = z end",
+        "$ markers hide in preview"
+    );
+    assert!(
+        display_math
+            .styled_spans()
+            .iter()
+            .any(|s| s.style == InlineStyle::Math)
+    );
+
+    // LaTeX math with superscripts and greek
+    let text_math2 = "$x^2 + \\alpha = 0$";
+    let mut display_math2 = DisplayMap::new(text_math2, ProjectionMode::LivePreview);
+    display_math2.set_cursor(BytePos::new(100));
+    assert_eq!(
+        display_math2.visual_text(),
+        "x² + α = 0",
+        "LaTeX should format superscripts and greek letters"
+    );
+
+    // 4. Markdown tables
+    let table_header = "| Name | Age |";
+    let display_tbl = DisplayMap::new(table_header, ProjectionMode::LivePreview);
+    assert!(
+        display_tbl
+            .styled_spans()
+            .iter()
+            .any(|s| s.style == InlineStyle::TextColor([94, 129, 172, 220])),
+        "Table pipes should be styled as borders"
+    );
+
+    let table_del = "| --- | --- |";
+    let display_del = DisplayMap::new(table_del, ProjectionMode::LivePreview);
+    assert!(
+        display_del
+            .styled_spans()
+            .iter()
+            .any(|s| s.style == InlineStyle::TextColor([76, 86, 106, 200])),
+        "Table delimiter row should be styled with subtle border color"
+    );
+}

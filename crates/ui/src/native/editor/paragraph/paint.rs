@@ -254,8 +254,38 @@ impl Paragraph {
                     self.paint_selection_range(painter, origin, a, b, color(view.theme.selection));
                 }
             }
+        } else if view.mode == Mode::Normal
+            && let Some(cursor) = view
+                .cursor
+                .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
+        {
+            let caret = self.char_rect_at(origin, cursor);
+            let width = (self.galley.size().x + self.text_indent).max(view.content_width);
+            let line_rect = Rect::from_min_max(
+                Pos2::new(origin.x - self.text_indent, caret.min.y - HIGHLIGHT_PAD_Y),
+                Pos2::new(
+                    origin.x - self.text_indent + width,
+                    caret.max.y + HIGHLIGHT_PAD_Y,
+                ),
+            );
+            let line_bg = color(view.theme.bg_secondary).gamma_multiply(0.4);
+            painter.rect_filled(line_rect, 2.0, line_bg);
+        }
+        if self.display.source_text().trim_start().starts_with('>') {
+            let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
+            let bar_x = origin.x - self.text_indent + 2.0;
+            painter.line_segment(
+                [Pos2::new(bar_x, min_y + 1.0), Pos2::new(bar_x, max_y - 1.0)],
+                egui::Stroke::new(2.5, color(view.theme.accent).gamma_multiply(0.65)),
+            );
         }
         painter.galley(origin, self.galley.clone(), self.color);
+        if self.display.is_rule_hidden() {
+            let y = (origin.y + self.galley.size().y * 0.5).round();
+            let width = (self.galley.size().x + self.text_indent).max(view.content_width);
+            let stroke = egui::Stroke::new(1.0, color(view.theme.border_subtle));
+            painter.hline(origin.x..=(origin.x + width), y, stroke);
+        }
         if let Some(cursor) = view
             .cursor
             .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)

@@ -105,6 +105,27 @@ impl NavigatorState {
     }
 
     fn handle_normal_mode_key(&mut self, key: NavKey) -> NavigatorAction {
+        if self.jump_labels_active {
+            if key == NavKey::Escape || key == NavKey::Char('s') {
+                self.jump_labels_active = false;
+                return NavigatorAction::None;
+            }
+            if let NavKey::Char(c) = key {
+                const LABELS: &[char] = &[
+                    'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'q', 'w', 'e', 'r', 't', 'y', 'u',
+                    'i', 'o', 'p', 'z', 'x', 'c', 'v', 'b', 'n', 'm',
+                ];
+                if let Some(pos) = LABELS.iter().position(|&l| l == c) {
+                    let start = self.scroll.visible_range.start;
+                    let target = start + pos;
+                    if target < self.visible_count() {
+                        self.selected_index = target;
+                        self.jump_labels_active = false;
+                        return NavigatorAction::None;
+                    }
+                }
+            }
+        }
         use truff_core::vim::{Command, Key, Mode, Motion, parser::ParseResult};
         let motion_key = match key {
             NavKey::Char(c @ ('0'..='9' | 'j' | 'k' | 'g' | 'G')) => Some(Key::Char(c)),
@@ -207,6 +228,11 @@ impl NavigatorState {
                 let parent_dir = self.current_parent_dir();
                 NavigatorAction::CreateFolder { parent_dir }
             }
+            NavKey::Char('s') => {
+                self.jump_labels_active = !self.jump_labels_active;
+                NavigatorAction::None
+            }
+            NavKey::Char('y') => self.quick_action("y"),
             NavKey::Char('r') => self.quick_action("r"),
             NavKey::Char('d') => self.quick_action("d"),
             NavKey::Char('P' | 'o' | 'u') if self.mode == NavigatorMode::Sessions => {

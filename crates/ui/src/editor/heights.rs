@@ -23,6 +23,7 @@ pub struct HeightIndex {
     sums: Vec<f64>,
     default_line_height: f32,
     measured_limit: usize,
+    total_blocks: usize,
 }
 
 impl Default for HeightIndex {
@@ -39,6 +40,7 @@ impl HeightIndex {
             sums: Vec::new(),
             default_line_height,
             measured_limit: 0,
+            total_blocks: 0,
         }
     }
 
@@ -89,31 +91,48 @@ impl HeightIndex {
                 revision: 0,
             });
         }
+        self.total_blocks = self.blocks.len();
         self.measured_limit = 0;
         self.rebuild_sums();
     }
 
     /// Source offsets remain in the Rope; the native viewport needs only row heights.
     pub fn init_uniform(&mut self, count: usize) {
-        self.blocks.resize_with(count.max(1), || BlockInfo {
-            source_range: 0..0,
-            height: self.default_line_height,
-            is_measured: false,
-            line_count: 1,
-            revision: 0,
-        });
-        for block in &mut self.blocks {
-            block.height = self.default_line_height;
-            block.is_measured = false;
-        }
+        self.total_blocks = count.max(1);
+        self.blocks.clear();
+        self.sums.clear();
         self.measured_limit = 0;
-        self.rebuild_sums();
+    }
+
+    fn ensure_blocks_len(&mut self, len: usize) {
+        if self.blocks.len() < len {
+            let default_height = self.default_line_height;
+            self.blocks.resize_with(len, || BlockInfo {
+                source_range: 0..0,
+                height: default_height,
+                is_measured: false,
+                line_count: 1,
+                revision: 0,
+            });
+        }
     }
 
     /// Replaces edited source rows, retaining measured heights of unchanged rows.
     pub(crate) fn replace_blocks(&mut self, old: Range<usize>, count: usize) {
-        if old.len() == count && count <= (self.blocks.len() / 16).max(1) {
-            for index in old {
+        let clamped_end = old.end.min(self.total_blocks);
+        let clamped_start = old.start.min(clamped_end);
+        let removed = clamped_end - clamped_start;
+        self.total_blocks = (self.total_blocks - removed + count).max(1);
+
+        if clamped_start >= self.blocks.len() {
+            return;
+        }
+
+        if removed == count
+            && clamped_end <= self.blocks.len()
+            && count <= (self.blocks.len() / 16).max(1)
+        {
+            for index in clamped_start..clamped_end {
                 self.update_block_height(index, self.default_line_height, None);
                 self.blocks[index].is_measured = false;
             }
@@ -126,17 +145,29 @@ impl HeightIndex {
             }
             return;
         }
+
+        if clamped_end > self.blocks.len() {
+            self.blocks.truncate(clamped_start);
+            self.measured_limit = self.blocks[..self.measured_limit.min(self.blocks.len())]
+                .iter()
+                .rposition(|b| b.is_measured)
+                .map_or(0, |p| p + 1);
+            self.rebuild_sums();
+            return;
+        }
+
+        let default_height = self.default_line_height;
         let replacement = std::iter::repeat_with(|| BlockInfo {
             source_range: 0..0,
-            height: self.default_line_height,
+            height: default_height,
             is_measured: false,
             line_count: 1,
             revision: 0,
         })
         .take(count);
         let old_limit = self.measured_limit;
-        self.blocks.splice(old.clone(), replacement);
-        if old_limit == 0 || old.start >= old_limit {
+        self.blocks.splice(clamped_start..clamped_end, replacement);
+        if old_limit == 0 || clamped_start >= old_limit {
             return;
         }
         let search_end = (old_limit + count).min(self.blocks.len());
@@ -149,6 +180,10 @@ impl HeightIndex {
 
     fn rebuild_sums(&mut self) {
         let count = self.measured_limit.min(self.blocks.len());
+        if count == 0 {
+            self.sums.clear();
+            return;
+        }
         self.sums.clear();
         self.sums.resize(count + 1, 0.0);
         for index in 1..=count {
@@ -173,10 +208,10 @@ impl HeightIndex {
 
     /// Number of blocks in the index.
     pub fn block_count(&self) -> usize {
-        self.blocks.len()
+        self.total_blocks
     }
 
-    /// Access all blocks.
+    /// Access materialized blocks.
     pub fn blocks(&self) -> &[BlockInfo] {
         &self.blocks
     }
@@ -190,13 +225,13 @@ impl HeightIndex {
 
     /// Total vertical height of all blocks.
     pub fn total_height(&self) -> f32 {
-        self.y_for_block(self.blocks.len())
+        self.y_for_block(self.total_blocks)
     }
 
     /// Returns the top y coordinate of `block_index`.
     pub fn y_for_block(&self, block_index: usize) -> f32 {
         let limit = self.measured_limit.min(self.blocks.len());
-        let clamped = block_index.min(self.blocks.len());
+        let clamped = block_index.min(self.total_blocks);
         if clamped <= limit {
             self.fenwick_prefix(clamped)
         } else {
@@ -207,7 +242,7 @@ impl HeightIndex {
 
     /// Finds which block is located at coordinate `y`, returning `(block_index, local_y_within_block)`.
     pub fn block_at_y(&self, y: f32) -> (usize, f32) {
-        if self.blocks.is_empty() || y <= 0.0 {
+        if self.total_blocks == 0 || y <= 0.0 {
             return (0, 0.0);
         }
 
@@ -219,7 +254,7 @@ impl HeightIndex {
             } else {
                 0
             };
-            let index = (limit + extra).min(self.blocks.len() - 1);
+            let index = (limit + extra).min(self.total_blocks - 1);
             let block_y = self.y_for_block(index);
             return (index, (y - block_y).max(0.0));
         }
@@ -235,7 +270,7 @@ impl HeightIndex {
             }
             step >>= 1;
         }
-        let index = index.min(self.blocks.len() - 1);
+        let index = index.min(self.total_blocks - 1);
         (index, (y - self.y_for_block(index)).max(0.0))
     }
 
@@ -249,13 +284,21 @@ impl HeightIndex {
         new_height: f32,
         anchor: Option<&mut ScrollAnchor>,
     ) {
-        if block_index >= self.blocks.len() {
+        if block_index >= self.total_blocks {
             return;
         }
 
         if !new_height.is_finite() || new_height <= 0.0 {
             return;
         }
+
+        if block_index >= self.blocks.len()
+            && (new_height - self.default_line_height).abs() <= f32::EPSILON
+        {
+            return;
+        }
+
+        self.ensure_blocks_len(block_index + 1);
         let old_height = self.blocks[block_index].height;
         let delta = new_height - old_height;
         self.blocks[block_index].height = new_height;

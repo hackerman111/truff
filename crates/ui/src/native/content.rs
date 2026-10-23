@@ -14,17 +14,6 @@ pub(super) fn show(
     theme: &Theme,
 ) -> bool {
     let mut open_vault = false;
-    for change in application.shell.take_buffer_changes() {
-        application.notify_buffer_change_for_facts(&change);
-        if let Some(buffer) = application
-            .shell
-            .workspace()
-            .buffers()
-            .get_buffer(change.buffer_id)
-        {
-            editor.apply_change(buffer, &change);
-        }
-    }
     egui::CentralPanel::default().show(ui, |ui| {
         let is_welcome_screen = application.vault_path().is_none()
             && application
@@ -110,16 +99,16 @@ fn show_welcome_screen(
         ui.add_space(top_padding);
         ui.label(
             egui::RichText::new("Truff v2")
-                .size(16.0)
+                .size(18.0)
                 .strong()
                 .color(color(theme.accent)),
         );
-        ui.add_space(4.0);
+        ui.add_space(6.0);
         ui.label(
             egui::RichText::new(
                 "Персональная база знаний в формате Markdown с поддержкой Vim и вики-ссылок",
             )
-            .size(14.0)
+            .size(13.5)
             .color(color(theme.text_muted)),
         );
 
@@ -132,10 +121,17 @@ fn show_welcome_screen(
             let left_offset = ((ui.available_width() - total_buttons_w) * 0.5).max(0.0);
             ui.add_space(left_offset);
 
-            if widgets::primary_button(ui, "➕  Создать хранилище").clicked() {
+            if widgets::primary_button_with_icon(ui, icons::Icon::Plus, "Создать хранилище")
+                .clicked()
+            {
                 open_vault_dialog = true;
             }
-            if widgets::secondary_button(ui, "📂  Открыть существующее").clicked()
+            if widgets::secondary_button_with_icon(
+                ui,
+                icons::Icon::FolderOpen,
+                "Открыть существующее",
+            )
+            .clicked()
             {
                 open_vault_dialog = true;
             }

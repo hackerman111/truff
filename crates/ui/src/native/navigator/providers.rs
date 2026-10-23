@@ -16,9 +16,10 @@ impl NativeApp {
                     .unwrap_or("Хранилище");
                 let title = format!("Vault / {vault_name}");
 
-                let mut items = Vec::new();
-                let mut parents: Vec<&str> = Vec::new();
-                for row in self.application.shell.sidebar_model().all_items() {
+                let all_rows = self.application.shell.sidebar_model().all_items();
+                let mut items = Vec::with_capacity(all_rows.len());
+                let mut parents: Vec<&str> = Vec::with_capacity(8);
+                for row in all_rows {
                     parents.truncate(row.depth);
                     if row.is_folder {
                         parents.push(&row.title);
@@ -90,15 +91,16 @@ impl NativeApp {
 
                 // 1. Text colors (foreground)
                 for (name, hex) in [
-                    ("Красный (текст)", "#BF616A"),
-                    ("Оранжевый (текст)", "#D08770"),
-                    ("Жёлтый (текст)", "#EBCB8B"),
-                    ("Зелёный (текст)", "#A3BE8C"),
-                    ("Голубой (текст)", "#88C0D0"),
-                    ("Синий (текст)", "#81A1C1"),
-                    ("Фиолетовый (текст)", "#B48EAD"),
+                    ("Красный", "#BF616A"),
+                    ("Оранжевый", "#D08770"),
+                    ("Жёлтый", "#EBCB8B"),
+                    ("Зелёный", "#A3BE8C"),
+                    ("Голубой", "#88C0D0"),
+                    ("Синий", "#81A1C1"),
+                    ("Фиолетовый", "#B48EAD"),
                 ] {
                     let mut item = NavigatorItem::new_file(id, name, hex.into(), false, 0);
+                    item.shortcut = Some(hex.into());
                     item.category = Some(std::borrow::Cow::Borrowed("Цвет текста"));
                     item.payload = crate::navigator::NavigatorItemPayload::Color { hex };
                     items.push(item);
@@ -107,14 +109,15 @@ impl NativeApp {
 
                 // 2. Highlights (background <mark>)
                 for (name, hex) in [
-                    ("Жёлтый маркер (фон)", "#EBCB8B"),
-                    ("Зелёный маркер (фон)", "#A3BE8C"),
-                    ("Голубой маркер (фон)", "#88C0D0"),
-                    ("Оранжевый маркер (фон)", "#D08770"),
-                    ("Красный маркер (фон)", "#BF616A"),
-                    ("Фиолетовый маркер (фон)", "#B48EAD"),
+                    ("Жёлтый (маркер)", "#EBCB8B"),
+                    ("Зелёный (маркер)", "#A3BE8C"),
+                    ("Голубой (маркер)", "#88C0D0"),
+                    ("Оранжевый (маркер)", "#D08770"),
+                    ("Красный (маркер)", "#BF616A"),
+                    ("Фиолетовый (маркер)", "#B48EAD"),
                 ] {
                     let mut item = NavigatorItem::new_file(id, name, hex.into(), false, 0);
+                    item.shortcut = Some(hex.into());
                     item.category = Some(std::borrow::Cow::Borrowed("Маркер (Highlight)"));
                     item.payload = crate::navigator::NavigatorItemPayload::Highlight { hex };
                     items.push(item);

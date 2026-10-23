@@ -30,6 +30,12 @@ pub fn resolve_font_and_line_height(source: &str, typography: &TypographyConfig)
             FontId::new(size, egui::FontFamily::Monospace),
             (size * 1.5).round(),
         )
+    } else if source_trim.starts_with('|') {
+        let size = base;
+        (
+            FontId::new(size, egui::FontFamily::Monospace),
+            (size * typography.line_height_multiplier).round(),
+        )
     } else {
         let size = base;
         (
@@ -46,13 +52,49 @@ pub(super) fn shape(
     width: f32,
     typography: &TypographyConfig,
 ) -> (Arc<Galley>, f32) {
-    let (font, line_height) = resolve_font_and_line_height(display.source_text(), typography);
+    let source = display.source_text();
+    let (font, line_height) = resolve_font_and_line_height(source, typography);
+    let source_trim = source.trim_start();
+    let is_dark = (foreground.r() as u16 + foreground.g() as u16 + foreground.b() as u16) > 380;
+    let base_color = if source_trim.starts_with("# ") {
+        if is_dark {
+            Color32::from_rgb(235, 203, 139) // Nord Aurora Gold (#ebcb8b)
+        } else {
+            Color32::from_rgb(166, 118, 28)
+        }
+    } else if source_trim.starts_with("## ") {
+        if is_dark {
+            Color32::from_rgb(136, 192, 208) // Nord Frost Cyan (#88c0d0)
+        } else {
+            Color32::from_rgb(43, 108, 176)
+        }
+    } else if source_trim.starts_with("### ") {
+        if is_dark {
+            Color32::from_rgb(129, 161, 193) // Nord Frost Blue (#81a1c1)
+        } else {
+            Color32::from_rgb(58, 110, 165)
+        }
+    } else if source_trim.starts_with("#### ")
+        || source_trim.starts_with("##### ")
+        || source_trim.starts_with("###### ")
+    {
+        if is_dark {
+            Color32::from_rgb(143, 188, 187) // Nord Frost Sage (#8fbcbb)
+        } else {
+            Color32::from_rgb(56, 132, 130)
+        }
+    } else if source_trim.starts_with('>') {
+        foreground.gamma_multiply(0.82)
+    } else {
+        foreground
+    };
+
     let indent = display.list_content_start().map_or(0.0, |start| {
         painter
             .layout_no_wrap(
                 display.visual_text()[..start.get()].to_owned(),
                 font.clone(),
-                foreground,
+                base_color,
             )
             .size()
             .x
@@ -61,7 +103,7 @@ pub(super) fn shape(
     let mut job = egui::text::LayoutJob::simple(
         display.visual_text().to_owned(),
         font.clone(),
-        foreground,
+        base_color,
         width,
     );
     job.sections[0].format.line_height = Some(line_height);
@@ -132,6 +174,11 @@ pub(super) fn shape(
                     InlineStyle::Highlight([r, g, b, a]) => {
                         let alpha = (*a as u16 * 75 / 255) as u8;
                         format.background = Color32::from_rgba_unmultiplied(*r, *g, *b, alpha);
+                    }
+                    InlineStyle::Math => {
+                        format.italics = true;
+                        format.color = Color32::from_rgb(143, 188, 187);
+                        format.background = Color32::from_rgba_unmultiplied(143, 188, 187, 40);
                     }
                 }
             }

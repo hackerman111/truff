@@ -67,11 +67,18 @@ pub(super) fn show(
             ui.add_space(4.0);
             if application.vault_path().is_none() {
                 ui.add_space(8.0);
-                if widgets::primary_button(ui, "➕ Создать хранилище").clicked() {
+                if widgets::primary_button_with_icon(ui, icons::Icon::Plus, "Создать хранилище")
+                    .clicked()
+                {
                     dialogs.vault.open = true;
                 }
                 ui.add_space(4.0);
-                if widgets::secondary_button(ui, "📂 Открыть хранилище").clicked()
+                if widgets::secondary_button_with_icon(
+                    ui,
+                    icons::Icon::FolderOpen,
+                    "Открыть хранилище",
+                )
+                .clicked()
                 {
                     dialogs.vault.open = true;
                 }
@@ -140,6 +147,7 @@ pub(super) fn show(
                 let count = model.visible_count();
                 let selected = model.selected_index();
                 let active_file = application.active_relative_path();
+                let any_dirty = application.has_any_dirty_buffer();
                 let mut open = None;
                 let mut toggle_folder = None;
                 crate::rows::selected_rows(
@@ -156,20 +164,25 @@ pub(super) fn show(
                                 let is_selected = model.selected_range().contains(&index);
                                 let is_active =
                                     !row.is_folder && row.data.as_deref() == active_file.as_deref();
-                                let is_dirty = row
-                                    .data
-                                    .as_deref()
-                                    .is_some_and(|p| application.is_path_dirty(p));
+                                let is_dirty = any_dirty
+                                    && row
+                                        .data
+                                        .as_deref()
+                                        .is_some_and(|p| application.is_path_dirty(p));
 
-                                let text_color = if is_active || is_selected || row.is_folder {
+                                let text_color = if is_active {
+                                    color(theme.accent)
+                                } else if is_selected || row.is_folder {
                                     color(theme.text_primary)
                                 } else {
-                                    color(theme.text_muted)
+                                    color(theme.text_secondary)
                                 };
 
                                 let frame = egui::Frame::new()
                                     .fill(if is_selected {
                                         color(theme.selection)
+                                    } else if is_active {
+                                        color(theme.bg_secondary)
                                     } else {
                                         egui::Color32::TRANSPARENT
                                     })
@@ -177,8 +190,8 @@ pub(super) fn show(
                                         theme.geometry.corner_radius as u8,
                                     ))
                                     .inner_margin(egui::Margin {
-                                        left: 4,
-                                        right: 4,
+                                        left: 6,
+                                        right: 6,
                                         top: 3,
                                         bottom: 3,
                                     });
@@ -187,7 +200,7 @@ pub(super) fn show(
                                     ui.set_min_height(theme.geometry.tree_row_height - 6.0);
                                     ui.set_min_width(ui.available_width());
                                     ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        ui.spacing_mut().item_spacing.x = 5.0;
                                         ui.add_space(indent);
                                         if row.is_folder {
                                             let chevron = if row.is_collapsed {
@@ -204,19 +217,24 @@ pub(super) fn show(
                                                 chevron,
                                                 chev_rect,
                                                 color(theme.text_muted),
-                                                1.5,
+                                                1.4,
                                             );
 
                                             let (folder_rect, _) = ui.allocate_exact_size(
                                                 egui::vec2(14.0, 16.0),
                                                 egui::Sense::hover(),
                                             );
+                                            let folder_icon = if row.is_collapsed {
+                                                icons::Icon::Folder
+                                            } else {
+                                                icons::Icon::FolderOpen
+                                            };
                                             icons::render_icon(
                                                 ui.painter(),
-                                                icons::Icon::Folder,
+                                                folder_icon,
                                                 folder_rect,
-                                                color(theme.text_muted),
-                                                1.5,
+                                                color(theme.accent).gamma_multiply(0.85),
+                                                1.4,
                                             );
                                         } else {
                                             let (file_rect, _) = ui.allocate_exact_size(
@@ -227,14 +245,21 @@ pub(super) fn show(
                                                 ui.painter(),
                                                 icons::Icon::File,
                                                 file_rect,
-                                                color(theme.text_muted),
-                                                1.5,
+                                                if is_active {
+                                                    color(theme.accent)
+                                                } else {
+                                                    color(theme.text_muted)
+                                                },
+                                                1.4,
                                             );
                                         }
 
-                                        let rich = egui::RichText::new(&row.title)
+                                        let mut rich = egui::RichText::new(&row.title)
                                             .color(text_color)
                                             .size(theme.geometry.ui_font_size);
+                                        if is_active || row.is_folder {
+                                            rich = rich.strong();
+                                        }
                                         ui.add(egui::Label::new(rich).truncate());
 
                                         if is_dirty {
@@ -263,8 +288,20 @@ pub(super) fn show(
                                     }
                                 }
 
+                                let rect = interact_resp.rect;
+                                // Subtle Obsidian-style vertical indentation guide lines
+                                for d in 1..=row.depth {
+                                    let guide_x = rect.left() + 10.0 + ((d - 1) as f32) * 16.0;
+                                    ui.painter().line_segment(
+                                        [
+                                            egui::pos2(guide_x, rect.top()),
+                                            egui::pos2(guide_x, rect.bottom()),
+                                        ],
+                                        egui::Stroke::new(1.0, color(theme.border_subtle)),
+                                    );
+                                }
+
                                 if is_active {
-                                    let rect = interact_resp.rect;
                                     ui.painter().line_segment(
                                         [
                                             egui::pos2(rect.left(), rect.top() + 3.0),

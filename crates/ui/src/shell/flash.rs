@@ -186,4 +186,27 @@ impl Shell {
         self.flash_kind = kind;
         Ok(())
     }
+
+    /// Activates Flash in Neovim-style 2-character query mode over the visible windows.
+    pub fn start_flash_search_ranges(
+        &mut self,
+        ranges: &[std::ops::Range<usize>],
+    ) -> Result<(), InputError> {
+        let buffer = self.editor_buffer().ok_or(InputError::UnavailableTarget)?;
+        if ranges.len() > 1024 {
+            return Err(InputError::Vim(
+                "Flash viewport window limit exceeded".into(),
+            ));
+        }
+        let mut windows = Vec::new();
+        for range in ranges {
+            if range.start <= range.end && range.end <= buffer.byte_len() {
+                let slice = buffer.slice(range.clone()).to_string();
+                windows.push((range.clone(), slice));
+            }
+        }
+        self.flash.activate_search(windows);
+        self.flash_kind = FlashKind::Word;
+        Ok(())
+    }
 }

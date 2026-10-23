@@ -201,42 +201,10 @@ impl EditorWidget {
                 }
             }
             while range.end > range.start
-                && matches!(
-                    buffer.slice(range.clone()).chars().next_back(),
-                    Some('\n' | '\r')
-                )
+                && matches!(buffer.rope().byte(range.end - 1), b'\n' | b'\r')
             {
                 range.end -= 1;
             }
-            let slice = buffer.slice(range.clone());
-            let presentation = if let Some(entry) = self.cache.get(&line).filter(|entry| {
-                entry.presentation_revision == buffer.revision() && entry.range == range
-            }) {
-                entry.presentation.clone()
-            } else {
-                let mut presentation = syntax
-                    .as_ref()
-                    .map(|syntax| syntax.line_presentation(range.clone()))
-                    .unwrap_or_default();
-                if let Some(list) = &mut presentation.list {
-                    list.range.start -= range.start;
-                    list.range.end -= range.start;
-                    if let truff_core::markdown::presentation::ListKind::Task { checkbox, .. } =
-                        &mut list.kind
-                    {
-                        *checkbox -= range.start;
-                    }
-                }
-                presentation
-            };
-            let changed = self.cache.get(&line).is_none_or(|entry| {
-                entry.presentation != presentation
-                    || (entry.range != range || entry.revision != buffer.revision())
-                        && !slice
-                            .chunks()
-                            .flat_map(str::bytes)
-                            .eq(entry.display.source_text().bytes())
-            });
             let style = ParagraphStyle {
                 foreground,
                 pixels_per_point: ui.ctx().pixels_per_point(),
@@ -248,26 +216,76 @@ impl EditorWidget {
                 },
                 typography,
             };
-            if changed {
-                self.cache.insert(
-                    line,
-                    Paragraph::new(
-                        range.clone(),
-                        slice.to_string(),
-                        presentation,
-                        &painter,
-                        style,
-                    ),
-                );
-                self.builds += 1;
+            let up_to_date = self.cache.get(&line).is_some_and(|entry| {
+                entry.revision == buffer.revision()
+                    && entry.presentation_revision == buffer.revision()
+                    && entry.range == range
+            });
+            if !up_to_date {
+                let slice = buffer.slice(range.clone());
+                let presentation = if let Some(entry) = self.cache.get(&line).filter(|entry| {
+                    entry.presentation_revision == buffer.revision() && entry.range == range
+                }) {
+                    entry.presentation.clone()
+                } else {
+                    let mut presentation = syntax
+                        .as_ref()
+                        .map(|syntax| syntax.line_presentation(range.clone()))
+                        .unwrap_or_default();
+                    if let Some(list) = &mut presentation.list {
+                        list.range.start -= range.start;
+                        list.range.end -= range.start;
+                        if let truff_core::markdown::presentation::ListKind::Task {
+                            checkbox, ..
+                        } = &mut list.kind
+                        {
+                            *checkbox -= range.start;
+                        }
+                    }
+                    if slice_is_table_row(&slice) {
+                        let next_start = line_start(buffer, line + 1);
+                        let next_end = line_start(buffer, line + 2);
+                        if next_start < buffer.byte_len()
+                            && slice_is_table_delimiter(&buffer.slice(next_start..next_end))
+                        {
+                            presentation.table_header = true;
+                        }
+                    }
+                    presentation
+                };
+                let changed = self.cache.get(&line).is_none_or(|entry| {
+                    entry.presentation != presentation
+                        || (entry.range != range || entry.revision != buffer.revision())
+                            && !slice
+                                .chunks()
+                                .flat_map(str::bytes)
+                                .eq(entry.display.source_text().bytes())
+                });
+                if changed {
+                    self.cache.insert(
+                        line,
+                        Paragraph::new(
+                            range.clone(),
+                            slice.to_string(),
+                            presentation,
+                            &painter,
+                            style,
+                        ),
+                    );
+                    self.builds += 1;
+                }
+                let entry = self
+                    .cache
+                    .get_mut(&line)
+                    .expect("visible paragraph was inserted");
+                entry.range = range.clone();
+                entry.revision = buffer.revision();
+                entry.presentation_revision = buffer.revision();
             }
             let entry = self
                 .cache
                 .get_mut(&line)
                 .expect("visible paragraph was inserted");
-            entry.range = range.clone();
-            entry.revision = buffer.revision();
-            entry.presentation_revision = buffer.revision();
             let paragraph_cursor = BytePos::new(if line == cursor_line {
                 cursor.saturating_sub(range.start)
             } else {
@@ -493,4 +511,23 @@ fn line_start(buffer: &Buffer, line: usize) -> usize {
     } else {
         buffer.byte_of_line(line)
     }
+}
+
+fn slice_is_table_row(slice: &truff_core::RopeSlice<'_>) -> bool {
+    let mut non_ws = slice
+        .chunks()
+        .flat_map(str::bytes)
+        .filter(|b| !b.is_ascii_whitespace());
+    let Some(first) = non_ws.next() else {
+        return false;
+    };
+    first == b'|' && non_ws.next_back() == Some(b'|')
+}
+
+fn slice_is_table_delimiter(slice: &truff_core::RopeSlice<'_>) -> bool {
+    slice_is_table_row(slice)
+        && slice
+            .chunks()
+            .flat_map(str::bytes)
+            .all(|b| b.is_ascii_whitespace() || matches!(b, b'|' | b'-' | b':'))
 }

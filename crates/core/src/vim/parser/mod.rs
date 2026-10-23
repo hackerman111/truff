@@ -450,7 +450,42 @@ impl VimParser {
                 self.reset();
                 ParseResult::Complete(Command::SearchWordUnderCursor { forward: false })
             }
-            Key::Char('g') if self.buffer.len() >= 2 && self.buffer[1] == Key::Char('f') => {
+            Key::Char('m') => {
+                if self.buffer.len() < 2 {
+                    return ParseResult::Incomplete;
+                }
+                if let Key::Char(reg) = self.buffer[1] {
+                    self.reset();
+                    ParseResult::Complete(Command::SetMark(reg))
+                } else {
+                    self.reset();
+                    ParseResult::Invalid
+                }
+            }
+            Key::Char('\'') | Key::Char('`') => {
+                if self.buffer.len() < 2 {
+                    return ParseResult::Incomplete;
+                }
+                if let Key::Char(reg) = self.buffer[1] {
+                    self.reset();
+                    ParseResult::Complete(Command::JumpToMark(reg))
+                } else {
+                    self.reset();
+                    ParseResult::Invalid
+                }
+            }
+            Key::Ctrl('o') => {
+                self.reset();
+                ParseResult::Complete(Command::JumpBack)
+            }
+            Key::Ctrl('i') => {
+                self.reset();
+                ParseResult::Complete(Command::JumpForward)
+            }
+            Key::Char('g')
+                if self.buffer.len() >= 2
+                    && matches!(self.buffer[1], Key::Char('f') | Key::Char('d')) =>
+            {
                 self.reset();
                 ParseResult::Complete(Command::FollowLink)
             }
@@ -493,6 +528,24 @@ impl VimParser {
             Key::Char(';') => ParseMotionResult::Complete(Motion::RepeatFind),
             Key::Char(',') => ParseMotionResult::Complete(Motion::ReverseRepeatFind),
             Key::Char('G') => ParseMotionResult::Complete(Motion::LastLine),
+            Key::Char(']') => {
+                if self.buffer.len() < 2 {
+                    return ParseMotionResult::Incomplete;
+                }
+                match self.buffer[1] {
+                    Key::Char('h') => ParseMotionResult::Complete(Motion::NextHeading),
+                    _ => ParseMotionResult::Invalid,
+                }
+            }
+            Key::Char('[') => {
+                if self.buffer.len() < 2 {
+                    return ParseMotionResult::Incomplete;
+                }
+                match self.buffer[1] {
+                    Key::Char('h') => ParseMotionResult::Complete(Motion::PrevHeading),
+                    _ => ParseMotionResult::Invalid,
+                }
+            }
             Key::Char('g') => {
                 if self.buffer.len() < 2 {
                     return ParseMotionResult::Incomplete;

@@ -14,6 +14,7 @@ pub struct NavigatorState {
     pub filtered_indices: Vec<usize>,
     pub selected_index: usize,
     pub preview_visible: bool,
+    pub jump_labels_active: bool,
     pub actions_menu_open: bool,
     pub actions_menu_selected: usize,
     pub last_filtered_query: String,
@@ -22,6 +23,8 @@ pub struct NavigatorState {
     pub(crate) results_query: Option<String>,
     pub(crate) scroll: crate::rows::RowScroll,
     pub(crate) motion_parser: truff_core::vim::parser::VimParser,
+    pub(crate) vault_root: Option<std::path::PathBuf>,
+    pub(crate) cached_preview: Option<(u64, Box<str>)>,
 }
 
 impl Default for NavigatorState {
@@ -42,6 +45,7 @@ impl NavigatorState {
             filtered_indices: Vec::new(),
             selected_index: 0,
             preview_visible: true,
+            jump_labels_active: false,
             actions_menu_open: false,
             actions_menu_selected: 0,
             last_filtered_query: String::new(),
@@ -50,6 +54,8 @@ impl NavigatorState {
             results_query: None,
             scroll: crate::rows::RowScroll::default(),
             motion_parser: truff_core::vim::parser::VimParser::new(),
+            vault_root: None,
+            cached_preview: None,
         }
     }
 
@@ -69,6 +75,8 @@ impl NavigatorState {
         self.search_page = 0;
         self.search_total = 0;
         self.search_mode = false;
+        self.jump_labels_active = false;
+        self.cached_preview = None;
         for item in &mut items {
             if item.char_mask == 0 {
                 item.update_char_mask();
@@ -90,12 +98,14 @@ impl NavigatorState {
         self.search_total = 0;
         self.motion_parser.reset();
         self.search_mode = false;
+        self.jump_labels_active = false;
         self.actions_menu_open = false;
         self.query = String::new();
         self.last_filtered_query.clear();
         self.context_title = String::new();
         self.items = Vec::new();
         self.filtered_indices = Vec::new();
+        self.cached_preview = None;
         self.selected_index = 0;
         self.actions_menu_selected = 0;
     }
@@ -130,22 +140,22 @@ impl NavigatorState {
         if q.is_empty() || matches!(self.mode, NavigatorMode::Content | NavigatorMode::Mixed) {
             self.last_filtered_query.clear();
             let mut hidden_below = None;
-            self.filtered_indices = self
-                .items
-                .iter()
-                .enumerate()
-                .filter_map(|(index, item)| {
-                    if hidden_below.is_some_and(|depth| item.depth > depth) {
-                        return None;
-                    }
-                    hidden_below = if item.is_folder && item.is_collapsed {
-                        Some(item.depth)
-                    } else {
-                        None
-                    };
-                    Some(index)
-                })
-                .collect();
+            self.filtered_indices.clear();
+            if self.filtered_indices.capacity() < self.items.len() {
+                self.filtered_indices
+                    .reserve_exact(self.items.len() - self.filtered_indices.len());
+            }
+            for (index, item) in self.items.iter().enumerate() {
+                if hidden_below.is_some_and(|depth| item.depth > depth) {
+                    continue;
+                }
+                hidden_below = if item.is_folder && item.is_collapsed {
+                    Some(item.depth)
+                } else {
+                    None
+                };
+                self.filtered_indices.push(index);
+            }
         } else {
             let q_mask = compute_char_mask(&q);
             let incremental = !self.last_filtered_query.is_empty()
@@ -154,50 +164,67 @@ impl NavigatorState {
 
             if !incremental {
                 for item in &mut self.items {
-                    item.update_char_mask();
+                    if item.char_mask == 0
+                        || !item.title.is_empty()
+                        || item.subtitle.is_some()
+                        || item.category.as_deref() != Some("Файлы")
+                    {
+                        item.update_char_mask();
+                    }
                 }
             }
 
-            let candidate_indices: Vec<usize> = if incremental {
-                self.filtered_indices.clone()
-            } else {
-                (0..self.items.len()).collect()
+            let score_item = |idx: usize, item: &NavigatorItem| -> Option<(usize, i32)> {
+                if item.char_mask != 0 && (item.char_mask & q_mask) != q_mask {
+                    return None;
+                }
+
+                let title_lower = lowercase(item.display_title());
+                let score = if title_lower == q {
+                    200
+                } else if title_lower.starts_with(q.as_ref()) {
+                    100
+                } else if title_lower.contains(q.as_ref()) {
+                    50
+                } else if item
+                    .display_subtitle()
+                    .is_some_and(|sub| lowercase(sub).contains(q.as_ref()))
+                {
+                    25
+                } else if item
+                    .category
+                    .as_deref()
+                    .is_some_and(|cat| lowercase(cat).contains(q.as_ref()))
+                {
+                    15
+                } else if is_subsequence(q.as_ref(), title_lower.as_ref()) {
+                    10
+                } else {
+                    return None;
+                };
+
+                Some((idx, score))
             };
 
-            let mut scored: Vec<(usize, i32)> = candidate_indices
-                .into_iter()
-                .filter_map(|idx| {
-                    let item = &self.items[idx];
-                    if item.char_mask != 0 && (item.char_mask & q_mask) != q_mask {
-                        return None;
-                    }
-
-                    let title_lower = lowercase(item.display_title());
-                    let score = if title_lower == q {
-                        200
-                    } else if title_lower.starts_with(q.as_ref()) {
-                        100
-                    } else if title_lower.contains(q.as_ref()) {
-                        50
-                    } else if lowercase(item.display_subtitle().unwrap_or("")).contains(q.as_ref())
-                    {
-                        25
-                    } else if lowercase(item.category.as_deref().unwrap_or("")).contains(q.as_ref())
-                    {
-                        15
-                    } else if is_subsequence(q.as_ref(), title_lower.as_ref()) {
-                        10
-                    } else {
-                        return None;
-                    };
-
-                    Some((idx, score))
-                })
-                .collect();
+            let mut scored: Vec<(usize, i32)> = if incremental {
+                self.filtered_indices
+                    .iter()
+                    .filter_map(|&idx| score_item(idx, &self.items[idx]))
+                    .collect()
+            } else {
+                self.items
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, item)| score_item(idx, item))
+                    .collect()
+            };
 
             scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-            self.filtered_indices = scored.into_iter().map(|(idx, _)| idx).collect();
-            self.last_filtered_query = q.into_owned();
+            self.filtered_indices.clear();
+            self.filtered_indices
+                .extend(scored.into_iter().map(|(idx, _)| idx));
+            self.last_filtered_query.clear();
+            self.last_filtered_query.push_str(&q);
         }
 
         if self.filtered_indices.is_empty() {
@@ -349,7 +376,20 @@ impl NavigatorState {
     }
 }
 
+#[inline]
 fn is_subsequence(sub: &str, target: &str) -> bool {
+    if sub.len() > target.len() {
+        return false;
+    }
+    if sub.is_ascii() && target.is_ascii() {
+        let mut target_bytes = target.bytes();
+        for sb in sub.bytes() {
+            if !target_bytes.any(|tb| tb == sb) {
+                return false;
+            }
+        }
+        return true;
+    }
     let mut target_chars = target.chars();
     for sc in sub.chars() {
         if !target_chars.any(|tc| tc == sc) {

@@ -43,6 +43,28 @@ pub fn highlight_spans(text: &str) -> Vec<ColorSpan> {
     spans
 }
 
+#[inline]
+fn has_markdown_syntax(text: &str) -> bool {
+    text.bytes().any(|b| {
+        matches!(
+            b,
+            b'*' | b'_'
+                | b'~'
+                | b'`'
+                | b'['
+                | b'#'
+                | b'-'
+                | b'+'
+                | b'='
+                | b'$'
+                | b'<'
+                | b'|'
+                | b'.'
+                | b')'
+        )
+    })
+}
+
 impl DisplayMap {
     pub(super) fn scan_markers(&mut self) {
         self.markers.clear();
@@ -53,11 +75,14 @@ impl DisplayMap {
             return;
         }
         let text = &self.source_text;
-        let indent = if self
+        let has_list_presentation = self
             .presentation
             .as_ref()
-            .is_some_and(|line| line.list.is_some())
-        {
+            .is_some_and(|line| line.list.is_some());
+        if !has_list_presentation && self.colors.is_empty() && !has_markdown_syntax(text) {
+            return;
+        }
+        let indent = if has_list_presentation {
             text.len() - text.trim_start_matches([' ', '\t']).len()
         } else {
             0
@@ -221,6 +246,9 @@ impl DisplayMap {
                         text_ranges.push(range);
                     }
                 }
+                Event::Rule => {
+                    self.markers.push((range.clone(), Some(range)));
+                }
                 _ => {}
             }
         }
@@ -240,6 +268,99 @@ impl DisplayMap {
                     style: InlineStyle::Link,
                 });
                 start = close + 2;
+            }
+        }
+        // Obsidian ==highlight== syntax
+        let mut h_start = 0;
+        while let Some(open) = text[h_start..].find("==") {
+            let open = h_start + open;
+            if let Some(close) = text[open + 2..].find("==") {
+                let close = open + 2 + close;
+                let span = open..close + 2;
+                self.markers.push((open..open + 2, Some(span.clone())));
+                self.markers.push((close..close + 2, Some(span)));
+                self.styles.push(StyledSpan {
+                    content: (open + 2)..close,
+                    style: InlineStyle::Highlight([235, 203, 139, 255]),
+                });
+                h_start = close + 2;
+            } else {
+                break;
+            }
+        }
+        // LaTeX block math $$ ... $$
+        let mut m_start = 0;
+        while let Some(open) = text[m_start..].find("$$") {
+            let open = m_start + open;
+            if let Some(close) = text[open + 2..].find("$$") {
+                let close = open + 2 + close;
+                let span = open..close + 2;
+                self.markers.push((span.clone(), Some(span.clone())));
+                self.styles.push(StyledSpan {
+                    content: span.clone(),
+                    style: InlineStyle::Math,
+                });
+                m_start = close + 2;
+            } else {
+                break;
+            }
+        }
+        // LaTeX inline math $ ... $
+        let mut im_start = 0;
+        while let Some(open) = text[im_start..].find('$') {
+            let open = im_start + open;
+            if text[open..].starts_with("$$") {
+                im_start = open + 2;
+                continue;
+            }
+            if let Some(close) = text[open + 1..].find('$') {
+                let close = open + 1 + close;
+                if !text[close..].starts_with("$$") && close > open + 1 {
+                    let span = open..close + 1;
+                    self.markers.push((span.clone(), Some(span.clone())));
+                    self.styles.push(StyledSpan {
+                        content: span.clone(),
+                        style: InlineStyle::Math,
+                    });
+                    im_start = close + 1;
+                    continue;
+                }
+            }
+            im_start = open + 1;
+        }
+        // Table row styling
+        let trimmed_text = text.trim();
+        if trimmed_text.starts_with('|') && trimmed_text.ends_with('|') && trimmed_text.len() > 1 {
+            let is_delimiter = trimmed_text
+                .chars()
+                .all(|c| c == '|' || c == '-' || c == ':' || c == ' ');
+            if is_delimiter {
+                self.styles.push(StyledSpan {
+                    content: 0..text.len(),
+                    style: InlineStyle::TextColor([76, 86, 106, 200]),
+                });
+            } else {
+                let is_header = self.presentation.as_ref().is_some_and(|p| p.table_header);
+                let mut cell_start = None;
+                for (idx, b) in text.bytes().enumerate() {
+                    if b == b'|' && (idx == 0 || text.as_bytes().get(idx - 1) != Some(&b'\\')) {
+                        self.styles.push(StyledSpan {
+                            content: idx..idx + 1,
+                            style: InlineStyle::TextColor([94, 129, 172, 220]),
+                        });
+                        if is_header {
+                            if let Some(start) = cell_start
+                                && start < idx
+                            {
+                                self.styles.push(StyledSpan {
+                                    content: start..idx,
+                                    style: InlineStyle::Bold,
+                                });
+                            }
+                            cell_start = Some(idx + 1);
+                        }
+                    }
+                }
             }
         }
         if let Some(LinePresentation { list, .. }) = &self.presentation {
@@ -284,16 +405,28 @@ impl DisplayMap {
         self.markers.sort_by_key(|(range, _)| range.start);
     }
 
-    pub(super) fn replacement(&self, range: &Range<usize>) -> Option<&'static str> {
+    pub(super) fn replacement(&self, range: &Range<usize>) -> Option<std::borrow::Cow<'_, str>> {
+        use std::borrow::Cow;
+        if let Some(slice) = self.source_text.get(range.clone()) {
+            let trimmed = slice.trim();
+            if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                return Some(Cow::Borrowed(" "));
+            }
+            if (trimmed.starts_with("$$") && trimmed.ends_with("$$") && trimmed.len() >= 4)
+                || (trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() >= 2)
+            {
+                return Some(Cow::Owned(format_latex_math(trimmed)));
+            }
+        }
         let list = self.list_at_marker(range)?;
         match list.kind {
-            ListKind::Bullet => Some(match list.depth % 3 {
+            ListKind::Bullet => Some(Cow::Borrowed(match list.depth % 3 {
                 0 => "• ",
                 1 => "◦ ",
                 _ => "▪ ",
-            }),
-            ListKind::Task { checked: false, .. } => Some("☐ "),
-            ListKind::Task { checked: true, .. } => Some("☑ "),
+            })),
+            ListKind::Task { checked: false, .. } => Some(Cow::Borrowed("☐ ")),
+            ListKind::Task { checked: true, .. } => Some(Cow::Borrowed("☑ ")),
             ListKind::Ordered => None,
         }
     }
@@ -309,4 +442,225 @@ impl DisplayMap {
 
 pub(super) fn ranges_touch(a: &Range<usize>, b: &Range<usize>) -> bool {
     a.start <= b.end && a.end >= b.start
+}
+
+pub(super) fn format_latex_math(raw: &str) -> String {
+    let mut s = raw.trim();
+    if s.starts_with("$$") && s.ends_with("$$") && s.len() >= 4 {
+        s = &s[2..s.len() - 2];
+    } else if s.starts_with('$') && s.ends_with('$') && s.len() >= 2 {
+        s = &s[1..s.len() - 1];
+    }
+    let s = s.trim();
+
+    if !s.contains('\\') && !s.contains('^') && !s.contains('_') && !s.contains('{') {
+        return s.to_string();
+    }
+
+    let mut out = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' {
+            let mut end = i + 1;
+            while end < chars.len() && chars[end].is_alphabetic() {
+                end += 1;
+            }
+            if end > i + 1 {
+                let cmd: String = chars[i + 1..end].iter().collect();
+                let sym = match cmd.as_str() {
+                    "alpha" => Some("α"),
+                    "beta" => Some("β"),
+                    "gamma" => Some("γ"),
+                    "delta" => Some("δ"),
+                    "epsilon" | "varepsilon" => Some("ε"),
+                    "zeta" => Some("ζ"),
+                    "eta" => Some("η"),
+                    "theta" | "vartheta" => Some("θ"),
+                    "iota" => Some("ι"),
+                    "kappa" => Some("κ"),
+                    "lambda" => Some("λ"),
+                    "mu" => Some("μ"),
+                    "nu" => Some("ν"),
+                    "xi" => Some("ξ"),
+                    "pi" | "varpi" => Some("π"),
+                    "rho" | "varrho" => Some("ρ"),
+                    "sigma" | "varsigma" => Some("σ"),
+                    "tau" => Some("τ"),
+                    "upsilon" => Some("υ"),
+                    "phi" | "varphi" => Some("φ"),
+                    "chi" => Some("χ"),
+                    "psi" => Some("ψ"),
+                    "omega" => Some("ω"),
+                    "Gamma" => Some("Γ"),
+                    "Delta" => Some("Δ"),
+                    "Theta" => Some("Θ"),
+                    "Lambda" => Some("Λ"),
+                    "Xi" => Some("Ξ"),
+                    "Pi" => Some("Π"),
+                    "Sigma" => Some("Σ"),
+                    "Phi" => Some("Φ"),
+                    "Psi" => Some("Ψ"),
+                    "Omega" => Some("Ω"),
+                    "times" => Some("×"),
+                    "cdot" => Some("·"),
+                    "pm" => Some("±"),
+                    "mp" => Some("∓"),
+                    "div" => Some("÷"),
+                    "neq" | "ne" => Some("≠"),
+                    "leq" | "le" => Some("≤"),
+                    "geq" | "ge" => Some("≥"),
+                    "approx" => Some("≈"),
+                    "equiv" => Some("≡"),
+                    "infty" => Some("∞"),
+                    "in" => Some("∈"),
+                    "notin" => Some("∉"),
+                    "subset" => Some("⊂"),
+                    "subseteq" => Some("⊆"),
+                    "cup" => Some("∪"),
+                    "cap" => Some("∩"),
+                    "emptyset" => Some("∅"),
+                    "forall" => Some("∀"),
+                    "exists" => Some("∃"),
+                    "nabla" => Some("∇"),
+                    "partial" => Some("∂"),
+                    "sum" => Some("∑"),
+                    "prod" => Some("∏"),
+                    "int" => Some("∫"),
+                    "to" | "rightarrow" => Some("→"),
+                    "leftarrow" => Some("←"),
+                    "Rightarrow" => Some("⇒"),
+                    "Leftarrow" => Some("⇐"),
+                    "iff" | "Leftrightarrow" => Some("⇔"),
+                    "sqrt" => Some("√"),
+                    "quad" | "qquad" => Some("  "),
+                    _ => None,
+                };
+                if let Some(replacement) = sym {
+                    out.push_str(replacement);
+                    i = end;
+                    continue;
+                } else if cmd == "frac" {
+                    i = end;
+                    let mut num = String::new();
+                    let mut den = String::new();
+                    if i < chars.len() && chars[i] == '{' {
+                        i += 1;
+                        while i < chars.len() && chars[i] != '}' {
+                            num.push(chars[i]);
+                            i += 1;
+                        }
+                        if i < chars.len() && chars[i] == '}' {
+                            i += 1;
+                        }
+                    }
+                    if i < chars.len() && chars[i] == '{' {
+                        i += 1;
+                        while i < chars.len() && chars[i] != '}' {
+                            den.push(chars[i]);
+                            i += 1;
+                        }
+                        if i < chars.len() && chars[i] == '}' {
+                            i += 1;
+                        }
+                    }
+                    if !num.is_empty() || !den.is_empty() {
+                        out.push_str(&format!("{num}/{den}"));
+                        continue;
+                    }
+                }
+            }
+            out.push(c);
+            i += 1;
+        } else if c == '^' {
+            i += 1;
+            if i < chars.len() && chars[i] == '{' {
+                i += 1;
+                while i < chars.len() && chars[i] != '}' {
+                    out.push(to_superscript(chars[i]));
+                    i += 1;
+                }
+                if i < chars.len() && chars[i] == '}' {
+                    i += 1;
+                }
+            } else if i < chars.len() {
+                out.push(to_superscript(chars[i]));
+                i += 1;
+            }
+        } else if c == '_' {
+            i += 1;
+            if i < chars.len() && chars[i] == '{' {
+                i += 1;
+                while i < chars.len() && chars[i] != '}' {
+                    out.push(to_subscript(chars[i]));
+                    i += 1;
+                }
+                if i < chars.len() && chars[i] == '}' {
+                    i += 1;
+                }
+            } else if i < chars.len() {
+                out.push(to_subscript(chars[i]));
+                i += 1;
+            }
+        } else if c == '{' || c == '}' {
+            i += 1;
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn to_superscript(c: char) -> char {
+    match c {
+        '0' => '⁰',
+        '1' => '¹',
+        '2' => '²',
+        '3' => '³',
+        '4' => '⁴',
+        '5' => '⁵',
+        '6' => '⁶',
+        '7' => '⁷',
+        '8' => '⁸',
+        '9' => '⁹',
+        '+' => '⁺',
+        '-' => '⁻',
+        '=' => '⁼',
+        '(' => '⁽',
+        ')' => '⁾',
+        'n' => 'ⁿ',
+        'i' => 'ⁱ',
+        'x' => 'ˣ',
+        _ => c,
+    }
+}
+
+fn to_subscript(c: char) -> char {
+    match c {
+        '0' => '₀',
+        '1' => '₁',
+        '2' => '₂',
+        '3' => '₃',
+        '4' => '₄',
+        '5' => '₅',
+        '6' => '₆',
+        '7' => '₇',
+        '8' => '₈',
+        '9' => '₉',
+        '+' => '₊',
+        '-' => '₋',
+        '=' => '₌',
+        '(' => '₍',
+        ')' => '₎',
+        'a' => 'ₐ',
+        'e' => 'ₑ',
+        'i' => 'ᵢ',
+        'o' => 'ₒ',
+        'u' => 'ᵤ',
+        'x' => 'ₓ',
+        'n' => 'ₙ',
+        _ => c,
+    }
 }

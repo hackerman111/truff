@@ -232,7 +232,7 @@ fn window_keyboard_workflow_saves_renames_and_restores_real_files() {
     // Insert, Flash to the second word, select it, and apply a color through the command UI.
     text(&mut root, "iHello ");
     named(&mut root, egui::Key::Escape);
-    text(&mut root, "s");
+    text(&mut root, "sbe");
     let label = with_app(&root, id, |app| {
         app.shell
             .flash()

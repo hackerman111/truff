@@ -3,71 +3,101 @@ use truff_core::navigation::{RowId, RowItem};
 
 struct TreePath {
     path: String,
-    components: Range<usize>,
+    components_start: u32,
+    components_end: u32,
 }
 
 impl TreePath {
+    #[inline]
+    fn components_range(&self) -> Range<usize> {
+        (self.components_start as usize)..(self.components_end as usize)
+    }
+
     fn sort_key<'a>(
         &'a self,
-        components: &'a [Range<usize>],
+        components: &'a [(u32, u32)],
     ) -> impl Iterator<Item = (bool, &'a str)> {
-        components[self.components.clone()]
+        let range = self.components_range();
+        let len = range.len();
+        components[range]
             .iter()
             .enumerate()
-            .map(|(index, range)| {
-                (
-                    index + 1 == self.components.len(),
-                    &self.path[range.clone()],
-                )
-            })
+            .map(move |(index, &(s, e))| (index + 1 == len, &self.path[(s as usize)..(e as usize)]))
     }
 }
 
 pub(super) fn build_tree_items(files: Vec<String>) -> Vec<RowItem> {
     // Parse once: repeatedly scanning separators during sorting dominates large catalogs.
-    let mut components = Vec::new();
+    let mut components: Vec<(u32, u32)> = Vec::with_capacity(files.len().saturating_mul(3));
     let mut paths: Vec<TreePath> = files
         .into_iter()
         .map(|path| {
-            let first = components.len();
-            let mut start = 0;
+            let first = components.len() as u32;
+            let mut start = 0usize;
             for (end, byte) in path.bytes().enumerate() {
                 if byte == b'/' || byte == b'\\' {
                     if start < end {
-                        components.push(start..end);
+                        components.push((start as u32, end as u32));
                     }
                     start = end + 1;
                 }
             }
             if start < path.len() {
-                components.push(start..path.len());
+                components.push((start as u32, path.len() as u32));
             }
             TreePath {
                 path,
-                components: first..components.len(),
+                components_start: first,
+                components_end: components.len() as u32,
             }
         })
         .collect();
     // Stable order preserves input order for paths equal after separator normalization.
     paths.sort_by(|a, b| {
-        if let (Some(a_last), Some(b_last)) = (
-            components[a.components.clone()].last(),
-            components[b.components.clone()].last(),
-        ) && a.path[..a_last.start] == b.path[..b_last.start]
+        if let (Some(&(a_s, a_e)), Some(&(b_s, b_e))) = (
+            components[a.components_range()].last(),
+            components[b.components_range()].last(),
+        ) && a.path[..(a_s as usize)] == b.path[..(b_s as usize)]
         {
-            return a.path[a_last.clone()].cmp(&b.path[b_last.clone()]);
+            return a.path[(a_s as usize)..(a_e as usize)]
+                .cmp(&b.path[(b_s as usize)..(b_e as usize)]);
         }
         a.sort_key(&components).cmp(b.sort_key(&components))
     });
-    let mut items: Vec<RowItem> = Vec::with_capacity(paths.len() + paths.len() / 4);
+
+    // Count exact number of emitted rows (folders + files) so `items` can be allocated once
+    // with exact capacity, avoiding a 2x peak memory spike from `shrink_to_fit()`.
+    let mut exact_count = 0usize;
+    let mut count_dirs: Vec<(usize, Range<usize>)> = Vec::with_capacity(8);
+    for (path_idx, tree_path) in paths.iter().enumerate() {
+        let range = tree_path.components_range();
+        for (depth, &(s, e)) in components[range.clone()].iter().enumerate() {
+            let comp_range = (s as usize)..(e as usize);
+            if depth + 1 < range.len() {
+                let same = count_dirs.get(depth).is_some_and(|(prev_idx, prev_range)| {
+                    paths[*prev_idx].path[prev_range.clone()] == tree_path.path[comp_range.clone()]
+                });
+                if !same {
+                    count_dirs.truncate(depth);
+                    count_dirs.push((path_idx, comp_range));
+                    exact_count += 1;
+                }
+            } else {
+                count_dirs.truncate(depth);
+                exact_count += 1;
+                break;
+            }
+        }
+    }
+    drop(count_dirs);
+
+    let mut items: Vec<RowItem> = Vec::with_capacity(exact_count);
     let mut active_dirs: Vec<usize> = Vec::with_capacity(8);
-    for TreePath {
-        path,
-        components: range,
-    } in paths
-    {
-        for (depth, component) in components[range.clone()].iter().enumerate() {
-            let part = &path[component.clone()];
+    for tree_path in paths {
+        let range = tree_path.components_range();
+        let path = tree_path.path;
+        for (depth, &(s, e)) in components[range.clone()].iter().enumerate() {
+            let part = &path[(s as usize)..(e as usize)];
             if depth + 1 < range.len() {
                 let current = active_dirs
                     .get(depth)
@@ -98,6 +128,5 @@ pub(super) fn build_tree_items(files: Vec<String>) -> Vec<RowItem> {
             }
         }
     }
-    items.shrink_to_fit();
     items
 }

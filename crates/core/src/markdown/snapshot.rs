@@ -579,7 +579,15 @@ fn build_sections(
             .map_or(text.len(), |next| next.range.start);
 
         let full_range = h.range.start..next_pos;
-        let body_start = h.range.end.min(next_pos);
+        let heading_rest = &text[h.range.end..next_pos];
+        let newline_offset = if heading_rest.starts_with("\r\n") {
+            2
+        } else if heading_rest.starts_with('\n') {
+            1
+        } else {
+            0
+        };
+        let body_start = (h.range.end + newline_offset).min(next_pos);
         let body_range = body_start..next_pos;
 
         let parent_section = (0..i).rev().find(|&j| headings[j].level < h.level);

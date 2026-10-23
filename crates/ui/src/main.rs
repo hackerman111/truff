@@ -216,6 +216,13 @@ fn main() {
         depth_buffer: 0,
         stencil_buffer: 0,
         multisampling: 0,
+        // On Wayland, SwapInterval::Wait (vsync: true) causes eglSwapBuffers to block
+        // the main thread when the window is occluded/on an inactive workspace, preventing
+        // winit from answering xdg_wm_base.ping and triggering OS "Not Responding" dialogs.
+        glow_options: eframe::egui_glow::GlowConfiguration {
+            vsync: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
     if let Err(error) = eframe::run_native(

@@ -63,7 +63,12 @@ pub(super) fn footer(
         ui.spacing_mut().button_padding = egui::vec2(theme.spacing_sm, theme.spacing_xs);
         ui.spacing_mut().interact_size.y = theme.geometry.list_row_height - theme.spacing_sm;
         for quick in state.quick_actions() {
-            let label = format!("{} {}", quick.key, quick.label);
+            let display_key = if quick.key == "↵" {
+                "Enter"
+            } else {
+                quick.key
+            };
+            let label = format!("{display_key} {}", quick.label);
             if ui.button(label).on_hover_text(quick.description).clicked() {
                 match quick.key {
                     "/" => state.search_mode = true,
@@ -111,11 +116,16 @@ pub(super) fn actions(
         .max_height((height - theme.geometry.list_row_height).max(1.0))
         .show(ui, |ui| {
             for (index, item) in state.context_actions().into_iter().enumerate() {
+                let display_key = if item.key == "↵" {
+                    "Enter"
+                } else {
+                    item.key.as_str()
+                };
                 let response = ui.add_sized(
                     [ui.available_width(), theme.geometry.list_row_height],
                     egui::Button::selectable(
                         index == state.actions_menu_selected,
-                        format!("{}  {}", item.key, item.label),
+                        format!("{display_key}  {}", item.label),
                     ),
                 );
                 response.clone().on_hover_text(&item.description);

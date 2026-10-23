@@ -7,22 +7,12 @@ use super::types::{DisplayChunk, ProjectionMode};
 impl DisplayMap {
     /// Rebuilds projection visibility from cached source markers.
     pub(super) fn rebuild(&mut self) {
-        if self.mode == ProjectionMode::Source {
-            if self.visual_text.is_some() || self.chunks.len() != 1 {
+        if self.mode == ProjectionMode::Source || self.markers.is_empty() {
+            if self.visual_text.is_some() || !self.chunks.is_empty() {
                 self.visual_revision = self.visual_revision.wrapping_add(1);
             }
             self.visual_text = None;
             self.chunks.clear();
-            self.chunks.push(DisplayChunk {
-                source_start: 0,
-                source_end: self.source_text.len() as u32,
-                visual_start: 0,
-                visual_len: self.source_text.len() as u32,
-                enclosing_start: u32::MAX,
-                enclosing_end: u32::MAX,
-                is_marker: false,
-                hidden: false,
-            });
             return;
         }
         let cursor_offset = self.cursor.get();
@@ -74,7 +64,9 @@ impl DisplayMap {
                     )
                 });
             let v_len = if hidden {
-                self.replacement(marker_range).map_or(0, str::len) as u32
+                self.replacement(marker_range)
+                    .as_deref()
+                    .map_or(0, str::len) as u32
             } else {
                 marker_range.len() as u32
             };
@@ -112,7 +104,7 @@ impl DisplayMap {
                 if !chunk.hidden {
                     visual.push_str(&self.source_text[chunk.source_range()]);
                 } else if let Some(replacement) = self.replacement(&chunk.source_range()) {
-                    visual.push_str(replacement);
+                    visual.push_str(replacement.as_ref());
                 }
             }
             Some(visual.into_boxed_str())

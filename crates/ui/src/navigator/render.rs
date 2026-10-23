@@ -63,8 +63,14 @@ fn show_inner(
                 (ui.available_height() - theme.geometry.list_row_height - theme.spacing_lg)
                     .max(1.0);
             let gap = theme.spacing_lg;
-            let list_width = (ui.available_width() - gap) * 0.48;
-            let preview_width = (ui.available_width() - gap - list_width).max(1.0);
+            let total_width = ui.available_width();
+            let show_preview = state.preview_visible
+                && (context.content_rect().width() >= 900.0 || total_width >= 600.0);
+            let list_width = if show_preview {
+                (total_width - gap) * 0.45
+            } else {
+                total_width
+            };
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = gap / 2.0;
                 ui.allocate_ui_with_layout(
@@ -72,18 +78,22 @@ fn show_inner(
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| list::show(ui, state, theme, height, &mut action),
                 );
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    egui::vec2(preview_width, height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        if state.actions_menu_open {
-                            chrome::actions(ui, state, theme, height, &mut action);
-                        } else {
-                            preview::show(ui, state, theme, height);
-                        }
-                    },
-                );
+                if show_preview {
+                    ui.separator();
+                    let remaining_width =
+                        (ui.available_width() - ui.spacing().item_spacing.x).max(1.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(remaining_width, height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            if state.actions_menu_open {
+                                chrome::actions(ui, state, theme, height, &mut action);
+                            } else {
+                                preview::show(ui, state, theme, height);
+                            }
+                        },
+                    );
+                }
             });
             ui.add_space(theme.spacing_sm);
             ui.separator();

@@ -51,7 +51,11 @@ impl DisplayMap {
         mode: ProjectionMode,
         presentation: Option<truff_core::markdown::presentation::LinePresentation>,
     ) -> Self {
-        let colors = truff_core::markdown::style::color_spans(&text);
+        let colors = if text.contains("<span") {
+            truff_core::markdown::style::color_spans(&text)
+        } else {
+            Vec::new()
+        };
         let mut map = Self {
             source_text: text,
             mode,
@@ -92,8 +96,13 @@ impl DisplayMap {
     /// Updates the source text.
     pub fn set_text(&mut self, text: &str) {
         self.presentation = None;
-        self.source_text = text.to_string();
-        self.colors = truff_core::markdown::style::color_spans(text);
+        self.source_text.clear();
+        self.source_text.push_str(text);
+        if text.contains("<span") {
+            self.colors = truff_core::markdown::style::color_spans(text);
+        } else {
+            self.colors.clear();
+        }
         self.scan_markers();
         self.visual_revision = self.visual_revision.wrapping_add(1);
         self.rebuild();
@@ -145,7 +154,11 @@ impl DisplayMap {
             self.presentation = None;
             self.source_text.clear();
             self.source_text.push_str(text);
-            self.colors = truff_core::markdown::style::color_spans(text);
+            if text.contains("<span") {
+                self.colors = truff_core::markdown::style::color_spans(text);
+            } else {
+                self.colors.clear();
+            }
             self.scan_markers();
         }
         if text.is_some() || self.cursor != cursor || self.selection != selection {
@@ -163,6 +176,17 @@ impl DisplayMap {
     /// Current projected visual text.
     pub fn visual_text(&self) -> &str {
         self.visual_text.as_deref().unwrap_or(&self.source_text)
+    }
+
+    /// Returns true if this line represents a thematic break (---, ***, ___).
+    pub fn is_thematic_break(&self) -> bool {
+        let trimmed = self.source_text.trim();
+        trimmed == "---" || trimmed == "***" || trimmed == "___"
+    }
+
+    /// Returns true if this paragraph is a thematic break whose marker is currently hidden.
+    pub fn is_rule_hidden(&self) -> bool {
+        self.is_thematic_break() && self.chunks.iter().any(|c| c.is_marker && c.hidden)
     }
 
     /// Updates the active cursor position.

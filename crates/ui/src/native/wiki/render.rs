@@ -83,7 +83,13 @@ pub fn render_folder_wiki(
                     if widgets::icon_button(ui, icons::Icon::Close, "Закрыть (Esc)").clicked() {
                         action = Some(WikiAction::Close);
                     }
-                    if widgets::primary_button(ui, "➕ Новая заметка (a)").clicked() {
+                    if widgets::primary_button_with_icon(
+                        ui,
+                        icons::Icon::Plus,
+                        "Новая заметка (a)",
+                    )
+                    .clicked()
+                    {
                         action = Some(WikiAction::CreateNewNote {
                             folder: data.folder_path.clone(),
                         });
@@ -186,7 +192,13 @@ fn render_overview(
                                 line: None,
                             });
                         }
-                    } else if widgets::primary_button(ui, "➕ Создать index.md").clicked() {
+                    } else if widgets::primary_button_with_icon(
+                        ui,
+                        icons::Icon::Plus,
+                        "Создать index.md",
+                    )
+                    .clicked()
+                    {
                         *action = Some(WikiAction::CreateMasterNote {
                             folder: data.folder_path.clone(),
                         });
@@ -241,17 +253,38 @@ fn render_overview(
             .show(ui, |ui| {
                 for (idx, note) in data.notes.iter().enumerate() {
                     let is_sel = idx == data.selected_index;
-                    let text = format!("📄 {} ({} строк, {} задач)", note.name, note.line_count, note.task_count);
-                    let rich = egui::RichText::new(text)
-                        .size(12.0)
-                        .color(if is_sel { color(theme.accent) } else { color(theme.text_primary) });
-
-                    if ui.selectable_label(is_sel, rich).clicked() {
-                        *action = Some(WikiAction::OpenNote {
-                            path: note.path.clone(),
-                            line: None,
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (icon_rect, _) =
+                            ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                        icons::render_icon(
+                            ui.painter(),
+                            icons::Icon::File,
+                            icon_rect,
+                            if is_sel {
+                                color(theme.accent)
+                            } else {
+                                color(theme.text_muted)
+                            },
+                            1.3,
+                        );
+                        let text = format!(
+                            "{} ({} строк, {} задач)",
+                            note.name, note.line_count, note.task_count
+                        );
+                        let rich = egui::RichText::new(text).size(12.0).color(if is_sel {
+                            color(theme.accent)
+                        } else {
+                            color(theme.text_primary)
                         });
-                    }
+
+                        if ui.selectable_label(is_sel, rich).clicked() {
+                            *action = Some(WikiAction::OpenNote {
+                                path: note.path.clone(),
+                                line: None,
+                            });
+                        }
+                    });
                 }
             });
     });
@@ -396,19 +429,19 @@ fn render_tasks(
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
 
-                    let check_icon = if task.checked { "[x]" } else { "[ ]" };
+                    let (check_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                    let check_icon = if task.checked {
+                        icons::Icon::CheckSquare
+                    } else {
+                        icons::Icon::Square
+                    };
                     let check_color = if task.checked {
                         color(theme.accent)
                     } else {
                         color(theme.text_muted)
                     };
-
-                    ui.label(
-                        egui::RichText::new(check_icon)
-                            .size(12.0)
-                            .monospace()
-                            .color(check_color),
-                    );
+                    icons::render_icon(ui.painter(), check_icon, check_rect, check_color, 1.3);
 
                     let rich = egui::RichText::new(&task.text)
                         .size(12.0)
@@ -468,7 +501,7 @@ fn render_metadata_table(
                     egui::Label::new(egui::RichText::new("Задачи").strong().size(11.0)),
                 );
                 ui.add_sized(
-                    [100.0, 20.0],
+                    [120.0, 20.0],
                     egui::Label::new(egui::RichText::new("Статус").strong().size(11.0)),
                 );
             });
@@ -516,14 +549,38 @@ fn render_metadata_table(
                     };
                     ui.add_sized([100.0, 20.0], egui::Label::new(task_text));
 
-                    let status = if note.is_master {
-                        "⭐ Мастер"
+                    let (status_icon, status_text, status_color) = if note.is_master {
+                        (icons::Icon::Star, "Мастер", color(theme.accent))
                     } else if note.pending_tasks > 0 {
-                        "⚠️ Есть задачи"
+                        (
+                            icons::Icon::Warning,
+                            "Есть задачи",
+                            color(theme.callout_warning),
+                        )
                     } else {
-                        "✓ Чисто"
+                        (icons::Icon::Check, "Чисто", color(theme.callout_tip))
                     };
-                    ui.add_sized([100.0, 20.0], egui::Label::new(status));
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(120.0, 20.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            let (icon_rect, _) = ui
+                                .allocate_exact_size(egui::vec2(13.0, 13.0), egui::Sense::hover());
+                            icons::render_icon(
+                                ui.painter(),
+                                status_icon,
+                                icon_rect,
+                                status_color,
+                                1.3,
+                            );
+                            ui.label(
+                                egui::RichText::new(status_text)
+                                    .size(11.0)
+                                    .color(status_color),
+                            );
+                        },
+                    );
                 });
             }
         });
