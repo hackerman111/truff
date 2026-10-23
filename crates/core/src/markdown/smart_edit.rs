@@ -234,20 +234,61 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
 
     // If cursor is before content_start, clamp split point to content_start
     let split_pos = pos.max(parsed.content_start);
+    let rel_split = split_pos.saturating_sub(parsed.line_start);
+    let after_split = line_str.get(rel_split..).unwrap_or("");
+    let has_indent = !parsed.indent.is_empty() && after_split.starts_with(&parsed.indent);
+    let rem = if has_indent {
+        &after_split[parsed.indent.len()..]
+    } else {
+        after_split
+    };
+    let needed_indent = if has_indent {
+        ""
+    } else {
+        parsed.indent.as_str()
+    };
+
     let next_prefix = match parsed.kind {
-        MarkerKind::Bullet(b) => format!("{}{}{b} ", parsed.quote_prefix, parsed.indent),
+        MarkerKind::Bullet(b) => {
+            let marker = format!("{b} ");
+            if rem.starts_with(&marker) {
+                format!("{}{}", parsed.quote_prefix, needed_indent)
+            } else {
+                format!("{}{}{b} ", parsed.quote_prefix, parsed.indent)
+            }
+        }
         MarkerKind::Task { bullet, .. } => {
-            // Always create an unchecked child/sibling task `[ ] `
-            format!("{}{}{bullet} [ ] ", parsed.quote_prefix, parsed.indent)
+            let has_full_task = rem.starts_with(&format!("{bullet} [ ] "))
+                || rem.starts_with(&format!("{bullet} [x] "))
+                || rem.starts_with(&format!("{bullet} [X] "));
+            let has_checkbox_only =
+                rem.starts_with("[ ] ") || rem.starts_with("[x] ") || rem.starts_with("[X] ");
+
+            if has_full_task {
+                format!("{}{}", parsed.quote_prefix, needed_indent)
+            } else if has_checkbox_only {
+                format!("{}{}{bullet} ", parsed.quote_prefix, needed_indent)
+            } else {
+                format!("{}{}{bullet} [ ] ", parsed.quote_prefix, parsed.indent)
+            }
         }
         MarkerKind::Ordered { number, delimiter } => {
-            format!(
-                "{}{}{}{} ",
-                parsed.quote_prefix,
-                parsed.indent,
-                number + 1,
-                delimiter
-            )
+            let digits_len = rem.bytes().take_while(|b| b.is_ascii_digit()).count();
+            let has_ordered = digits_len > 0
+                && rem.as_bytes().get(digits_len) == Some(&(delimiter as u8))
+                && rem.as_bytes().get(digits_len + 1) == Some(&b' ');
+
+            if has_ordered {
+                format!("{}{}", parsed.quote_prefix, needed_indent)
+            } else {
+                format!(
+                    "{}{}{}{} ",
+                    parsed.quote_prefix,
+                    parsed.indent,
+                    number + 1,
+                    delimiter
+                )
+            }
         }
         MarkerKind::QuoteOnly => parsed.quote_prefix.clone(),
     };

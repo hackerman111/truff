@@ -155,3 +155,35 @@ fn remove_style_clean() {
 
     assert_eq!(buffer.as_str(), "Hello colored and highlighted text");
 }
+
+#[test]
+fn color_trailing_newline_trimmed() {
+    let initial_text = "hello\nworld";
+    let mut buffer = Buffer::from_str(initial_text);
+
+    // Range covers "hello\n" (0..6)
+    let range = 0..6;
+    assert_eq!(&initial_text[range.clone()], "hello\n");
+    let tx = apply_text_color(initial_text, range, "#ff0000").expect("apply color with newline");
+    buffer.apply(tx).expect("apply tx");
+
+    // The closing </span> must stay on the line, newline must not be wrapped inside <span>
+    assert_eq!(
+        buffer.as_str(),
+        "<span style=\"color:#ff0000\">hello</span>\nworld"
+    );
+
+    // CRLF case: "hello\r\nworld"
+    let crlf_text = "hello\r\nworld";
+    let mut crlf_buffer = Buffer::from_str(crlf_text);
+    let crlf_range = 0..7;
+    assert_eq!(&crlf_text[crlf_range.clone()], "hello\r\n");
+    let tx_crlf =
+        apply_text_color(crlf_text, crlf_range, "#00ff00").expect("apply color with crlf");
+    crlf_buffer.apply(tx_crlf).expect("apply tx_crlf");
+
+    assert_eq!(
+        crlf_buffer.as_str(),
+        "<span style=\"color:#00ff00\">hello</span>\r\nworld"
+    );
+}

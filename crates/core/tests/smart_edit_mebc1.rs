@@ -175,3 +175,48 @@ fn test_mebc1_numbering_only_new_item_not_mass_renumbered() {
     // Subsequent item "2. Second" remains "2. Second", not renumbered to "3. Second"
     assert_eq!(b.as_str(), "1. First\n2. \n2. Second\n");
 }
+
+#[test]
+fn test_mebc1_enter_list_continuation_dedup() {
+    // 1. Bullet list `-`: "- item 1- item 2" -> "- item 1\n- item 2"
+    let mut b = Buffer::from_str("- item 1- item 2");
+    let cursor = BytePos::new("- item 1".len());
+    let tx = plan_enter(&b, cursor).expect("enter between bullet items");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "- item 1\n- item 2");
+
+    // 2. Bullet list `*`: "* item 1* item 2" -> "* item 1\n* item 2"
+    let mut b = Buffer::from_str("* item 1* item 2");
+    let cursor = BytePos::new("* item 1".len());
+    let tx = plan_enter(&b, cursor).expect("enter between * bullet items");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "* item 1\n* item 2");
+
+    // 3. Bullet list `+`: "+ item 1+ item 2" -> "+ item 1\n+ item 2"
+    let mut b = Buffer::from_str("+ item 1+ item 2");
+    let cursor = BytePos::new("+ item 1".len());
+    let tx = plan_enter(&b, cursor).expect("enter between + bullet items");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "+ item 1\n+ item 2");
+
+    // 4. Ordered list: "1. item 12. item 2" -> "1. item 1\n2. item 2"
+    let mut b = Buffer::from_str("1. item 12. item 2");
+    let cursor = BytePos::new("1. item 1".len());
+    let tx = plan_enter(&b, cursor).expect("enter between ordered items");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "1. item 1\n2. item 2");
+
+    // 5. Task list: "- [ ] item 1- [ ] item 2" -> "- [ ] item 1\n- [ ] item 2"
+    let mut b = Buffer::from_str("- [ ] item 1- [ ] item 2");
+    let cursor = BytePos::new("- [ ] item 1".len());
+    let tx = plan_enter(&b, cursor).expect("enter between task items");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "- [ ] item 1\n- [ ] item 2");
+
+    // 6. Task list with [ ] after split: "- [ ] item 1[ ] item 2" -> "- [ ] item 1\n- [ ] item 2"
+    let mut b = Buffer::from_str("- [ ] item 1[ ] item 2");
+    let cursor = BytePos::new("- [ ] item 1".len());
+    let tx = plan_enter(&b, cursor).expect("enter between task items with [ ] marker");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "- [ ] item 1\n- [ ] item 2");
+}

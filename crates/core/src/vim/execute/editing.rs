@@ -237,7 +237,27 @@ impl VimState {
                 let range = if start != end {
                     start..end
                 } else if key == Key::Backspace {
-                    buffer.grapheme_prev(head).map_or(start, BytePos::get)..end
+                    let line = buffer.line_of_byte(head.get());
+                    let line_start = buffer.byte_of_line(line);
+                    let prefix = buffer.slice(line_start..head.get());
+                    let spaces = prefix.chars().rev().take_while(|&c| c == ' ').count();
+                    let col = prefix.chars().count();
+                    let rem = col % 4;
+                    let dist_to_boundary = if rem == 0 { 4 } else { rem };
+                    let del_count = if spaces >= dist_to_boundary && dist_to_boundary > 1 {
+                        dist_to_boundary
+                    } else if spaces >= 4 && spaces % 4 == 0 {
+                        4
+                    } else if spaces >= 2 && spaces % 2 == 0 {
+                        2
+                    } else {
+                        1
+                    };
+                    if del_count > 1 {
+                        (head.get() - del_count)..end
+                    } else {
+                        buffer.grapheme_prev(head).map_or(start, BytePos::get)..end
+                    }
                 } else {
                     start..buffer.grapheme_next(head).map_or(end, BytePos::get)
                 };
@@ -425,5 +445,47 @@ impl VimState {
             Ok(()) => InputResult::Consumed,
             Err(e) => self.error(e.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::views::ViewId;
+
+    fn check_backspace(initial: &str, cursor: usize, expected: &str, expected_cursor: usize) {
+        let mut buffer = Buffer::from_str(initial);
+        let mut view = View::new(ViewId::new(1), buffer.id());
+        view.set_cursor(BytePos::new(cursor), BytePos::new(cursor));
+        let mut vim = VimState {
+            mode: Mode::Insert,
+            ..Default::default()
+        };
+        let ctx = InputContext::Editor {
+            view_id: view.id(),
+            buffer: &mut buffer,
+            view: &mut view,
+        };
+        vim.insert_key(Key::Backspace, ctx);
+        assert_eq!(buffer.as_str(), expected);
+        assert_eq!(view.head(), BytePos::new(expected_cursor));
+    }
+
+    #[test]
+    fn test_soft_tab_backspace() {
+        // 4 spaces deleted at once
+        check_backspace("    ", 4, "", 0);
+        // 2 spaces deleted at once
+        check_backspace("  ", 2, "", 0);
+        // 8 spaces: deletes 4 spaces down to 4
+        check_backspace("        ", 8, "    ", 4);
+        // 1 space: deleted to 0
+        check_backspace(" ", 1, "", 0);
+        // text followed by 4 spaces aligned to tab stop 4..8
+        check_backspace("abcd    ", 8, "abcd", 4);
+        // text followed by 2 spaces aligned to tab stop 2..4
+        check_backspace("ab  ", 4, "ab", 2);
+        // normal text without trailing spaces: deletes 1 char
+        check_backspace("hello", 5, "hell", 4);
     }
 }

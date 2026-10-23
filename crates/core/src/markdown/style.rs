@@ -123,6 +123,16 @@ pub fn apply_text_color(
     validate_range(text, &range)?;
     validate_protection(text, &range)?;
 
+    let mut range = range;
+    if text.get(range.clone()).is_some_and(|s| s.ends_with("\r\n")) {
+        range.end -= 2;
+    } else if text.get(range.clone()).is_some_and(|s| s.ends_with('\n')) {
+        range.end -= 1;
+    }
+    if range.is_empty() {
+        return Err(StyleError::EmptyRange);
+    }
+
     let normalized_color = normalize_hex_color(color_hex);
 
     // Check if range is inside or encompasses an existing <span style="color:...> wrapper.
