@@ -4,7 +4,6 @@ use crate::{
     navigator::{NavigatorItemPayload, NavigatorState},
     theme::Theme,
 };
-use eframe::egui;
 use std::io::Read;
 
 pub(super) fn show(ui: &mut egui::Ui, state: &mut NavigatorState, theme: &Theme, height: f32) {

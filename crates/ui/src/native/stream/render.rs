@@ -2,7 +2,6 @@ use super::model::{NoteStreamModel, StreamFilter};
 use crate::native::editor::color;
 use crate::native::{icons, widgets};
 use crate::theme::Theme;
-use eframe::egui;
 
 /// Action resulting from interacting with the Note Stream.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use super::NativeApp;
 use crate::editor::EditorInput;
 use crate::shell::{Focus, ShellAction};
-use eframe::egui::{self, Event};
+use egui::Event;
 use truff_core::vim::{Key, Mode};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

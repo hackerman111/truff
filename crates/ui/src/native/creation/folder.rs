@@ -1,7 +1,6 @@
 use super::super::{editor::color, icons, widgets};
 use crate::app::Application;
 use crate::theme::Theme;
-use eframe::egui;
 
 pub struct FolderDialog {
     pub open: bool,

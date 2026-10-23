@@ -1,5 +1,5 @@
 //! Procedural vector icons and canvas drawing primitives.
-use eframe::egui::{Color32, Painter, Pos2, Rect, Stroke, vec2};
+use egui::{Color32, Painter, Pos2, Rect, Stroke, vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
@@ -281,11 +281,11 @@ pub fn render_icon(painter: &Painter, icon: Icon, rect: Rect, color: Color32, st
         }
         Icon::Square => {
             let box_rect = Rect::from_center_size(center, vec2(10.0, 10.0));
-            painter.rect_stroke(box_rect, 2.0, stroke, eframe::egui::StrokeKind::Inside);
+            painter.rect_stroke(box_rect, 2.0, stroke, egui::StrokeKind::Inside);
         }
         Icon::CheckSquare => {
             let box_rect = Rect::from_center_size(center, vec2(10.0, 10.0));
-            painter.rect_stroke(box_rect, 2.0, stroke, eframe::egui::StrokeKind::Inside);
+            painter.rect_stroke(box_rect, 2.0, stroke, egui::StrokeKind::Inside);
             painter.line_segment(
                 [
                     Pos2::new(center.x - 2.6, center.y + 0.2),

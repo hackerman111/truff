@@ -5,7 +5,7 @@ use crate::app::global_config::TypographyConfig;
 use crate::editor::{EditorInput, ProjectionMode, ScrollAnchor, VisualPos};
 use crate::overlays::FlashTarget;
 use crate::theme::Theme;
-use eframe::egui::{self, Sense, Vec2};
+use egui::{Sense, Vec2};
 use truff_core::{Buffer, text::BytePos, vim::Mode, workspace::View};
 const MAX_LINE_BYTES: usize = 4096;
 

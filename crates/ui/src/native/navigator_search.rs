@@ -3,7 +3,6 @@ use super::{
     search::{SearchKey, SearchTransport},
 };
 use crate::navigator::{NavigatorItem, NavigatorMode};
-use eframe::egui;
 use std::{borrow::Cow, sync::Arc};
 
 impl NativeApp {

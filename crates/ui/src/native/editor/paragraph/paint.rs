@@ -3,7 +3,7 @@ use super::Paragraph;
 use crate::editor::Affinity;
 use crate::overlays::FlashTarget;
 use crate::theme::Theme;
-use eframe::egui::{self, Color32, FontId, Painter, Pos2, Rect, epaint::text::PlacedRow};
+use egui::{Color32, FontId, Painter, Pos2, Rect, epaint::text::PlacedRow};
 use std::ops::Range;
 use truff_core::{text::BytePos, vim::Mode};
 
@@ -19,7 +19,7 @@ pub(in super::super) struct ParagraphView<'a> {
 const HIGHLIGHT_PAD_Y: f32 = 2.0;
 const HIGHLIGHT_PAD_X: f32 = 1.0;
 
-use eframe::egui::epaint::text::Glyph;
+use egui::epaint::text::Glyph;
 
 fn glyph_vertical_bounds(origin_y: f32, row: &PlacedRow, glyph: &Glyph) -> (f32, f32) {
     let baseline_y = origin_y + row.pos.y + glyph.pos.y;

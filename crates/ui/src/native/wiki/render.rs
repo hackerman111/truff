@@ -2,7 +2,6 @@ use super::model::{FolderWikiData, WikiTab};
 use crate::native::editor::color;
 use crate::native::{icons, widgets};
 use crate::theme::Theme;
-use eframe::egui;
 
 /// Action produced by interacting with the Folder Wiki dashboard.
 #[derive(Debug, Clone, PartialEq, Eq)]

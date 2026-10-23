@@ -1,6 +1,6 @@
 //! Standardized Zed-inspired interactive widgets (Ghost IconButtons, Primary/Secondary Buttons).
 use super::icons::{Icon, render_icon};
-use eframe::egui::{self, CornerRadius, Response, RichText, Sense, Ui, vec2};
+use egui::{CornerRadius, Response, RichText, Sense, Ui, vec2};
 
 /// Ghost icon button with 28×28 px clickable area and 5 px corner radius.
 pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {

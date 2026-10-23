@@ -1,6 +1,5 @@
 use super::{EditorWidget, LINE_HEIGHT};
 use crate::editor::{Affinity, VisualPos};
-use eframe::egui;
 use truff_core::{Buffer, text::BytePos, workspace::View};
 
 impl EditorWidget {

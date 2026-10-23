@@ -1,7 +1,6 @@
 use super::editor::color;
 use crate::app::Application;
 use crate::theme::Theme;
-use eframe::egui;
 
 pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &Theme) {
     egui::Panel::bottom("status")

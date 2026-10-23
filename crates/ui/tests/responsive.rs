@@ -1,4 +1,4 @@
-use eframe::egui::{self, Event};
+use egui::Event;
 use truff_ui::{
     app::Application,
     native::NativeApp,
@@ -201,10 +201,10 @@ fn native_persists_egui_panel_sizes() {
         .x;
     assert!(after > before + 20.0);
     let mut storage = TestStorage::default();
-    if eframe::App::persist_egui_memory(&app) {
-        ctx.memory(|memory| eframe::set_value(&mut storage, "egui", memory));
+    if app.persist_egui_memory() {
+        ctx.memory(|memory| truff_ui::native::set_value(&mut storage, "egui", memory));
     }
-    let restored = eframe::get_value(&storage, "egui").expect("egui memory saved");
+    let restored = truff_ui::native::get_value(&storage, "egui").expect("egui memory saved");
     let next = egui::Context::default();
     next.memory_mut(|memory| *memory = restored);
     let mut app = NativeApp::new(Application::new(), &next);
@@ -223,7 +223,7 @@ fn native_persists_egui_panel_sizes() {
 
 #[derive(Default)]
 struct TestStorage(std::collections::BTreeMap<String, String>);
-impl eframe::Storage for TestStorage {
+impl truff_ui::native::Storage for TestStorage {
     fn get_string(&self, key: &str) -> Option<String> {
         self.0.get(key).cloned()
     }

@@ -113,7 +113,6 @@ impl EditorWidget {
 #[cfg(test)]
 mod tests {
     use crate::{app::Application, native::NativeApp};
-    use eframe::egui;
     use truff_core::{Transaction, commands::Action};
 
     fn frame(app: &mut NativeApp, context: &egui::Context) {

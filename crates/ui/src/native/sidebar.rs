@@ -2,7 +2,6 @@ use super::editor::color;
 use super::{creation::CreationDialogs, icons, widgets};
 use crate::app::Application;
 use crate::theme::Theme;
-use eframe::egui;
 
 pub(super) fn show(
     application: &mut Application,

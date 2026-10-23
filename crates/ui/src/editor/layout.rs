@@ -14,9 +14,9 @@ pub use super::heights::{BlockInfo, HeightIndex, ScrollAnchor};
 
 /// Viewport-only paragraph shaping shared by headless measurement scenarios.
 pub struct VirtualizedLayout {
-    context: eframe::egui::Context,
+    context: egui::Context,
     font_size: f32,
-    cache: HashMap<usize, (u64, u32, std::sync::Arc<eframe::egui::Galley>)>,
+    cache: HashMap<usize, (u64, u32, std::sync::Arc<egui::Galley>)>,
     rebuild_count: usize,
 }
 
@@ -82,15 +82,15 @@ impl VirtualizedLayout {
         }
         (first..=last).collect()
     }
-    pub fn get_layout(&self, index: usize) -> Option<&std::sync::Arc<eframe::egui::Galley>> {
+    pub fn get_layout(&self, index: usize) -> Option<&std::sync::Arc<egui::Galley>> {
         self.cache.get(&index).map(|(_, _, galley)| galley)
     }
 }
 
 /// Small component-layout adapter; the production editor shapes bounded Rope windows.
 pub struct EditorLayout {
-    context: eframe::egui::Context,
-    galley: std::sync::Arc<eframe::egui::Galley>,
+    context: egui::Context,
+    galley: std::sync::Arc<egui::Galley>,
     font_size: f32,
 }
 impl Default for EditorLayout {
@@ -117,15 +117,11 @@ impl EditorLayout {
     pub fn width(&self) -> f32 {
         self.galley.size().x
     }
-    pub fn galley(&self) -> &std::sync::Arc<eframe::egui::Galley> {
+    pub fn galley(&self) -> &std::sync::Arc<egui::Galley> {
         &self.galley
     }
     pub fn hit_test(&self, text: &str, x: f32, y: f32) -> usize {
-        let index = self
-            .galley
-            .cursor_from_pos(eframe::egui::vec2(x, y))
-            .index
-            .0;
+        let index = self.galley.cursor_from_pos(egui::vec2(x, y)).index.0;
         let byte = text
             .char_indices()
             .nth(index)
@@ -133,35 +129,35 @@ impl EditorLayout {
         snap_to_grapheme_boundary(text, byte)
     }
 }
-fn font_context() -> eframe::egui::Context {
-    let context = eframe::egui::Context::default();
+fn font_context() -> egui::Context {
+    let context = egui::Context::default();
     context
         .run_ui(Default::default(), |_| {})
         .drop_without_applying_deltas();
     context
 }
 fn shape(
-    context: &eframe::egui::Context,
+    context: &egui::Context,
     text: &str,
     size: f32,
     width: Option<f32>,
-) -> std::sync::Arc<eframe::egui::Galley> {
+) -> std::sync::Arc<egui::Galley> {
     let trimmed = text.trim_start();
     let (font, line_height) = if trimmed.starts_with("# ") {
-        (eframe::egui::FontId::proportional(size * 1.375), 32.0)
+        (egui::FontId::proportional(size * 1.375), 32.0)
     } else if trimmed.starts_with("## ") {
-        (eframe::egui::FontId::proportional(size * 1.156), 28.0)
+        (egui::FontId::proportional(size * 1.156), 28.0)
     } else if trimmed.starts_with("### ") {
-        (eframe::egui::FontId::proportional(size * 1.031), 25.0)
+        (egui::FontId::proportional(size * 1.031), 25.0)
     } else if trimmed.starts_with("```") || trimmed.starts_with("    ") {
-        (eframe::egui::FontId::monospace(size * 0.875), 22.0)
+        (egui::FontId::monospace(size * 0.875), 22.0)
     } else {
-        (eframe::egui::FontId::proportional(size), 24.0)
+        (egui::FontId::proportional(size), 24.0)
     };
-    let mut job = eframe::egui::text::LayoutJob::simple(
+    let mut job = egui::text::LayoutJob::simple(
         text.to_owned(),
         font,
-        eframe::egui::Color32::WHITE,
+        egui::Color32::WHITE,
         width.filter(|width| *width > 0.0).unwrap_or(f32::INFINITY),
     );
     job.sections[0].format.line_height = Some(line_height);

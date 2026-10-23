@@ -2,7 +2,6 @@ pub mod model;
 pub mod render;
 
 use crate::theme::Theme;
-use eframe::egui;
 use truff_core::vim::Key;
 
 pub use model::{TocItem, TocItemKind, TocModel, TocScope};

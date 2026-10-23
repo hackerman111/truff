@@ -1,4 +1,4 @@
-use eframe::egui::{self, Rect, Vec2};
+use egui::{Rect, Vec2};
 use truff_core::vim::{Key, Mode, ScrollPosition};
 use truff_core::{Buffer, BytePos};
 use truff_ui::app::global_config::TypographyConfig;

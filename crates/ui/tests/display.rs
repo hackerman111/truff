@@ -274,7 +274,7 @@ fn test_editor_readable_column_and_margin() {
 
 #[test]
 fn test_typography_hierarchy_scale() {
-    use eframe::egui::{FontFamily, FontId};
+    use egui::{FontFamily, FontId};
     use truff_ui::app::global_config::TypographyConfig;
     use truff_ui::native::resolve_font_and_line_height;
 

@@ -1,6 +1,5 @@
 //! Shared geometry and styling for the existing native surfaces.
 use crate::theme::Theme;
-use eframe::egui;
 
 pub(crate) use crate::theme::style::color;
 

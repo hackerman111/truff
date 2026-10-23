@@ -1,5 +1,5 @@
 //! CPU-side egui viewport benchmark; excludes platform window, GPU, and initial layout.
-use eframe::egui::{self, Event};
+use egui::Event;
 use std::time::Instant;
 use truff_ui::{app::Application, native::NativeApp};
 

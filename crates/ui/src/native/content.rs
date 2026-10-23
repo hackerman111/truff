@@ -3,7 +3,6 @@ use super::{EditorWidget, icons, widgets};
 use crate::app::Application;
 use crate::shell::Focus;
 use crate::theme::Theme;
-use eframe::egui;
 use truff_core::text::Buffer;
 
 pub(super) fn show(

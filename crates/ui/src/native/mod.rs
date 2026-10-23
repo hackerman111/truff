@@ -1,4 +1,4 @@
-//! Native egui/glow adapter. Application owns domain state; this module owns events and paint.
+//! Native egui/softbuffer CPU adapter. Application owns domain state; this module owns events and paint.
 mod backlinks;
 mod command_bar;
 mod content;
@@ -13,7 +13,9 @@ mod navigator_search;
 mod outline;
 mod p4_actions;
 mod paint;
+pub mod rasterizer;
 mod recent;
+pub mod runner;
 mod search;
 mod sidebar;
 mod status;
@@ -25,8 +27,8 @@ pub mod wiki;
 
 use crate::app::Application;
 pub use editor::EditorWidget;
-use eframe::egui;
 pub use paint::resolve_font_and_line_height;
+pub use runner::{Storage, get_value, run_native, set_value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -288,12 +290,8 @@ impl NativeApp {
             }
         }
     }
-}
-impl eframe::App for NativeApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
-        self.show(ui);
-    }
-    fn persist_egui_memory(&self) -> bool {
+
+    pub fn persist_egui_memory(&self) -> bool {
         true
     }
 }

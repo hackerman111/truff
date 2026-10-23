@@ -1,7 +1,7 @@
 mod paint;
 use crate::app::global_config::TypographyConfig;
 use crate::editor::{DisplayMap, ProjectionMode};
-use eframe::egui::{Color32, Galley, Painter};
+use egui::{Color32, Galley, Painter};
 pub(super) use paint::ParagraphView;
 use std::ops::Range;
 use std::sync::Arc;

@@ -1,6 +1,5 @@
 use super::editor::color;
 use crate::{overlays::WhichKeyMode, shell::Shell};
-use eframe::egui;
 
 fn humanize_description(desc: &str) -> String {
     match desc {

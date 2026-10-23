@@ -1,5 +1,5 @@
 //! Production egui event path with real vault files, without a native GPU window.
-use eframe::egui::{self, Event};
+use egui::Event;
 use std::time::{Duration, Instant};
 use truff_ui::app::Application;
 use truff_ui::native::NativeApp;

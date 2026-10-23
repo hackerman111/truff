@@ -1,5 +1,5 @@
 use super::{Color, Theme};
-use eframe::egui::{self, FontId, TextStyle};
+use egui::{FontId, TextStyle};
 
 pub(crate) fn color(value: Color) -> egui::Color32 {
     let [r, g, b, a] = value.to_rgba_u8();

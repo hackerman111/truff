@@ -3,7 +3,6 @@ pub mod render;
 
 use crate::app::Application;
 use crate::theme::Theme;
-use eframe::egui;
 use truff_core::vim::Key;
 
 pub use model::{NoteStreamModel, StreamCard, StreamFilter};

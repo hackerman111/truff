@@ -229,7 +229,7 @@ fn test_navigator_normal_mode_shortcuts_and_native_app_integration() {
     use truff_ui::native::NativeApp;
     use truff_ui::shell::Focus;
 
-    let ctx = eframe::egui::Context::default();
+    let ctx = egui::Context::default();
     let mut app = NativeApp::new(Application::new(), &ctx);
     app.application
         .shell

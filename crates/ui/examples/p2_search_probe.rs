@@ -1,5 +1,4 @@
 //! Request-to-accepted-page and CPU frame timing through the production Navigator adapter.
-use eframe::egui;
 use std::{
     fs,
     time::{Duration, Instant},

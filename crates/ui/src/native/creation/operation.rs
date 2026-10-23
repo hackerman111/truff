@@ -1,5 +1,4 @@
 use crate::{app::Application, components, theme::Theme};
-use eframe::egui;
 
 enum Operation {
     Rename {

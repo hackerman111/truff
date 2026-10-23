@@ -1,5 +1,5 @@
 //! UI-P4 integration tests: Floating TOC, Folder Wiki, and Note Stream.
-use eframe::egui::{self, Event};
+use egui::Event;
 use truff_core::vim::Key;
 use truff_ui::app::Application;
 use truff_ui::native::NativeApp;

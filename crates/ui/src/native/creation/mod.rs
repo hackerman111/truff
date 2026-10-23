@@ -12,7 +12,6 @@ pub use vault::VaultDialog;
 
 use crate::app::Application;
 use crate::theme::Theme;
-use eframe::egui;
 
 #[derive(Default)]
 pub struct CreationDialogs {

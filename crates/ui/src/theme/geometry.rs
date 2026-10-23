@@ -79,8 +79,8 @@ impl GeometryTokens {
 }
 
 impl GeometryTokens {
-    pub fn navigator_size(&self, available: eframe::egui::Vec2) -> eframe::egui::Vec2 {
-        eframe::egui::vec2(
+    pub fn navigator_size(&self, available: egui::Vec2) -> egui::Vec2 {
+        egui::vec2(
             (available.x * self.navigator_width_ratio).min(self.navigator_max_width),
             available.y * self.navigator_height_ratio,
         )

@@ -2,7 +2,6 @@ use super::model::{TocItemKind, TocModel, TocScope};
 use crate::native::editor::color;
 use crate::native::{icons, widgets};
 use crate::theme::Theme;
-use eframe::egui;
 
 /// Action resulting from TOC interaction.
 #[derive(Debug, Clone, PartialEq, Eq)]

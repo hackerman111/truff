@@ -1,4 +1,3 @@
-use eframe::egui;
 use std::time::Instant;
 use truff_ui::{app::Application, editor::EditorInput, native::NativeApp};
 

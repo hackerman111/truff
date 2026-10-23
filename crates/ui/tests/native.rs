@@ -1,5 +1,5 @@
 //! Production egui event/paint path, without a platform window or GPU.
-use eframe::egui::{self, Event};
+use egui::Event;
 use truff_ui::{app::Application, native::NativeApp};
 
 fn frame(app: &mut NativeApp, context: &egui::Context, events: Vec<Event>) -> egui::FullOutput {

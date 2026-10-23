@@ -2,7 +2,6 @@ use super::super::{editor::color, icons, resolve_font_and_line_height, widgets};
 use crate::app::Application;
 use crate::components::follow_tab_focus;
 use crate::theme::Theme;
-use eframe::egui;
 
 pub struct SettingsDialog {
     pub open: bool,

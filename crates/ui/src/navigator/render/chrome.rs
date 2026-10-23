@@ -3,7 +3,6 @@ use crate::{
     navigator::{NavigatorAction, NavigatorState},
     theme::Theme,
 };
-use eframe::egui;
 
 pub(super) fn header(
     ui: &mut egui::Ui,

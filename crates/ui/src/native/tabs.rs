@@ -2,7 +2,6 @@ use super::editor::color;
 use super::icons;
 use crate::app::Application;
 use crate::theme::Theme;
-use eframe::egui;
 use truff_core::text::Buffer;
 
 pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &Theme) {

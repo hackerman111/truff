@@ -3,7 +3,6 @@ use crate::app::Application;
 use crate::native::toc::{FloatingToc, TocAction};
 use crate::shell::Focus;
 use crate::theme::Theme;
-use eframe::egui;
 
 pub(super) fn show(
     application: &mut Application,

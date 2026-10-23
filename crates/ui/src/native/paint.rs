@@ -1,6 +1,6 @@
 use crate::app::global_config::TypographyConfig;
 use crate::editor::{Affinity, DisplayMap, InlineStyle};
-use eframe::egui::{self, Color32, FontId, Galley, Painter};
+use egui::{Color32, FontId, Galley, Painter};
 use std::sync::Arc;
 use truff_core::text::BytePos;
 

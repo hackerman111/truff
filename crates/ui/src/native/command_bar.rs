@@ -1,5 +1,4 @@
 use crate::{app::Application, components::color, theme::Theme};
-use eframe::egui;
 
 pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &Theme) {
     let Some(input) = application.shell.command_input_mut() else {

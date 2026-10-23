@@ -1,4 +1,4 @@
-use eframe::egui::{self, Event};
+use egui::Event;
 use truff_core::{
     commands::CommandId,
     config::{KeyBinding, KeymapConfig},

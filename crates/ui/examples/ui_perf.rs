@@ -1,7 +1,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use eframe::egui::{self, Event};
+use egui::Event;
 use truff_ui::{
     app::Application,
     native::NativeApp,

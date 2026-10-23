@@ -9,7 +9,7 @@ use paragraph::Paragraph;
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use eframe::egui::{Color32, Rect};
+use egui::{Color32, Rect};
 
 use crate::editor::HeightIndex;
 use crate::theme::Color;
@@ -40,7 +40,7 @@ pub struct EditorWidget {
     revision: Option<u64>,
     syntax: syntax::EditorSyntax,
     view_scrolls: BTreeMap<truff_core::workspace::ViewId, ViewScroll>,
-    last_viewport: Option<eframe::egui::Rect>,
+    last_viewport: Option<egui::Rect>,
     follow_pending: bool,
     pending_scroll_pos: Option<truff_core::vim::ScrollPosition>,
     pub(in crate::native) input_blocked: bool,
@@ -102,6 +102,6 @@ impl EditorWidget {
     pub fn char_rect(&self, line: usize, source_byte: usize) -> Option<Rect> {
         self.cache
             .get(&line)
-            .map(|entry| entry.char_rect_at(eframe::egui::Pos2::ZERO, source_byte))
+            .map(|entry| entry.char_rect_at(egui::Pos2::ZERO, source_byte))
     }
 }

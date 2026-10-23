@@ -3,7 +3,6 @@
 mod counting_allocator;
 
 use counting_allocator::{CountingAllocator, measure};
-use eframe::egui;
 use truff_core::text::{Buffer, BytePos};
 use truff_ui::{
     app::Application,

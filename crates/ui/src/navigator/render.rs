@@ -1,6 +1,5 @@
 use super::model::{NavigatorAction, NavigatorState};
 use crate::{components, theme::Theme};
-use eframe::egui;
 
 mod chrome;
 mod list;

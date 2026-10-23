@@ -1,5 +1,5 @@
 //! CPU-side production egui frames; excludes GPU presentation and native input latency.
-use eframe::egui::{self, Event};
+use egui::Event;
 use std::time::Instant;
 use truff_ui::{
     app::Application,
