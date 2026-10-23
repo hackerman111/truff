@@ -168,6 +168,11 @@ pub(super) fn shape(
                             Color32::from_rgba_unmultiplied(136, 192, 208, 180),
                         );
                     }
+                    InlineStyle::Tag(tag_name) => {
+                        let [r, g, b, _] = crate::theme::resolve_tag_rgba(tag_name);
+                        format.color = Color32::from_rgb(r, g, b);
+                        format.background = Color32::from_rgba_unmultiplied(r, g, b, 52);
+                    }
                     InlineStyle::TextColor([r, g, b, a]) => {
                         format.color = Color32::from_rgba_unmultiplied(*r, *g, *b, *a);
                     }

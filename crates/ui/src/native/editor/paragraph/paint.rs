@@ -279,6 +279,55 @@ impl Paragraph {
                 egui::Stroke::new(2.5, color(view.theme.accent).gamma_multiply(0.65)),
             );
         }
+        let src = self.display.source_text();
+        let leading_ws = &src[..src.len() - src.trim_start_matches([' ', '\t']).len()];
+        if !leading_ws.is_empty() {
+            let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
+            let left_base_x = origin.x - self.text_indent;
+            let mut space_cols = 0usize;
+            let mut tab_levels = Vec::new();
+            for ch in leading_ws.chars() {
+                if ch == '\t' {
+                    let level = space_cols / 2;
+                    tab_levels.push((level, true));
+                    space_cols = (level + 1) * 2;
+                } else {
+                    space_cols += 1;
+                    if space_cols.is_multiple_of(2) {
+                        tab_levels.push((space_cols / 2 - 1, false));
+                    }
+                }
+            }
+            let is_active_line = view
+                .cursor
+                .is_some_and(|cursor| self.range.contains(&cursor) || cursor == self.range.end);
+            let step_x = 14.0;
+            for (level, is_tab) in tab_levels {
+                let guide_x = (left_base_x + (level as f32) * step_x + 4.0).round();
+                let guide_color = if is_active_line {
+                    color(view.theme.accent).gamma_multiply(0.55)
+                } else {
+                    color(view.theme.accent).gamma_multiply(0.28)
+                };
+                painter.line_segment(
+                    [
+                        Pos2::new(guide_x, min_y + 1.0),
+                        Pos2::new(guide_x, max_y - 1.0),
+                    ],
+                    egui::Stroke::new(if is_active_line { 1.8 } else { 1.2 }, guide_color),
+                );
+                if is_tab {
+                    let mid_y = (min_y + max_y) * 0.5;
+                    painter.line_segment(
+                        [
+                            Pos2::new(guide_x + 2.0, mid_y),
+                            Pos2::new(guide_x + step_x - 3.0, mid_y),
+                        ],
+                        egui::Stroke::new(1.4, color(view.theme.accent).gamma_multiply(0.5)),
+                    );
+                }
+            }
+        }
         painter.galley(origin, self.galley.clone(), self.color);
         if self.display.is_rule_hidden() {
             let y = (origin.y + self.galley.size().y * 0.5).round();

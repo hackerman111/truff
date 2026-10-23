@@ -60,6 +60,8 @@ pub struct GlobalConfig {
     pub themes: BTreeMap<String, CustomThemeConfig>,
     #[serde(default)]
     pub typography: TypographyConfig,
+    #[serde(default)]
+    pub tag_colors: BTreeMap<String, String>,
 }
 
 impl Default for GlobalConfig {
@@ -70,6 +72,7 @@ impl Default for GlobalConfig {
             theme: default_theme(),
             themes: BTreeMap::new(),
             typography: TypographyConfig::default(),
+            tag_colors: BTreeMap::new(),
         }
     }
 }
@@ -115,6 +118,7 @@ impl GlobalConfig {
         if config.prune_nonexistent() {
             let _ = config.save();
         }
+        crate::theme::set_global_tag_colors(&config.tag_colors);
         config
     }
 
@@ -139,6 +143,7 @@ impl GlobalConfig {
 
     /// Saves the global configuration atomically to `config.toml`.
     pub fn save(&self) -> io::Result<()> {
+        crate::theme::set_global_tag_colors(&self.tag_colors);
         let Some(path) = Self::config_path() else {
             return Ok(());
         };

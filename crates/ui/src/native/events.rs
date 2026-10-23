@@ -38,6 +38,25 @@ impl NativeApp {
             self.handle_toc_action(action);
             return;
         }
+        if self.application.database_view_open && self.database.feed_key(key, &mut self.application)
+        {
+            return;
+        }
+        if self.application.graph_view_open {
+            match key {
+                Key::Esc | Key::Char('q') => {
+                    self.application.graph_view_open = false;
+                    self.application.status = "Редактор".into();
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if self.application.is_active_note_kanban()
+            && self.kanban.feed_key(key, &mut self.application)
+        {
+            return;
+        }
         if self.application.file_operation_pending()
             || self.dialogs.is_any_open()
             || self.navigator.is_open()
@@ -265,6 +284,8 @@ impl NativeApp {
         if !help_owned
             && !navigator_owned
             && self.application.shell.command().is_none()
+            && !self.kanban.is_editing_text()
+            && !self.database.editing_query
             && context.egui_wants_keyboard_input()
         {
             // The only egui text fields live in these overlays; a closed field can retain focus for one frame.
@@ -396,8 +417,17 @@ impl NativeApp {
                         }
                         continue;
                     }
-                    if self.application.shell.mode() == Mode::Insert
+                    if (self.kanban.is_editing_text() || self.database.editing_query)
+                        && !help
+                        && !self.navigator.is_open()
                         && self.application.shell.command().is_none()
+                    {
+                        field_events.push(Event::Text(text));
+                    } else if self.application.shell.mode() == Mode::Insert
+                        && self.application.shell.command().is_none()
+                        && !self.application.graph_view_open
+                        && !self.application.database_view_open
+                        && !self.application.is_active_note_kanban()
                     {
                         if self.application.shell.focus() != Focus::Editor {
                             self.application.shell.set_focus(Focus::Editor);
@@ -423,6 +453,12 @@ impl NativeApp {
                         if help && self.application.shell.which_key().help.inserting {
                             field_events.push(Event::Paste(text));
                         }
+                        continue;
+                    }
+                    if (self.kanban.is_editing_text() || self.database.editing_query)
+                        && self.application.shell.command().is_none()
+                    {
+                        field_events.push(Event::Paste(text));
                         continue;
                     }
                     if self.application.shell.command().is_some() {
@@ -507,6 +543,12 @@ impl NativeApp {
                             false,
                         );
                         self.handle_navigator_action(action);
+                        continue;
+                    }
+                    if (self.kanban.is_editing_text() || self.database.editing_query)
+                        && !matches!(key, egui::Key::Escape | egui::Key::Enter)
+                    {
+                        field_events.push(event);
                         continue;
                     }
                     let key = match key {

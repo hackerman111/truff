@@ -3,11 +3,14 @@ mod backlinks;
 mod command_bar;
 mod content;
 pub mod creation;
+pub mod database;
 mod editor;
 mod events;
 mod file_commands;
+pub mod graph;
 mod hints;
 pub mod icons;
+pub mod kanban;
 mod navigator;
 mod navigator_search;
 mod outline;
@@ -67,6 +70,9 @@ pub struct NativeApp {
     pub toc: toc::FloatingToc,
     pub wiki: wiki::FolderWiki,
     pub stream: stream::NoteStream,
+    pub graph: graph::GraphWidget,
+    pub kanban: kanban::KanbanWidget,
+    pub database: database::DatabaseWidget,
     hints_tick: Instant,
     last_typography: crate::app::global_config::TypographyConfig,
     last_theme: Option<crate::theme::Theme>,
@@ -94,6 +100,9 @@ impl NativeApp {
             toc: toc::FloatingToc::new(),
             wiki: wiki::FolderWiki::new(),
             stream: stream::NoteStream::new(),
+            graph: graph::GraphWidget::default(),
+            kanban: kanban::KanbanWidget::default(),
+            database: database::DatabaseWidget::default(),
             last_typography,
             last_theme: None,
             recent_vaults: recent::RecentVaults::default(),
@@ -221,7 +230,13 @@ impl NativeApp {
                 ui,
                 &theme,
             );
-            let dock_toc_action = backlinks::show(&mut self.application, &mut self.toc, ui, &theme);
+            let dock_toc_action = backlinks::show(
+                &mut self.application,
+                &mut self.toc,
+                &mut self.graph,
+                ui,
+                &theme,
+            );
             self.handle_toc_action(dock_toc_action);
         }
         self.editor.input_blocked = self.application.shell.command().is_some()
@@ -232,11 +247,17 @@ impl NativeApp {
             || (self.toc.is_open && !self.toc.is_pinned)
             || (self.application.shell.which_key().is_visible()
                 && self.application.shell.which_key().mode()
-                    == crate::overlays::WhichKeyMode::Help);
+                    == crate::overlays::WhichKeyMode::Help)
+            || self.application.graph_view_open
+            || self.application.database_view_open
+            || self.application.is_active_note_kanban();
         self.editor.retain_views(self.application.shell.workspace());
         let open_vault = content::show(
             &mut self.application,
             &mut self.editor,
+            &mut self.graph,
+            &mut self.kanban,
+            &mut self.database,
             &mut self.recent_vaults,
             ui,
             &theme,

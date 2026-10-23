@@ -188,6 +188,103 @@ impl Application {
                 self.status = "Лента заметок (Note Stream)".into();
                 Ok(())
             }
+            "graph" => {
+                if argument.eq_ignore_ascii_case("dock") || argument.eq_ignore_ascii_case("panel") {
+                    self.right_dock_tab_requested = Some(3);
+                    self.right_dock_visible = true;
+                    self.status = "Граф открыт в правой панели".into();
+                } else {
+                    self.graph_view_open = !self.graph_view_open;
+                    if self.graph_view_open {
+                        self.database_view_open = false;
+                    }
+                    self.status = if self.graph_view_open {
+                        "Интерактивный граф открыт (:graph для возврата)"
+                    } else {
+                        "Редактор"
+                    }
+                    .into();
+                }
+                Ok(())
+            }
+            "kanban" | "board" => {
+                let next_state = !self.is_active_note_kanban();
+                self.kanban_mode_override = Some(next_state);
+                self.graph_view_open = false;
+                self.database_view_open = false;
+                self.status = if next_state {
+                    "Режим Канбан-доски включен (:kanban для возврата в текст)"
+                } else {
+                    "Текстовый режим редактора"
+                }
+                .into();
+                Ok(())
+            }
+            "database" | "sql" | "db" => {
+                self.database_view_open = !self.database_view_open;
+                if self.database_view_open {
+                    self.graph_view_open = false;
+                }
+                self.status = if self.database_view_open {
+                    "SQL база данных открыта (:database или Esc для возврата)"
+                } else {
+                    "Редактор"
+                }
+                .into();
+                Ok(())
+            }
+            "tags" => {
+                self.right_dock_tab_requested = Some(2);
+                self.right_dock_visible = true;
+                self.status = "Панель тегов открыта справа".into();
+                Ok(())
+            }
+            "template" => {
+                let kind = if argument.is_empty() {
+                    truff_core::markdown::NoteTemplateKind::ZettelkastenPermanent
+                } else {
+                    truff_core::markdown::NoteTemplateKind::parse_alias(argument)
+                        .ok_or("Usage: :template <zk | lit | fleeting | wiki | kanban | sql>")?
+                };
+                let title = self
+                    .active_relative_path()
+                    .and_then(|p| {
+                        std::path::Path::new(&p)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_else(|| "Новая заметка".to_string());
+                let rendered = truff_core::markdown::render_template(kind, &title, "2026-10-23");
+                let buf = self.shell.editor_buffer().ok_or("Open a note first")?;
+                let len = buf.byte_len();
+                let tx = if buf.as_str().trim().is_empty() {
+                    truff_core::Transaction::replace(0..len, rendered)
+                } else {
+                    truff_core::Transaction::insert(len, format!("\n{rendered}"))
+                };
+                self.apply_active_transaction(tx)?;
+                self.status = format!("Шаблон «{}» применен (u для отмены)", kind.label_ru());
+                Ok(())
+            }
+            "wiki-sync" => {
+                let target_folder = if argument.is_empty() {
+                    self.active_relative_path()
+                        .and_then(|p| {
+                            std::path::Path::new(&p)
+                                .parent()
+                                .and_then(|d| d.to_str())
+                                .map(str::to_owned)
+                        })
+                        .unwrap_or_default()
+                } else {
+                    argument.to_owned()
+                };
+                let master_rel = self.sync_folder_wiki_master(&target_folder)?;
+                let _ = self.open_note(&master_rel);
+                self.status = format!("Мастер-файл {master_rel} синхронизирован");
+                Ok(())
+            }
             _ => Err(format!("Unknown command: {command}").into()),
         }
     }

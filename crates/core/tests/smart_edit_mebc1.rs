@@ -220,3 +220,20 @@ fn test_mebc1_enter_list_continuation_dedup() {
     b.apply(tx).unwrap();
     assert_eq!(b.as_str(), "- [ ] item 1\n- [ ] item 2");
 }
+
+#[test]
+fn test_plan_enter_auto_aligns_list_indentation() {
+    // Tab-indented list item normalizes both current and new line to 2-space indent stops
+    let mut b = Buffer::from_str("\t- Sub item");
+    let cursor = BytePos::new("\t- Sub item".len());
+    let tx = plan_enter(&b, cursor).expect("enter on tab-indented list item");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "  - Sub item\n  - ");
+
+    // Odd 3-space indented list item aligns to 2-space step (4 spaces)
+    let mut b = Buffer::from_str("   - Misaligned item");
+    let cursor = BytePos::new("   - Misaligned item".len());
+    let tx = plan_enter(&b, cursor).expect("enter on 3-space misaligned item");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "    - Misaligned item\n    - ");
+}

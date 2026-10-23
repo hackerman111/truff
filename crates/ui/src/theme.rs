@@ -381,3 +381,68 @@ impl Theme {
         self.bg_primary.r < 0.5
     }
 }
+
+pub const TAG_PALETTE: &[(&str, &str, [u8; 4])] = &[
+    ("cyan", "Бирюзовый", [136, 192, 208, 255]),
+    ("gold", "Золотой", [235, 203, 139, 255]),
+    ("emerald", "Изумрудный", [163, 190, 140, 255]),
+    ("rose", "Розовый", [191, 97, 106, 255]),
+    ("violet", "Фиолетовый", [180, 142, 173, 255]),
+    ("sky", "Синий", [129, 161, 193, 255]),
+    ("coral", "Коралловый", [208, 135, 112, 255]),
+    ("sage", "Мятный", [143, 188, 187, 255]),
+];
+
+static GLOBAL_TAG_COLORS: std::sync::OnceLock<
+    std::sync::RwLock<std::collections::BTreeMap<String, String>>,
+> = std::sync::OnceLock::new();
+
+fn tag_color_store() -> &'static std::sync::RwLock<std::collections::BTreeMap<String, String>> {
+    GLOBAL_TAG_COLORS.get_or_init(|| std::sync::RwLock::new(std::collections::BTreeMap::new()))
+}
+
+pub fn set_global_tag_colors(map: &std::collections::BTreeMap<String, String>) {
+    if let Ok(mut guard) = tag_color_store().write() {
+        *guard = map
+            .iter()
+            .map(|(k, v)| (k.trim_start_matches('#').to_lowercase(), v.clone()))
+            .collect();
+    }
+}
+
+pub fn resolve_palette_color_by_name(name: &str) -> Option<[u8; 4]> {
+    let clean = name.trim().to_ascii_lowercase();
+    for (key, _, rgba) in TAG_PALETTE {
+        if *key == clean {
+            return Some(*rgba);
+        }
+    }
+    Color::from_hex(&clean).map(Color::to_rgba_u8)
+}
+
+pub fn next_palette_color_name(current: Option<&str>) -> &'static str {
+    let Some(cur) = current else {
+        return TAG_PALETTE[0].0;
+    };
+    let clean = cur.trim().to_ascii_lowercase();
+    if let Some(pos) = TAG_PALETTE.iter().position(|(k, _, _)| *k == clean) {
+        TAG_PALETTE[(pos + 1) % TAG_PALETTE.len()].0
+    } else {
+        TAG_PALETTE[0].0
+    }
+}
+
+pub fn resolve_tag_rgba(tag: &str) -> [u8; 4] {
+    let clean = tag.trim().trim_start_matches('#').to_lowercase();
+    if let Ok(guard) = tag_color_store().read()
+        && let Some(color_name) = guard.get(&clean)
+        && let Some(rgba) = resolve_palette_color_by_name(color_name)
+    {
+        return rgba;
+    }
+    let mut hash: usize = 5381;
+    for b in clean.bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(b as usize);
+    }
+    TAG_PALETTE[hash % TAG_PALETTE.len()].2
+}

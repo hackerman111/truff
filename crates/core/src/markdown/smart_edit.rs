@@ -162,7 +162,13 @@ fn is_in_code_block_or_frontmatter_or_table(buffer: &Buffer, pos: usize) -> bool
     }
     for cb in &snapshot.code_blocks {
         if cb.range.contains(&pos) || (pos == cb.range.end && !cb.range.is_empty()) {
-            return true;
+            let block_head = buffer
+                .slice(cb.range.start..cb.range.end.min(cb.range.start + 16))
+                .to_string();
+            let trimmed = block_head.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                return true;
+            }
         }
     }
     for t in &snapshot.tables {
@@ -232,6 +238,17 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
         );
     }
 
+    // Auto-align indentation: normalize tabs (2 spaces per tab) and snap odd space counts
+    // to 2-space tab stops so nested list items stay cleanly aligned.
+    let raw_spaces: usize = parsed
+        .indent
+        .bytes()
+        .map(|b| if b == b'\t' { 2 } else { 1 })
+        .sum();
+    let aligned_spaces = raw_spaces.div_ceil(2) * 2;
+    let normalized_indent = " ".repeat(aligned_spaces);
+    let indent_needs_fix = normalized_indent != parsed.indent;
+
     // If cursor is before content_start, clamp split point to content_start
     let split_pos = pos.max(parsed.content_start);
     let rel_split = split_pos.saturating_sub(parsed.line_start);
@@ -245,7 +262,7 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     let needed_indent = if has_indent {
         ""
     } else {
-        parsed.indent.as_str()
+        normalized_indent.as_str()
     };
 
     let next_prefix = match parsed.kind {
@@ -254,7 +271,7 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
             if rem.starts_with(&marker) {
                 format!("{}{}", parsed.quote_prefix, needed_indent)
             } else {
-                format!("{}{}{b} ", parsed.quote_prefix, parsed.indent)
+                format!("{}{}{b} ", parsed.quote_prefix, normalized_indent)
             }
         }
         MarkerKind::Task { bullet, .. } => {
@@ -269,7 +286,7 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
             } else if has_checkbox_only {
                 format!("{}{}{bullet} ", parsed.quote_prefix, needed_indent)
             } else {
-                format!("{}{}{bullet} [ ] ", parsed.quote_prefix, parsed.indent)
+                format!("{}{}{bullet} [ ] ", parsed.quote_prefix, normalized_indent)
             }
         }
         MarkerKind::Ordered { number, delimiter } => {
@@ -284,7 +301,7 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
                 format!(
                     "{}{}{}{} ",
                     parsed.quote_prefix,
-                    parsed.indent,
+                    normalized_indent,
                     number + 1,
                     delimiter
                 )
@@ -294,11 +311,23 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     };
 
     let inserted = format!("{nl}{next_prefix}");
-    let new_cursor = BytePos::new(split_pos + inserted.len());
-    let tx = Transaction::new()
-        .with_edit(SingleEdit::insert(split_pos, inserted))
-        .with_cursor(new_cursor, new_cursor)
-        .with_undo_group(group);
+    let mut tx = Transaction::new().with_undo_group(group);
+    let indent_delta: isize = if indent_needs_fix {
+        let indent_start = parsed.line_start + parsed.quote_prefix.len();
+        let indent_end = indent_start + parsed.indent.len();
+        let delta = normalized_indent.len() as isize - parsed.indent.len() as isize;
+        tx.edits.push(SingleEdit::replace(
+            indent_start..indent_end,
+            normalized_indent,
+        ));
+        delta
+    } else {
+        0
+    };
+    tx.edits.push(SingleEdit::insert(split_pos, &inserted));
+    let new_cursor =
+        BytePos::new((split_pos as isize + indent_delta + inserted.len() as isize).max(0) as usize);
+    let tx = tx.with_cursor(new_cursor, new_cursor);
 
     // Numbering per §3.1: "автоматически увеличивается число только у нового пункта,
     // не производится массовая перенумерация документа."

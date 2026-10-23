@@ -269,6 +269,14 @@ impl DisplayMap {
                 });
                 start = close + 2;
             }
+            for tag in
+                truff_core::markdown::facts::extract_inline_tags(&text[range.clone()], &[], &[])
+            {
+                self.styles.push(StyledSpan {
+                    content: (range.start + tag.range.start)..(range.start + tag.range.end),
+                    style: InlineStyle::Tag(tag.name),
+                });
+            }
         }
         // Obsidian ==highlight== syntax
         let mut h_start = 0;

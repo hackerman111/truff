@@ -98,6 +98,25 @@ impl Application {
             } else {
                 self.status = "Note loaded".into();
             }
+            if let Some((tmpl_path, tmpl_kind)) = self.pending_template.clone()
+                && self.active_relative_path().as_deref() == Some(tmpl_path.as_str())
+            {
+                self.pending_template = None;
+                let title = std::path::Path::new(&tmpl_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Заметка");
+                let rendered =
+                    truff_core::markdown::render_template(tmpl_kind, title, "2026-10-23");
+                if let Some(buf) = self.shell.editor_buffer() {
+                    let len = buf.byte_len();
+                    let _ = self.apply_active_transaction(truff_core::Transaction::replace(
+                        0..len,
+                        rendered,
+                    ));
+                    let _ = self.save(false);
+                }
+            }
         }
         if saved {
             if self

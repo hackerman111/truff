@@ -5,9 +5,13 @@ use crate::shell::Focus;
 use crate::theme::Theme;
 use truff_core::text::Buffer;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn show(
     application: &mut Application,
     editor: &mut EditorWidget,
+    graph: &mut super::graph::GraphWidget,
+    kanban: &mut super::kanban::KanbanWidget,
+    database: &mut super::database::DatabaseWidget,
     recent: &mut super::recent::RecentVaults,
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -19,11 +23,77 @@ pub(super) fn show(
                 .shell
                 .editor_buffer()
                 .is_none_or(Buffer::is_empty)
-            && application.shell.mode() == truff_core::vim::Mode::Normal;
+            && application.shell.mode() == truff_core::vim::Mode::Normal
+            && !application.graph_view_open
+            && !application.database_view_open;
 
         if is_welcome_screen {
             open_vault = show_welcome_screen(application, recent, ui, theme);
+        } else if application.graph_view_open {
+            graph.show(ui, application, theme, false);
+        } else if application.database_view_open {
+            database.show(ui, application, theme);
+        } else if application.is_active_note_kanban() {
+            kanban.show(ui, application, theme);
         } else {
+            let show_inline_blocks = matches!(
+                application.projection(),
+                crate::editor::ProjectionMode::LivePreview | crate::editor::ProjectionMode::Reading
+            );
+            if show_inline_blocks {
+                let (graph_blocks, sql_blocks) = application
+                    .shell
+                    .editor_buffer()
+                    .map(|b| {
+                        let s = b.as_str();
+                        (
+                            truff_core::markdown::extract_graph_blocks(&s),
+                            truff_core::markdown::extract_sql_blocks(&s),
+                        )
+                    })
+                    .unwrap_or_default();
+
+                if !graph_blocks.is_empty() || !sql_blocks.is_empty() {
+                    egui::Panel::bottom("inline_blocks_preview_panel")
+                        .resizable(true)
+                        .default_size(240.0)
+                        .min_size(140.0)
+                        .max_size(460.0)
+                        .frame(
+                            egui::Frame::new()
+                                .fill(color(theme.bg_primary))
+                                .inner_margin(egui::Margin::symmetric(12, 6)),
+                        )
+                        .show(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("inline_blocks_scroll")
+                                .show(ui, |ui| {
+                                    for (idx, gblock) in graph_blocks.iter().enumerate() {
+                                        super::graph::render_inline_graph_preview(
+                                            ui,
+                                            application,
+                                            theme,
+                                            idx,
+                                            &gblock.config,
+                                            gblock.range.clone(),
+                                        );
+                                        ui.add_space(6.0);
+                                    }
+                                    for (idx, sblock) in sql_blocks.iter().enumerate() {
+                                        super::database::render_inline_sql_table(
+                                            ui,
+                                            application,
+                                            theme,
+                                            idx,
+                                            &sblock.query,
+                                        );
+                                        ui.add_space(6.0);
+                                    }
+                                });
+                        });
+                }
+            }
+
             let shell = &application.shell;
             let input = editor.show(
                 ui,

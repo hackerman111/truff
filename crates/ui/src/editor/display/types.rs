@@ -31,6 +31,7 @@ pub enum InlineStyle {
     Strikethrough,
     Code,
     Link,
+    Tag(String),
     TextColor([u8; 4]),
     Highlight([u8; 4]),
     Math,
