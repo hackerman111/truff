@@ -260,8 +260,8 @@ fn test_editor_readable_column_and_margin() {
     let available_width = 1200.0;
     let (content_width, margin_x) =
         truff_ui::native::EditorWidget::calculate_column_metrics(available_width);
-    assert_eq!(content_width, 800.0);
-    assert_eq!(margin_x, (1200.0 - 800.0) / 2.0);
+    assert_eq!(content_width, 720.0);
+    assert_eq!(margin_x, (1200.0 - 720.0) / 2.0);
     assert_eq!(truff_ui::native::EditorWidget::TOP_MARGIN, 48.0);
 
     // Narrow window clamps to available_width - 48
@@ -313,7 +313,7 @@ fn test_typography_hierarchy_scale() {
     let (f_body_scaled, lh_body_scaled) =
         resolve_font_and_line_height("Regular markdown text", &scaled_typo);
     assert_eq!(f_body_scaled, FontId::new(20.0, FontFamily::Proportional));
-    assert_eq!(lh_body_scaled, 30.0);
+    assert_eq!(lh_body_scaled, 31.0);
 
     let (f_code_scaled, lh_code_scaled) = resolve_font_and_line_height("```rust", &scaled_typo);
     assert_eq!(f_code_scaled, FontId::new(20.0, FontFamily::Monospace));
@@ -343,7 +343,7 @@ fn list_projection_keeps_unicode_text_and_maps_rendered_markers_to_source() {
     map.set_cursor(BytePos::new(text.len() + 1));
     assert_eq!(
         map.visual_text(),
-        "• верх\n  ◦ вложенный\n    ▪ глубже\n☐ задача\n☑ готово\n"
+        "• верх\n  ◦ вложенный\n    • глубже\n☐ задача\n☑ готово\n"
     );
     for word in ["верх", "вложенный", "глубже", "задача", "готово"] {
         let source = text.find(word).unwrap();
@@ -558,4 +558,40 @@ fn test_thematic_break_highlight_and_math() {
             .any(|s| s.style == InlineStyle::TextColor([76, 86, 106, 200])),
         "Table delimiter row should be styled with subtle border color"
     );
+
+    // 5. Arrow rendering `-->` into `→`
+    let arrow_text = "from --> to and <- back";
+    let mut display_arr = DisplayMap::new(arrow_text, ProjectionMode::LivePreview);
+    display_arr.set_cursor(BytePos::new(0));
+    assert_eq!(
+        display_arr.visual_text(),
+        "from → to and ← back",
+        "Arrows --> and <- should render as Unicode arrows in live preview"
+    );
+    display_arr.set_cursor(BytePos::new(6)); // cursor touching -->
+    assert_eq!(
+        display_arr.visual_text(),
+        "from --> to and ← back",
+        "Cursor touching --> should reveal raw source"
+    );
+
+    let ctx = egui::Context::default();
+    truff_ui::native::configure_fonts(
+        &ctx,
+        &truff_ui::app::global_config::TypographyConfig::default(),
+    );
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let galley = ui.painter().layout_no_wrap(
+            "→ ← ↔".to_owned(),
+            egui::FontId::proportional(14.0),
+            egui::Color32::WHITE,
+        );
+        assert_eq!(galley.rows[0].glyphs.len(), 5);
+        for g in &galley.rows[0].glyphs {
+            if g.chr != ' ' {
+                assert!(!g.uv_rect.is_nothing());
+            }
+        }
+    });
+    output.textures_delta.clear();
 }

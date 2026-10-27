@@ -124,6 +124,7 @@ impl Application {
         self.shell.set_right_panel_available(false);
         self.pending_location = None;
         self.apply_effects(effects)?;
+        self.close_unused_scratch_views();
         if let Some(path) = self.active_relative_path() {
             self.shell.select_sidebar_file(&path);
         }

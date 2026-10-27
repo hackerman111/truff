@@ -16,6 +16,9 @@ impl NativeApp {
                     .unwrap_or("Хранилище");
                 let title = format!("Vault / {vault_name}");
 
+                if let Some(path) = self.application.active_relative_path() {
+                    self.application.shell.select_sidebar_file(&path);
+                }
                 let all_rows = self.application.shell.sidebar_model().all_items();
                 let mut items = Vec::with_capacity(all_rows.len());
                 let mut parents: Vec<&str> = Vec::with_capacity(8);

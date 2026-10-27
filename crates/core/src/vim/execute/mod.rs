@@ -38,6 +38,7 @@ pub struct VimState {
     syntax_objects: Vec<SyntaxObjectRange>,
     replaying_edit: bool,
     marks: HashMap<char, usize>,
+    last_yanked: Option<String>,
 }
 impl Default for VimState {
     fn default() -> Self {
@@ -65,12 +66,16 @@ impl Default for VimState {
             syntax_objects: Vec::new(),
             replaying_edit: false,
             marks: HashMap::new(),
+            last_yanked: None,
         }
     }
 }
 impl VimState {
     pub fn new() -> Self {
         Self::default()
+    }
+    pub fn take_last_yank(&mut self) -> Option<String> {
+        self.last_yanked.take()
     }
     pub fn cancel_input(&mut self) {
         if !self.current_edit.is_empty() {

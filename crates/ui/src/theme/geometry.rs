@@ -37,42 +37,42 @@ impl GeometryTokens {
     }
     pub const fn compact() -> Self {
         Self {
-            tab_height: 32.0,
-            tree_row_height: 28.0,
+            tab_height: 34.0,
+            tree_row_height: 30.0,
             status_height: 26.0,
-            sidebar_default_width: 280.0,
-            markdown_max_width: 800.0,
-            corner_radius: 5.0,
+            sidebar_default_width: 260.0,
+            markdown_max_width: 720.0,
+            corner_radius: 6.0,
             border_width: 1.0,
             ui_font_size: 13.0,
-            editor_font_size: 14.0,
+            editor_font_size: 15.0,
             list_row_height: 36.0,
             overlay_radius: 8,
             navigator_max_width: 1360.0,
             navigator_width_ratio: 0.86,
             navigator_height_ratio: 0.80,
-            right_default_width: 320.0,
+            right_default_width: 300.0,
             dialog_width: 560.0,
         }
     }
 
     pub const fn comfortable() -> Self {
         Self {
-            tab_height: 36.0,
-            tree_row_height: 38.0,
+            tab_height: 38.0,
+            tree_row_height: 36.0,
             status_height: 28.0,
-            sidebar_default_width: 320.0,
-            markdown_max_width: 850.0,
+            sidebar_default_width: 300.0,
+            markdown_max_width: 750.0,
             corner_radius: 6.0,
             border_width: 1.0,
             ui_font_size: 14.0,
-            editor_font_size: 15.0,
+            editor_font_size: 16.0,
             list_row_height: 42.0,
             overlay_radius: 10,
             navigator_max_width: 1360.0,
             navigator_width_ratio: 0.86,
             navigator_height_ratio: 0.80,
-            right_default_width: 360.0,
+            right_default_width: 340.0,
             dialog_width: 600.0,
         }
     }

@@ -1,12 +1,14 @@
 mod file;
 mod folder;
 mod operation;
+mod quit_confirm;
 mod settings;
 mod vault;
 
 pub use file::FileDialog;
 pub use folder::FolderDialog;
 pub use operation::OperationDialog;
+pub use quit_confirm::QuitConfirmDialog;
 pub use settings::SettingsDialog;
 pub use vault::VaultDialog;
 
@@ -20,6 +22,7 @@ pub struct CreationDialogs {
     pub folder: FolderDialog,
     pub settings: SettingsDialog,
     pub operation: OperationDialog,
+    pub quit_confirm: QuitConfirmDialog,
 }
 
 impl CreationDialogs {
@@ -29,6 +32,7 @@ impl CreationDialogs {
             || self.file.open
             || self.folder.open
             || self.settings.open
+            || self.quit_confirm.open
     }
 
     pub(super) fn show(
@@ -42,5 +46,6 @@ impl CreationDialogs {
         self.folder.show(application, context, theme);
         self.settings.show(application, context, theme);
         self.operation.show(application, context, theme);
+        self.quit_confirm.show(application, context, theme);
     }
 }

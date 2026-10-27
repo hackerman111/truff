@@ -22,6 +22,7 @@ impl EditorWidget {
         typography: &TypographyConfig,
         preedit: Option<&str>,
         flash: &[FlashTarget],
+        note_title: Option<&str>,
     ) -> Option<EditorInput> {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
@@ -233,13 +234,23 @@ impl EditorWidget {
                         .map(|syntax| syntax.line_presentation(range.clone()))
                         .unwrap_or_default();
                     if let Some(list) = &mut presentation.list {
-                        list.range.start -= range.start;
-                        list.range.end -= range.start;
+                        list.range.start = list.range.start.saturating_sub(range.start);
+                        list.range.end = list
+                            .range
+                            .end
+                            .saturating_sub(range.start)
+                            .min(slice.byte_len());
+                        let line_str = slice.to_string();
+                        let ws_len = line_str[list.range.start..list.range.end]
+                            .bytes()
+                            .take_while(|b| *b == b' ' || *b == b'\t')
+                            .count();
+                        list.range.start += ws_len;
                         if let truff_core::markdown::presentation::ListKind::Task {
                             checkbox, ..
                         } = &mut list.kind
                         {
-                            *checkbox -= range.start;
+                            *checkbox = checkbox.saturating_sub(range.start);
                         }
                     }
                     if slice_is_table_row(&slice) {
@@ -313,7 +324,7 @@ impl EditorWidget {
                 self.builds += 1;
             }
             if long && line == cursor_line && follow {
-                let caret = entry.char_rect_at(egui::pos2(entry.text_indent, 0.0), cursor);
+                let caret = entry.char_rect_at(egui::Pos2::ZERO, cursor);
                 if caret.left() < self.horizontal {
                     self.horizontal = caret.left().max(0.0);
                 }
@@ -363,13 +374,45 @@ impl EditorWidget {
         if paint_first < first || paint_last > last {
             ui.ctx().request_repaint();
         }
+        if typography.show_inline_title
+            && let Some(title) = note_title
+        {
+            let start0 = line_start(buffer, 0);
+            let end0 = line_start(buffer, 1).min(buffer.byte_len());
+            let first_line = buffer.slice(start0..end0);
+            let first_is_h1 = first_line
+                .chunks()
+                .any(|c| c.trim_start().starts_with("# "));
+            if !first_is_h1 {
+                let title_y = rect.top() + Self::TOP_MARGIN - 34.0 - self.scroll;
+                if title_y + 32.0 > rect.top() && title_y < rect.bottom() {
+                    let title_pos = egui::pos2(rect.left() + margin_x, title_y);
+                    let title_font = egui::FontId::new(
+                        (typography.base_font_size * 1.6).round().max(24.0),
+                        egui::FontFamily::Proportional,
+                    );
+                    let title_color = if theme.is_dark() {
+                        egui::Color32::from_rgb(235, 203, 139)
+                    } else {
+                        egui::Color32::from_rgb(180, 120, 20)
+                    };
+                    painter.text(
+                        title_pos,
+                        egui::Align2::LEFT_TOP,
+                        title,
+                        title_font,
+                        title_color,
+                    );
+                }
+            }
+        }
         for line in paint_first..paint_last {
             let Some(entry) = self.cache.get(&line) else {
                 continue;
             };
             let origin = rect.left_top()
                 + Vec2::new(
-                    margin_x + entry.text_indent
+                    margin_x
                         - if entry.width.is_infinite() {
                             self.horizontal
                         } else {

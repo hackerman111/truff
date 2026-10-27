@@ -50,15 +50,37 @@ pub(super) fn show(
                             .clicked()
                         {
                             dialogs.folder.open = true;
-                            dialogs.folder.path.clear();
+                            let parent =
+                                application.shell.sidebar_creation_parent().or_else(|| {
+                                    application.active_relative_path().and_then(|p| {
+                                        std::path::Path::new(&p)
+                                            .parent()
+                                            .and_then(|d| d.to_str())
+                                            .filter(|s| !s.is_empty())
+                                            .map(str::to_owned)
+                                    })
+                                });
+                            dialogs.folder.path = parent.map_or(String::new(), |d| format!("{d}/"));
                             dialogs.folder.error = None;
+                            dialogs.folder.needs_cursor_end = true;
                         }
                         if widgets::icon_button(ui, icons::Icon::Plus, "Создать новую заметку")
                             .clicked()
                         {
                             dialogs.file.open = true;
-                            dialogs.file.path.clear();
+                            let parent =
+                                application.shell.sidebar_creation_parent().or_else(|| {
+                                    application.active_relative_path().and_then(|p| {
+                                        std::path::Path::new(&p)
+                                            .parent()
+                                            .and_then(|d| d.to_str())
+                                            .filter(|s| !s.is_empty())
+                                            .map(str::to_owned)
+                                    })
+                                });
+                            dialogs.file.path = parent.map_or(String::new(), |d| format!("{d}/"));
                             dialogs.file.error = None;
+                            dialogs.file.needs_cursor_end = true;
                         }
                     }
                 });
@@ -149,6 +171,11 @@ pub(super) fn show(
                 let any_dirty = application.has_any_dirty_buffer();
                 let mut open = None;
                 let mut toggle_folder = None;
+                let mut select_row = None;
+                let mut new_note_in = None;
+                let mut new_folder_in = None;
+                let mut rename_item = None;
+                let mut trash_item = None;
                 crate::rows::selected_rows(
                     ui,
                     "file_tree_scroll",
@@ -181,16 +208,14 @@ pub(super) fn show(
                                     .fill(if is_selected {
                                         color(theme.selection)
                                     } else if is_active {
-                                        color(theme.bg_secondary)
+                                        color(theme.selection).gamma_multiply(0.75)
                                     } else {
                                         egui::Color32::TRANSPARENT
                                     })
-                                    .corner_radius(egui::CornerRadius::same(
-                                        theme.geometry.corner_radius as u8,
-                                    ))
+                                    .corner_radius(egui::CornerRadius::same(6))
                                     .inner_margin(egui::Margin {
-                                        left: 6,
-                                        right: 6,
+                                        left: 8,
+                                        right: 8,
                                         top: 3,
                                         bottom: 3,
                                     });
@@ -280,39 +305,89 @@ pub(super) fn show(
                                 let interact_resp =
                                     frame_resp.response.interact(egui::Sense::click());
                                 if interact_resp.clicked() {
+                                    select_row = Some(row.id);
                                     if row.is_folder {
                                         toggle_folder = Some(row.id);
                                     } else {
                                         open = row.data.clone();
                                     }
                                 }
+                                interact_resp.context_menu(|ui| {
+                                    select_row = Some(row.id);
+                                    if row.is_folder {
+                                        let folder_path =
+                                            row.data.clone().unwrap_or_else(|| row.title.clone());
+                                        if ui.button("Создать заметку").clicked() {
+                                            new_note_in = Some(folder_path.clone());
+                                            ui.close();
+                                        }
+                                        if ui.button("Создать папку").clicked() {
+                                            new_folder_in = Some(folder_path.clone());
+                                            ui.close();
+                                        }
+                                        if ui.button("Переименовать").clicked() {
+                                            rename_item = Some(folder_path.clone());
+                                            ui.close();
+                                        }
+                                        if ui.button("В корзину").clicked() {
+                                            trash_item = Some(folder_path);
+                                            ui.close();
+                                        }
+                                    } else if let Some(path) = &row.data {
+                                        if ui.button("Переименовать").clicked() {
+                                            rename_item = Some(path.clone());
+                                            ui.close();
+                                        }
+                                        if ui.button("В корзину").clicked() {
+                                            trash_item = Some(path.clone());
+                                            ui.close();
+                                        }
+                                    }
+                                });
 
                                 let rect = interact_resp.rect;
-                                // Subtle Obsidian-style vertical indentation guide lines
+                                let row_step = ui.spacing().item_spacing.y;
+                                // Distinct, continuous Obsidian-style vertical indentation guide lines
                                 for d in 1..=row.depth {
-                                    let guide_x = rect.left() + 10.0 + ((d - 1) as f32) * 16.0;
+                                    let guide_x = rect.left() + 14.0 + ((d - 1) as f32) * 16.0;
+                                    let guide_color = if theme.is_dark() {
+                                        color(theme.text_muted).gamma_multiply(0.70)
+                                    } else {
+                                        color(theme.text_muted).gamma_multiply(0.60)
+                                    };
                                     ui.painter().line_segment(
                                         [
                                             egui::pos2(guide_x, rect.top()),
-                                            egui::pos2(guide_x, rect.bottom()),
+                                            egui::pos2(guide_x, rect.bottom() + row_step),
                                         ],
-                                        egui::Stroke::new(1.0, color(theme.border_subtle)),
-                                    );
-                                }
-
-                                if is_active {
-                                    ui.painter().line_segment(
-                                        [
-                                            egui::pos2(rect.left(), rect.top() + 3.0),
-                                            egui::pos2(rect.left(), rect.bottom() - 3.0),
-                                        ],
-                                        egui::Stroke::new(2.0, color(theme.accent)),
+                                        egui::Stroke::new(1.0, guide_color),
                                     );
                                 }
                             }
                         }
                     },
                 );
+                if let Some(id) = select_row {
+                    application.shell.sidebar_model_mut().select_id(id);
+                }
+                if let Some(folder) = new_note_in {
+                    dialogs.file.open = true;
+                    dialogs.file.path = format!("{folder}/");
+                    dialogs.file.error = None;
+                    dialogs.file.needs_cursor_end = true;
+                }
+                if let Some(folder) = new_folder_in {
+                    dialogs.folder.open = true;
+                    dialogs.folder.path = format!("{folder}/");
+                    dialogs.folder.error = None;
+                    dialogs.folder.needs_cursor_end = true;
+                }
+                if let Some(path) = rename_item {
+                    dialogs.operation.rename(path);
+                }
+                if let Some(path) = trash_item {
+                    dialogs.operation.trash(path);
+                }
                 if let Some(id) = toggle_folder {
                     application.shell.sidebar_model_mut().toggle_collapse(id);
                 }

@@ -162,7 +162,11 @@ fn is_in_code_block_or_frontmatter_or_table(buffer: &Buffer, pos: usize) -> bool
     }
     for cb in &snapshot.code_blocks {
         if cb.range.contains(&pos) || (pos == cb.range.end && !cb.range.is_empty()) {
-            return true;
+            let slice = buffer.slice(cb.range.clone()).to_string();
+            let is_fenced = slice.starts_with("```") || slice.starts_with("~~~");
+            if is_fenced {
+                return true;
+            }
         }
     }
     for t in &snapshot.tables {
@@ -197,6 +201,8 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
         if !parsed.indent.is_empty() {
             let indent_step = if parsed.indent.starts_with('\t') {
                 1
+            } else if parsed.indent.len() >= 4 {
+                4
             } else if parsed.indent.len() >= 2 {
                 2
             } else {
@@ -317,7 +323,7 @@ pub fn plan_tab(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     if parsed.kind == MarkerKind::QuoteOnly {
         return None;
     }
-    let indent_unit = "  "; // 2 spaces standard per §3.2
+    let indent_unit = "    "; // 4 spaces default
     let parent_indent_len = parsed.indent.len();
     let mut edits = Vec::new();
 
@@ -364,12 +370,16 @@ pub fn plan_shift_tab(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     let remove_len = if parsed.indent.starts_with('\t') {
         1
     } else {
-        parsed
-            .indent
-            .bytes()
-            .take_while(|&b| b == b' ')
-            .count()
-            .min(2)
+        let spaces = parsed.indent.bytes().take_while(|&b| b == b' ').count();
+        if spaces >= 4 && spaces % 4 == 0 {
+            4
+        } else if spaces > 4 && spaces % 4 != 0 {
+            spaces % 4
+        } else if spaces >= 4 {
+            4
+        } else {
+            spaces
+        }
     };
     if remove_len == 0 {
         return None;
@@ -437,4 +447,47 @@ pub fn find_task_checkbox_on_line(buffer: &Buffer, cursor: BytePos) -> Option<us
 pub fn plan_toggle_task(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     let checkbox = find_task_checkbox_on_line(buffer, cursor)?;
     super::presentation::toggle_task(buffer, checkbox)
+}
+
+/// Plans smart Backspace: deletes an entire indentation step (tab / spaces) or outdents empty list item.
+pub fn plan_backspace(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
+    let pos = cursor.get().min(buffer.byte_len());
+    if pos == 0 {
+        return None;
+    }
+    let line_idx = buffer.line_of_byte(pos);
+    let line_start = buffer.byte_of_line(line_idx);
+    if pos == line_start {
+        return None;
+    }
+    let before_cursor = buffer.slice(line_start..pos).to_string();
+    let trailing_spaces = before_cursor
+        .chars()
+        .rev()
+        .take_while(|&c| c == ' ')
+        .count();
+    if trailing_spaces >= 2 {
+        let delete_len = if trailing_spaces >= 4
+            && (trailing_spaces % 4 == 0 || before_cursor.trim().is_empty() && trailing_spaces == 4)
+        {
+            4
+        } else if trailing_spaces % 2 == 0 {
+            2
+        } else {
+            2.min(trailing_spaces)
+        };
+        let new_pos = BytePos::new(pos - delete_len);
+        let tx = Transaction::new()
+            .with_edit(SingleEdit::delete((pos - delete_len)..pos))
+            .with_cursor(new_pos, new_pos)
+            .with_undo_group(UndoGroup::next());
+        return Some(tx);
+    }
+    if let Some(parsed) = parse_line_prefix(buffer, line_idx)
+        && pos == parsed.content_start
+        && parsed.kind != MarkerKind::QuoteOnly
+    {
+        return plan_shift_tab(buffer, cursor);
+    }
+    None
 }

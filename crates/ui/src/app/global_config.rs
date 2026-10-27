@@ -23,7 +23,15 @@ fn default_base_font_size() -> f32 {
 }
 
 fn default_line_height_multiplier() -> f32 {
-    1.5
+    1.55
+}
+
+fn default_show_inline_title() -> bool {
+    true
+}
+
+fn default_max_content_width() -> f32 {
+    720.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,6 +44,10 @@ pub struct TypographyConfig {
     pub line_height_multiplier: f32,
     #[serde(default)]
     pub custom_font_path: Option<PathBuf>,
+    #[serde(default = "default_show_inline_title")]
+    pub show_inline_title: bool,
+    #[serde(default = "default_max_content_width")]
+    pub max_content_width: f32,
 }
 
 impl Default for TypographyConfig {
@@ -45,6 +57,8 @@ impl Default for TypographyConfig {
             base_font_size: default_base_font_size(),
             line_height_multiplier: default_line_height_multiplier(),
             custom_font_path: None,
+            show_inline_title: default_show_inline_title(),
+            max_content_width: default_max_content_width(),
         }
     }
 }
@@ -77,7 +91,7 @@ impl Default for GlobalConfig {
 impl GlobalConfig {
     /// Resolves the configured active Theme.
     pub fn resolve_theme(&self) -> Theme {
-        match self.theme.as_str() {
+        let mut theme = match self.theme.as_str() {
             "nord" => Theme::nord(),
             "dark" | "obsidian-dark" => Theme::obsidian_dark(),
             "light" => Theme::light(),
@@ -88,7 +102,9 @@ impl GlobalConfig {
                     Theme::nord()
                 }
             }
-        }
+        };
+        theme.geometry.markdown_max_width = self.typography.max_content_width;
+        theme
     }
 
     /// Returns the canonical path to `config.toml` in `$XDG_CONFIG_HOME/truff` or `~/.config/truff`.

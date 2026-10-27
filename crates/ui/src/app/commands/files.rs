@@ -1,7 +1,8 @@
 use super::super::{AppResult, Application};
 use crate::shell::Focus;
 use std::path::{Path, PathBuf};
-use truff_core::commands::Action;
+use truff_core::commands::{Action, AppError};
+use truff_core::workspace::BufferState;
 use truff_store::catalog::CatalogJob;
 
 impl Application {
@@ -17,22 +18,31 @@ impl Application {
     }
 
     pub(crate) fn rename_path(&mut self, from: &str, argument: &str) -> AppResult<()> {
-        if !self.is_note_operation_target(from) {
-            return Err("Folder operations are unavailable; select an indexed or open note".into());
+        let is_note = self.is_note_operation_target(from);
+        let is_folder = self.is_folder_operation_target(from);
+        if !is_note && !is_folder {
+            return Err(
+                "Folder operations are unavailable; select an indexed note or existing folder"
+                    .into(),
+            );
         }
         if argument.is_empty() {
-            return Err("Usage: :rename <new/path.md>".into());
+            return Err("Usage: :rename <new/path>".into());
         }
         let paths = self.paths.as_ref().ok_or("Open a vault first")?;
         let destination = paths.resolve_path(Path::new(argument))?;
-        if self
-            .shell
-            .workspace()
-            .buffers()
-            .get_by_path(&destination)
-            .is_some()
+        if is_note
+            && self
+                .shell
+                .workspace()
+                .buffers()
+                .get_by_path(&destination)
+                .is_some()
         {
             return Err("Destination is already tracked by the workspace".into());
+        }
+        if destination.exists() {
+            return Err("Destination already exists".into());
         }
         self.start_file_operation(CatalogJob::Rename {
             from: from.to_owned(),
@@ -57,14 +67,58 @@ impl Application {
         Ok(())
     }
 
+    pub fn save_all_dirty(&mut self) -> AppResult<()> {
+        let dirty_buffers: Vec<_> = self
+            .shell
+            .workspace()
+            .buffers()
+            .entries()
+            .filter(|entry| {
+                entry.path().is_some()
+                    && (entry.state() == BufferState::Conflict
+                        || entry.buffer().is_some_and(|b| b.is_dirty()))
+            })
+            .map(|entry| (entry.id(), entry.state()))
+            .collect();
+        for (id, state) in dirty_buffers {
+            if state == BufferState::Conflict {
+                self.dispatch(Action::OverwriteBuffer(id))?;
+            } else if let Err(err) = self.dispatch(Action::SaveBuffer(id)) {
+                if err
+                    .downcast_ref::<AppError>()
+                    .is_some_and(|e| matches!(e, AppError::BufferConflict { .. }))
+                    || err.to_string().contains("conflict")
+                {
+                    self.dispatch(Action::OverwriteBuffer(id))?;
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn trash(&mut self, path: &str) -> AppResult<()> {
-        if !self.is_note_operation_target(path) {
-            return Err("Folder operations are unavailable; select an indexed or open note".into());
+        if !self.is_note_operation_target(path) && !self.is_folder_operation_target(path) {
+            return Err(
+                "Folder operations are unavailable; select an indexed note or existing folder"
+                    .into(),
+            );
         }
         self.start_file_operation(CatalogJob::Trash {
             path: path.to_owned(),
             dirty: self.dirty_paths(),
         })
+    }
+
+    pub(crate) fn is_folder_operation_target(&self, path: &str) -> bool {
+        let Some(paths) = &self.paths else {
+            return false;
+        };
+        let Ok(full_path) = paths.resolve_path(Path::new(path)) else {
+            return false;
+        };
+        full_path.is_dir()
     }
 
     pub(crate) fn is_note_operation_target(&self, path: &str) -> bool {

@@ -16,7 +16,8 @@ pub use link_selection::{ExtractNotePlan, LinkSelection, LinkTarget};
 pub use links::LinkOccurrence;
 pub use presentation::{LinePresentation, ListKind, ListMarker, toggle_task};
 pub use smart_edit::{
-    find_task_checkbox_on_line, plan_enter, plan_shift_tab, plan_tab, plan_toggle_task,
+    find_task_checkbox_on_line, plan_backspace, plan_enter, plan_shift_tab, plan_tab,
+    plan_toggle_task,
 };
 pub use snapshot::{
     CalloutFact, CodeBlockFact, FrontmatterFact, MarkdownSnapshot, SectionFact, SemanticKind,

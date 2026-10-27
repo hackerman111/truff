@@ -172,35 +172,35 @@ fn test_four_tier_palette_tokens() {
     let nord = Theme::nord();
     assert_eq!(
         nord.bg_primary,
-        truff_ui::theme::Color::from_hex("#2d333f").unwrap()
+        truff_ui::theme::Color::from_hex("#2e3440").unwrap()
     );
     assert_eq!(
         nord.bg_secondary,
-        truff_ui::theme::Color::from_hex("#252a34").unwrap()
+        truff_ui::theme::Color::from_hex("#313642").unwrap()
     );
     assert_eq!(
         nord.bg_tertiary,
-        truff_ui::theme::Color::from_hex("#1b1e24").unwrap()
+        truff_ui::theme::Color::from_hex("#252a35").unwrap()
     );
     assert_eq!(
         nord.selection,
-        truff_ui::theme::Color::from_hex("#394351").unwrap()
+        truff_ui::theme::Color::from_hex("#3d4758").unwrap()
     );
     assert_eq!(
         nord.accent,
-        truff_ui::theme::Color::from_hex("#88a9c1").unwrap()
+        truff_ui::theme::Color::from_hex("#88c0d0").unwrap()
     );
     assert_eq!(
         nord.border,
-        truff_ui::theme::Color::from_hex("#333945").unwrap()
+        truff_ui::theme::Color::from_hex("#3b4252").unwrap()
     );
     assert_eq!(
         nord.text_primary,
-        truff_ui::theme::Color::from_hex("#e2e6ed").unwrap()
+        truff_ui::theme::Color::from_hex("#eceff4").unwrap()
     );
     assert_eq!(
         nord.text_muted,
-        truff_ui::theme::Color::from_hex("#8b95a5").unwrap()
+        truff_ui::theme::Color::from_hex("#8892b0").unwrap()
     );
 }
 
@@ -213,8 +213,8 @@ fn test_semantic_design_tokens() {
     assert_eq!(nord.border_subtle, nord.border);
     assert_eq!(nord.accent_primary, nord.accent);
     assert_eq!(nord.density, truff_ui::theme::Density::Compact);
-    assert_eq!(nord.geometry.tab_height, 32.0);
-    assert_eq!(nord.geometry.tree_row_height, 28.0);
+    assert_eq!(nord.geometry.tab_height, 34.0);
+    assert_eq!(nord.geometry.tree_row_height, 30.0);
     assert_eq!(nord.geometry.status_height, 26.0);
 
     let dark = Theme::obsidian_dark();
@@ -325,7 +325,30 @@ fn test_smart_edit_enter_tab_shift_tab_and_undo() {
     shell.feed_key(Key::Esc);
     assert_eq!(shell.mode(), Mode::Normal);
     shell.feed_key(Key::Char('u'));
-    assert_eq!(shell.editor_text(), "  - item");
+    assert_eq!(shell.editor_text(), "    - item");
     shell.feed_key(Key::Char('u'));
     assert_eq!(shell.editor_text(), "- item");
+}
+
+#[test]
+fn test_tab_subitem_enter_reproduction() {
+    use truff_core::vim::Key;
+    let mut shell = Shell::new();
+    shell.set_editor_text("- item");
+    shell.feed_key(Key::Char('A'));
+    println!("1. After A: {:?}", shell.editor_text());
+    // Press Enter
+    shell.feed_key(Key::Enter);
+    println!("2. After Enter: {:?}", shell.editor_text());
+    // Press Tab
+    shell.feed_key(Key::Tab);
+    println!("3. After Tab: {:?}", shell.editor_text());
+    // Type "sub"
+    for c in "sub".chars() {
+        shell.feed_key(Key::Char(c));
+    }
+    println!("4. After typing sub: {:?}", shell.editor_text());
+    // Press Enter
+    shell.feed_key(Key::Enter);
+    println!("5. After Enter: {:?}", shell.editor_text());
 }

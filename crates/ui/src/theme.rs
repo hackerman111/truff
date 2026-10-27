@@ -136,16 +136,16 @@ impl Default for Theme {
 impl Theme {
     /// Standard Nord theme (default) inspired by Obsidian and Zed.
     pub fn nord() -> Self {
-        let bg_canvas = Color::from_hex("#2d333f").unwrap();
-        let bg_panel = Color::from_hex("#252a34").unwrap();
-        let bg_tertiary = Color::from_hex("#1b1e24").unwrap();
-        let bg_elevated = Color::from_hex("#252a34").unwrap();
-        let border_subtle = Color::from_hex("#333945").unwrap();
-        let text_primary = Color::from_hex("#e2e6ed").unwrap();
-        let text_secondary = Color::from_hex("#a8b2c1").unwrap();
-        let text_muted = Color::from_hex("#8b95a5").unwrap();
-        let accent = Color::from_hex("#88a9c1").unwrap();
-        let selection = Color::from_hex("#394351").unwrap();
+        let bg_canvas = Color::from_hex("#2e3440").unwrap();
+        let bg_panel = Color::from_hex("#313642").unwrap();
+        let bg_tertiary = Color::from_hex("#252a35").unwrap();
+        let bg_elevated = Color::from_hex("#353c4a").unwrap();
+        let border_subtle = Color::from_hex("#3b4252").unwrap();
+        let text_primary = Color::from_hex("#eceff4").unwrap();
+        let text_secondary = Color::from_hex("#d8dee9").unwrap();
+        let text_muted = Color::from_hex("#8892b0").unwrap();
+        let accent = Color::from_hex("#88c0d0").unwrap();
+        let selection = Color::from_hex("#3d4758").unwrap();
 
         Self {
             bg_canvas,
@@ -194,10 +194,10 @@ impl Theme {
     /// Standard Obsidian-inspired dark theme.
     pub fn obsidian_dark() -> Self {
         let bg_canvas = Color::from_hex("#1e1e1e").unwrap();
-        let bg_panel = Color::from_hex("#181818").unwrap();
-        let bg_tertiary = Color::from_hex("#141414").unwrap();
-        let bg_elevated = Color::from_hex("#242424").unwrap();
-        let border_subtle = Color::from_hex("#2b2b2b").unwrap();
+        let bg_panel = Color::from_hex("#222222").unwrap();
+        let bg_tertiary = Color::from_hex("#181818").unwrap();
+        let bg_elevated = Color::from_hex("#262626").unwrap();
+        let border_subtle = Color::from_hex("#2f2f2f").unwrap();
         let text_primary = Color::from_hex("#dcddde").unwrap();
         let text_secondary = Color::from_hex("#a6a7ab").unwrap();
         let text_muted = Color::from_hex("#8a8b91").unwrap();

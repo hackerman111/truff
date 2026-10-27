@@ -7,6 +7,7 @@ pub struct FolderDialog {
     pub path: String,
     pub create_initial_note: bool,
     pub error: Option<String>,
+    pub needs_cursor_end: bool,
 }
 impl Default for FolderDialog {
     fn default() -> Self {
@@ -15,6 +16,7 @@ impl Default for FolderDialog {
             path: String::new(),
             create_initial_note: true,
             error: None,
+            needs_cursor_end: false,
         }
     }
 }
@@ -61,7 +63,17 @@ impl FolderDialog {
                 ui.add_space(4.0);
 
                 let id = egui::Id::new("folder_path_input");
-                if ui.memory(|memory| memory.focused().is_none()) {
+                if self.needs_cursor_end {
+                    let mut state = egui::text_edit::TextEditState::default();
+                    let len = self.path.chars().count();
+                    let ccursor = egui::text::CCursor::new(len);
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(ccursor)));
+                    state.store(ui.ctx(), id);
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                    self.needs_cursor_end = false;
+                } else if ui.memory(|memory| memory.focused().is_none()) {
                     ui.memory_mut(|memory| memory.request_focus(id));
                 }
                 let response = ui.add(
@@ -73,7 +85,7 @@ impl FolderDialog {
                 if ui.memory(|memory| memory.focused().is_none()) {
                     response.request_focus();
                 }
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     submit_creation = true;
                 }
 

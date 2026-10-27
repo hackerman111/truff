@@ -533,9 +533,10 @@ fn test_settings_dialog_default_and_init() {
     assert!(!default_dialog.open);
     assert_eq!(default_dialog.font_family, "proportional");
     assert_eq!(default_dialog.base_font_size, 15.0);
-    assert_eq!(default_dialog.line_height_multiplier, 1.5);
+    assert_eq!(default_dialog.line_height_multiplier, 1.55);
     assert_eq!(default_dialog.custom_font_path, "");
     assert_eq!(default_dialog.active_theme, "nord");
+    assert!(default_dialog.show_inline_title);
     assert!(default_dialog.error.is_none());
 
     let mut dialog = SettingsDialog::default();
@@ -544,6 +545,8 @@ fn test_settings_dialog_default_and_init() {
         base_font_size: 18.0,
         line_height_multiplier: 1.6,
         custom_font_path: Some(std::path::PathBuf::from("/fonts/custom.ttf")),
+        show_inline_title: true,
+        max_content_width: 720.0,
     };
     dialog.init_from_app(&typo, "dark");
     assert_eq!(dialog.base_font_size, 18.0);
@@ -601,6 +604,77 @@ fn wrapped_list_rows_align_with_the_item_text() {
     let first_x = first.pos.x + first.glyphs[2].pos.x;
     let next_x = next.pos.x + next.glyphs[0].pos.x;
     assert!((first_x - next_x).abs() < 1.0, "{first_x} != {next_x}");
+}
+
+#[test]
+fn test_native_tab_enter_subitem() {
+    let (mut app, context) = scratch("- item\n");
+    // Send 'A' to enter insert mode at end
+    frame(
+        &mut app,
+        &context,
+        vec![
+            Event::Key {
+                key: egui::Key::A,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+                physical_key: None,
+            },
+            Event::Text("A".into()),
+        ],
+    );
+    // Send Enter
+    frame(&mut app, &context, vec![key(egui::Key::Enter)]);
+    // Send Tab
+    frame(&mut app, &context, vec![key(egui::Key::Tab)]);
+    // Send "sub"
+    frame(&mut app, &context, vec![Event::Text("sub".into())]);
+    // Send Enter
+    let output = frame(&mut app, &context, vec![key(egui::Key::Enter)]);
+    assert_eq!(
+        app.application.shell.editor_text(),
+        "- item\n    - sub\n    - \n"
+    );
+    let mut bullet_center_x = None;
+    let mut guide_xs = Vec::new();
+    let mut line_origins = Vec::new();
+    for s in &output.shapes {
+        match &s.shape {
+            egui::Shape::Text(t) => {
+                if t.galley.job.text == "• item" {
+                    let g = &t.galley.rows[0].glyphs[0];
+                    bullet_center_x = Some(t.pos.x + g.pos.x + g.size().x * 0.5);
+                    line_origins.push(t.pos.x);
+                } else if t.galley.job.text.starts_with("    ") {
+                    line_origins.push(t.pos.x);
+                }
+            }
+            egui::Shape::LineSegment { points, .. }
+                if (points[0].x - points[1].x).abs() < 0.1
+                    && (points[1].y - points[0].y).abs() > 10.0
+                    && points[0].x > 280.0 =>
+            {
+                guide_xs.push(points[0].x);
+            }
+            _ => {}
+        }
+    }
+    let bullet_x = bullet_center_x.expect("bullet circle glyph must exist");
+    assert!(
+        !guide_xs.is_empty(),
+        "guide lines must be painted for subitems"
+    );
+    for &gx in &guide_xs {
+        assert!(
+            (gx - bullet_x).abs() <= 1.0,
+            "guide_x {gx} must align with bullet_x {bullet_x}"
+        );
+    }
+    assert!(line_origins.len() >= 3);
+    for &origin in &line_origins[1..] {
+        assert_eq!(origin, line_origins[0], "all line origins must align");
+    }
 }
 
 #[test]
@@ -823,4 +897,90 @@ fn test_native_heading_hierarchy_and_reading_mode_and_inline_paint() {
         app.application.projection(),
         truff_ui::editor::ProjectionMode::LivePreview
     );
+}
+
+#[test]
+fn test_save_all_dirty_overwrites_conflict() {
+    use truff_core::workspace::BufferState;
+
+    let tmp = std::env::temp_dir().join(format!("truff-test-conflict-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("conflicted.md"), "disk content").unwrap();
+
+    let mut application = Application::new();
+    application.open_vault(&tmp).unwrap();
+    while application.needs_poll() {
+        application.poll();
+    }
+    application.open_note("conflicted.md").unwrap();
+    while application.needs_poll() {
+        application.poll();
+    }
+
+    let buf_id = application.shell.editor_buffer().unwrap().id();
+    let entry = application
+        .shell
+        .workspace_mut()
+        .buffers_mut()
+        .get_mut(buf_id)
+        .unwrap();
+    entry.set_state(BufferState::Conflict);
+    assert_eq!(entry.state(), BufferState::Conflict);
+
+    // save_all_dirty must succeed without BufferConflict error
+    assert!(application.save_all_dirty().is_ok());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_open_navigator_focuses_active_file() {
+    let tmp = std::env::temp_dir().join(format!("truff-test-navfocus-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("sub")).unwrap();
+    std::fs::write(tmp.join("root.md"), "root").unwrap();
+    std::fs::write(tmp.join("sub/target.md"), "target").unwrap();
+
+    let mut application = Application::new();
+    application.open_vault(&tmp).unwrap();
+    while application.needs_poll() {
+        application.poll();
+    }
+    application.open_note("sub/target.md").unwrap();
+    while application.needs_poll() {
+        application.poll();
+    }
+
+    let context = egui::Context::default();
+    let mut app = NativeApp::new(application, &context);
+    frame(&mut app, &context, vec![]);
+
+    app.open_navigator(truff_ui::navigator::NavigatorMode::Files);
+
+    let selected = app
+        .navigator
+        .selected_item()
+        .expect("Must have selected item");
+    match &selected.payload {
+        truff_ui::navigator::NavigatorItemPayload::File { path, .. } => {
+            assert_eq!(path, "sub/target.md");
+        }
+        _ => panic!("Expected file payload for selected item"),
+    }
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_lateral_margin_max_content_width_setting() {
+    let mut application = Application::new();
+    let mut typo = application.shell.typography().clone();
+    typo.max_content_width = 950.0;
+    application.shell.set_typography(typo);
+
+    assert_eq!(application.shell.theme().geometry.markdown_max_width, 950.0);
+    let (content_width, margin_x) = application.shell.theme().geometry.column_metrics(1400.0);
+    assert_eq!(content_width, 950.0);
+    assert_eq!(margin_x, (1400.0 - 950.0) / 2.0);
 }

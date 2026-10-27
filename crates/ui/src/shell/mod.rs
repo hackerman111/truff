@@ -142,6 +142,7 @@ impl Shell {
     }
 
     pub fn set_typography(&mut self, typography: crate::app::global_config::TypographyConfig) {
+        self.theme.geometry.markdown_max_width = typography.max_content_width;
         self.typography = typography;
     }
 
@@ -157,6 +158,11 @@ impl Shell {
 
     pub fn workspace(&self) -> &Workspace {
         &self.workspace
+    }
+
+    /// Takes the most recently yanked text from vim motion, if any.
+    pub fn take_last_yank(&mut self) -> Option<String> {
+        self.editor_vim.take_last_yank()
     }
 
     pub fn workspace_mut(&mut self) -> &mut Workspace {

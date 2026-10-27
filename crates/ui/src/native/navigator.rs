@@ -32,6 +32,20 @@ impl NativeApp {
             .vault_path()
             .map(std::path::Path::to_path_buf);
         self.navigator.open_mode(mode, context_title, items);
+        if matches!(
+            mode,
+            crate::navigator::NavigatorMode::Files | crate::navigator::NavigatorMode::Folders
+        ) && let Some(active_path) = self.application.active_relative_path()
+            && let Some(pos) = self.navigator.filtered_indices.iter().position(|&idx| {
+                matches!(
+                    &self.navigator.items.get(idx).map(|item| &item.payload),
+                    Some(crate::navigator::NavigatorItemPayload::File { path, .. })
+                        if path == &active_path
+                )
+            })
+        {
+            self.navigator.selected_index = pos;
+        }
         self.navigator_revision = self.application.catalog_revision();
     }
 
@@ -227,11 +241,13 @@ impl NativeApp {
                 self.dialogs.file.open = true;
                 self.dialogs.file.path = parent_dir.map_or(String::new(), |d| format!("{d}/"));
                 self.dialogs.file.error = None;
+                self.dialogs.file.needs_cursor_end = true;
             }
             NavigatorAction::CreateFolder { parent_dir } => {
                 self.dialogs.folder.open = true;
                 self.dialogs.folder.path = parent_dir.map_or(String::new(), |d| format!("{d}/"));
                 self.dialogs.folder.error = None;
+                self.dialogs.folder.needs_cursor_end = true;
             }
             NavigatorAction::RenameFile { path } => {
                 self.dialogs.operation.rename(path);

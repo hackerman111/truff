@@ -25,6 +25,12 @@ pub(super) fn show(
             open_vault = show_welcome_screen(application, recent, ui, theme);
         } else {
             let shell = &application.shell;
+            let note_title = shell.editor_view().and_then(|view| {
+                let buffer_id = view.buffer_id();
+                let entry = shell.workspace().buffers().get(buffer_id)?;
+                let name = entry.path()?.file_name()?.to_str()?;
+                Some(name.strip_suffix(".md").unwrap_or(name))
+            });
             let input = editor.show(
                 ui,
                 shell.editor_buffer(),
@@ -35,6 +41,7 @@ pub(super) fn show(
                 shell.typography(),
                 shell.ime_preedit(),
                 shell.flash().targets(),
+                note_title,
             );
             if let Some(input) = input {
                 application.shell.set_focus(Focus::Editor);

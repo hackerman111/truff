@@ -345,7 +345,7 @@ fn closing_window_recovers_dirty_text_and_save_clears_recovery() {
     let (mut root, id) = window(app);
     idle(&mut root, id);
     text(&mut root, "iunsaved ");
-    named(&mut root, egui::Key::Escape);
+    idle(&mut root, id);
     close(&mut root, id);
     drop(root);
     assert_eq!(
@@ -379,8 +379,7 @@ fn closing_window_recovers_dirty_text_and_save_clears_recovery() {
         .unwrap()
         .is_dirty()));
     // A checkpoint of an edit later undone to the savepoint must not reappear on restart.
-    text(&mut root, "ix");
-    named(&mut root, egui::Key::Escape);
+    text(&mut root, "x");
     idle(&mut root, id);
     text(&mut root, "u");
     assert!(!with_app(&root, id, |app| app

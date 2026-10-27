@@ -119,8 +119,17 @@ impl NativeApp {
                 _ => {}
             }
         }
+        let prev_mode = self.application.shell.mode();
         let action = self.application.shell.feed_key(key);
         self.action(action);
+        let new_mode = self.application.shell.mode();
+        if prev_mode == Mode::Insert
+            && new_mode == Mode::Normal
+            && self.application.active_path().is_some()
+            && self.application.has_any_dirty_buffer()
+        {
+            let _ = self.application.save(false);
+        }
         if let Some((buffer, view)) = self
             .application
             .shell
@@ -146,8 +155,14 @@ impl NativeApp {
 
     pub(super) fn action(&mut self, action: ShellAction) {
         match action {
-            ShellAction::FocusChanged(_) if self.application.focus_mode => {
-                self.application.shell.set_focus(Focus::Editor);
+            ShellAction::FocusChanged(focus) => {
+                if self.application.focus_mode {
+                    self.application.shell.set_focus(Focus::Editor);
+                } else if focus == Focus::Sidebar
+                    && let Some(path) = self.application.active_relative_path()
+                {
+                    self.application.shell.select_sidebar_file(&path);
+                }
             }
             ShellAction::ScrollCursor(pos) => {
                 self.editor.scroll_cursor(pos);
@@ -549,6 +564,9 @@ impl NativeApp {
             }
         }
         context.input_mut(|input| input.events = field_events);
+        if let Some(yanked) = self.application.shell.take_last_yank() {
+            context.copy_text(yanked);
+        }
     }
 }
 

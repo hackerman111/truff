@@ -134,6 +134,7 @@ impl NativeApp {
                     format!("{folder}/")
                 };
                 self.dialogs.file.error = None;
+                self.dialogs.file.needs_cursor_end = true;
             }
             WikiAction::Close => {
                 self.wiki.close();

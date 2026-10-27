@@ -56,6 +56,41 @@ pub fn configure_fonts(
             .or_default()
             .insert(0, "custom_font".to_owned());
     }
+
+    // Ensure Hack (bundled in egui) is a fallback for Proportional font family so
+    // Unicode arrows (→, ←, ↔) and symbols don't degrade into notdef square boxes.
+    if let Some(proportional) = fonts.families.get_mut(&egui::FontFamily::Proportional)
+        && !proportional.contains(&"Hack".to_owned())
+    {
+        proportional.push("Hack".to_owned());
+    }
+
+    // Add broad-coverage system fallback fonts if available on the system
+    let fallback_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    ];
+    for fb in fallback_paths {
+        if std::path::Path::new(fb).exists()
+            && let Ok(bytes) = std::fs::read(fb)
+        {
+            fonts.font_data.insert(
+                "system_symbol_fallback".to_owned(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                prop.push("system_symbol_fallback".to_owned());
+            }
+            if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                mono.push("system_symbol_fallback".to_owned());
+            }
+            break;
+        }
+    }
+
     ctx.set_fonts(fonts);
 }
 
@@ -280,12 +315,18 @@ impl NativeApp {
         if self.application.quit_requested
             || context.input(|input| input.viewport().close_requested())
         {
-            match self.application.shutdown() {
-                Ok(()) => context.send_viewport_cmd(egui::ViewportCommand::Close),
-                Err(error) => {
-                    self.application.status = error.to_string();
-                    self.application.quit_requested = false;
-                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.application.has_any_dirty_buffer() {
+                self.application.quit_requested = false;
+                self.dialogs.quit_confirm.open = true;
+                context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            } else {
+                match self.application.shutdown() {
+                    Ok(()) => context.send_viewport_cmd(egui::ViewportCommand::Close),
+                    Err(error) => {
+                        self.application.status = error.to_string();
+                        self.application.quit_requested = false;
+                        context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    }
                 }
             }
         }
