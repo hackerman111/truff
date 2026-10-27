@@ -8,6 +8,8 @@ pub struct SettingsDialog {
     pub font_family: String,
     pub base_font_size: f32,
     pub line_height_multiplier: f32,
+    pub show_inline_title: bool,
+    pub max_content_width: f32,
     pub custom_font_path: String,
     pub active_theme: String,
     pub error: Option<String>,
@@ -19,7 +21,9 @@ impl Default for SettingsDialog {
             open: false,
             font_family: "proportional".into(),
             base_font_size: 15.0,
-            line_height_multiplier: 1.5,
+            line_height_multiplier: 1.55,
+            show_inline_title: true,
+            max_content_width: 720.0,
             custom_font_path: "".into(),
             active_theme: "nord".into(),
             error: None,
@@ -43,6 +47,8 @@ impl SettingsDialog {
             };
         self.base_font_size = typography.base_font_size;
         self.line_height_multiplier = typography.line_height_multiplier;
+        self.show_inline_title = typography.show_inline_title;
+        self.max_content_width = typography.max_content_width;
         self.custom_font_path = typography
             .custom_font_path
             .as_ref()
@@ -217,6 +223,8 @@ impl SettingsDialog {
                     base_font_size: self.base_font_size,
                     line_height_multiplier: self.line_height_multiplier,
                     custom_font_path: temp_custom_path,
+                    show_inline_title: self.show_inline_title,
+                    max_content_width: self.max_content_width,
                 };
 
                 let preview_frame = egui::Frame::new()
@@ -250,6 +258,41 @@ impl SettingsDialog {
                             .color(color(theme.text_primary)),
                     );
                 });
+
+                ui.add_space(10.0);
+                follow_tab_focus(
+                    ui.checkbox(
+                        &mut self.show_inline_title,
+                        "Показывать заголовок заметки над текстом",
+                    ),
+                    ui,
+                );
+
+                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new("Свободное пространство по бокам (ширина текста)")
+                        .size(theme.geometry.ui_font_size)
+                        .strong()
+                        .color(color(theme.text_primary)),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    follow_tab_focus(
+                        ui.add(
+                            egui::Slider::new(&mut self.max_content_width, 500.0..=1600.0)
+                                .step_by(20.0)
+                                .text("px"),
+                        ),
+                        ui,
+                    );
+                });
+                ui.label(
+                    egui::RichText::new(
+                        "Регулирует ширину текстовой колонки и свободные поля по краям редактора (по умолчанию 720 px)",
+                    )
+                    .size(theme.geometry.ui_font_size - 2.0)
+                    .color(color(theme.text_muted)),
+                );
 
                 ui.add_space(12.0);
                 ui.label(
@@ -321,6 +364,8 @@ impl SettingsDialog {
                 base_font_size: self.base_font_size,
                 line_height_multiplier: self.line_height_multiplier,
                 custom_font_path: custom_path,
+                show_inline_title: self.show_inline_title,
+                max_content_width: self.max_content_width,
             };
 
             let mut config = crate::app::global_config::GlobalConfig::load();

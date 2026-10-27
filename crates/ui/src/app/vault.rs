@@ -120,11 +120,11 @@ impl Application {
             .dispatch(Action::OpenPath(absolute))?;
         self.shell.reset_editor_input();
         self.shell.set_focus(Focus::Editor);
-        self.kanban_mode_override = None;
         self.set_backlinks(Vec::new());
         self.shell.set_right_panel_available(false);
         self.pending_location = None;
         self.apply_effects(effects)?;
+        self.close_unused_scratch_views();
         if let Some(path) = self.active_relative_path() {
             self.shell.select_sidebar_file(&path);
         }
@@ -133,14 +133,6 @@ impl Application {
     }
 
     pub fn create_note(&mut self, path: &str) -> AppResult<()> {
-        self.create_note_with_template(path, None)
-    }
-
-    pub fn create_note_with_template(
-        &mut self,
-        path: &str,
-        template: Option<truff_core::markdown::NoteTemplateKind>,
-    ) -> AppResult<()> {
         let paths = self.paths.as_ref().ok_or("Open a vault first")?;
         let trimmed = path.trim();
         if trimmed.is_empty() {
@@ -152,7 +144,6 @@ impl Application {
             format!("{trimmed}.md")
         };
         paths.resolve_path(Path::new(&rel))?;
-        self.pending_template = template.map(|k| (rel.clone(), k));
         self.start_file_operation(truff_store::catalog::CatalogJob::Create { path: rel })
     }
 

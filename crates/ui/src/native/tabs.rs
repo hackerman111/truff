@@ -9,7 +9,10 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
         .frame(
             egui::Frame::new()
                 .fill(color(theme.bg_panel))
-                .stroke(egui::Stroke::new(1.0, color(theme.border)))
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    color(theme.border_subtle).gamma_multiply(0.4),
+                ))
                 .inner_margin(egui::Margin {
                     left: 8,
                     right: 8,
@@ -29,23 +32,32 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                 let mut switch_view = None;
                 let mut close_view = None;
 
-                let is_welcome = application.vault_path().is_none()
-                    && application
-                        .shell
-                        .editor_buffer()
-                        .is_none_or(Buffer::is_empty)
+                let is_empty_workspace = application
+                    .shell
+                    .editor_buffer()
+                    .is_none_or(Buffer::is_empty)
+                    && application.active_relative_path().is_none()
                     && application.shell.mode() == truff_core::vim::Mode::Normal;
 
-                if views.is_empty() || is_welcome {
+                if views.is_empty() || is_empty_workspace {
+                    let vault_name = application
+                        .vault_path()
+                        .and_then(|p| p.file_name())
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("Truff");
                     ui.label(
-                        egui::RichText::new("Truff")
+                        egui::RichText::new(vault_name)
                             .strong()
                             .color(color(theme.accent)),
                     );
                     ui.label(egui::RichText::new("·").color(color(theme.text_muted)));
                     ui.label(
-                        egui::RichText::new("Open a vault with :vault <path>")
-                            .color(color(theme.text_muted)),
+                        egui::RichText::new(if application.vault_path().is_none() {
+                            "Open a vault with :vault <path>"
+                        } else {
+                            "Select or create a note in the sidebar"
+                        })
+                        .color(color(theme.text_muted)),
                     );
                 } else {
                     for view in views {
@@ -54,6 +66,16 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                         let is_pinned = application.view_is_pinned(view_id);
                         let buffer_id = view.buffer_id();
                         let entry = application.shell.workspace().buffers().get(buffer_id);
+                        let is_scratch = entry.is_none_or(|e| e.path().is_none());
+                        let is_clean_empty = application
+                            .shell
+                            .workspace()
+                            .buffers()
+                            .get_buffer(buffer_id)
+                            .is_none_or(|b| !b.is_dirty() && b.as_str().is_empty());
+                        if is_scratch && is_clean_empty {
+                            continue;
+                        }
                         let title = entry
                             .and_then(|e| e.path())
                             .and_then(|p| p.file_name())
@@ -79,11 +101,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
 
                         let frame = egui::Frame::new()
                             .fill(tab_bg)
-                            .stroke(if is_active {
-                                egui::Stroke::new(1.0, color(theme.border_subtle))
-                            } else {
-                                egui::Stroke::NONE
-                            })
+                            .stroke(egui::Stroke::NONE)
                             .corner_radius(egui::CornerRadius {
                                 nw: 6,
                                 ne: 6,
@@ -174,16 +192,8 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                             });
                         });
 
-                        if is_active {
-                            let rect = frame_resp.response.rect;
-                            ui.painter().line_segment(
-                                [
-                                    egui::pos2(rect.left() + 4.0, rect.top() + 0.5),
-                                    egui::pos2(rect.right() - 4.0, rect.top() + 0.5),
-                                ],
-                                egui::Stroke::new(2.0, color(theme.accent)),
-                            );
-                        } else if frame_resp.response.interact(egui::Sense::click()).clicked()
+                        if !is_active
+                            && frame_resp.response.interact(egui::Sense::click()).clicked()
                             && close_view.is_none()
                         {
                             switch_view = Some(view_id);

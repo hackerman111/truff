@@ -173,30 +173,14 @@ impl NavigatorState {
                 acts.push(QuickAction {
                     key: "r".to_string(),
                     label: "Переименовать".to_string(),
-                    description: if *is_dir {
-                        "Переименование папок пока недоступно".into()
-                    } else {
-                        format!("Изменить имя {}", item.display_title())
-                    },
-                    action: if *is_dir {
-                        NavigatorAction::None
-                    } else {
-                        NavigatorAction::RenameFile { path: path.clone() }
-                    },
+                    description: format!("Изменить имя {}", item.display_title()),
+                    action: NavigatorAction::RenameFile { path: path.clone() },
                 });
                 acts.push(QuickAction {
                     key: "d".to_string(),
                     label: "Удалить".to_string(),
-                    description: if *is_dir {
-                        "Удаление папок пока недоступно".into()
-                    } else {
-                        format!("Переместить {} в корзину", item.display_title())
-                    },
-                    action: if *is_dir {
-                        NavigatorAction::None
-                    } else {
-                        NavigatorAction::DeleteFile { path: path.clone() }
-                    },
+                    description: format!("Переместить {} в корзину", item.display_title()),
+                    action: NavigatorAction::DeleteFile { path: path.clone() },
                 });
                 acts.push(QuickAction {
                     key: "y".to_string(),

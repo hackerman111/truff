@@ -461,3 +461,19 @@ fn test_p2_structural_text_objects_marks_and_motions() {
         "'daL' deletes list item"
     );
 }
+
+#[test]
+fn test_vim_yank_sets_last_yanked() {
+    let (mut buffer, mut view) = setup_editor("hello world\n");
+    let mut vim = VimState::new();
+    view.set_cursor(BytePos::new(0), BytePos::new(0));
+    // yy
+    feed_keys(
+        &mut vim,
+        &mut buffer,
+        &mut view,
+        &[Key::Char('y'), Key::Char('y')],
+    );
+    assert_eq!(vim.take_last_yank(), Some("hello world\n".to_string()));
+    assert_eq!(vim.take_last_yank(), None);
+}

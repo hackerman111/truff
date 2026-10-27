@@ -133,7 +133,7 @@ impl Shell {
                 curr_depth = item.depth;
             }
         }
-        for ancestor_id in ancestors {
+        for ancestor_id in ancestors.into_iter().rev() {
             self.sidebar_model.expand(ancestor_id);
         }
         self.sidebar_model.select_id(target_id);

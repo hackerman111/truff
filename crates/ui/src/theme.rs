@@ -136,16 +136,16 @@ impl Default for Theme {
 impl Theme {
     /// Standard Nord theme (default) inspired by Obsidian and Zed.
     pub fn nord() -> Self {
-        let bg_canvas = Color::from_hex("#2d333f").unwrap();
-        let bg_panel = Color::from_hex("#252a34").unwrap();
-        let bg_tertiary = Color::from_hex("#1b1e24").unwrap();
-        let bg_elevated = Color::from_hex("#252a34").unwrap();
-        let border_subtle = Color::from_hex("#333945").unwrap();
-        let text_primary = Color::from_hex("#e2e6ed").unwrap();
-        let text_secondary = Color::from_hex("#a8b2c1").unwrap();
-        let text_muted = Color::from_hex("#8b95a5").unwrap();
-        let accent = Color::from_hex("#88a9c1").unwrap();
-        let selection = Color::from_hex("#394351").unwrap();
+        let bg_canvas = Color::from_hex("#2e3440").unwrap();
+        let bg_panel = Color::from_hex("#313642").unwrap();
+        let bg_tertiary = Color::from_hex("#252a35").unwrap();
+        let bg_elevated = Color::from_hex("#353c4a").unwrap();
+        let border_subtle = Color::from_hex("#3b4252").unwrap();
+        let text_primary = Color::from_hex("#eceff4").unwrap();
+        let text_secondary = Color::from_hex("#d8dee9").unwrap();
+        let text_muted = Color::from_hex("#8892b0").unwrap();
+        let accent = Color::from_hex("#88c0d0").unwrap();
+        let selection = Color::from_hex("#3d4758").unwrap();
 
         Self {
             bg_canvas,
@@ -194,10 +194,10 @@ impl Theme {
     /// Standard Obsidian-inspired dark theme.
     pub fn obsidian_dark() -> Self {
         let bg_canvas = Color::from_hex("#1e1e1e").unwrap();
-        let bg_panel = Color::from_hex("#181818").unwrap();
-        let bg_tertiary = Color::from_hex("#141414").unwrap();
-        let bg_elevated = Color::from_hex("#242424").unwrap();
-        let border_subtle = Color::from_hex("#2b2b2b").unwrap();
+        let bg_panel = Color::from_hex("#222222").unwrap();
+        let bg_tertiary = Color::from_hex("#181818").unwrap();
+        let bg_elevated = Color::from_hex("#262626").unwrap();
+        let border_subtle = Color::from_hex("#2f2f2f").unwrap();
         let text_primary = Color::from_hex("#dcddde").unwrap();
         let text_secondary = Color::from_hex("#a6a7ab").unwrap();
         let text_muted = Color::from_hex("#8a8b91").unwrap();
@@ -380,69 +380,4 @@ impl Theme {
     pub fn is_dark(&self) -> bool {
         self.bg_primary.r < 0.5
     }
-}
-
-pub const TAG_PALETTE: &[(&str, &str, [u8; 4])] = &[
-    ("cyan", "Бирюзовый", [136, 192, 208, 255]),
-    ("gold", "Золотой", [235, 203, 139, 255]),
-    ("emerald", "Изумрудный", [163, 190, 140, 255]),
-    ("rose", "Розовый", [191, 97, 106, 255]),
-    ("violet", "Фиолетовый", [180, 142, 173, 255]),
-    ("sky", "Синий", [129, 161, 193, 255]),
-    ("coral", "Коралловый", [208, 135, 112, 255]),
-    ("sage", "Мятный", [143, 188, 187, 255]),
-];
-
-static GLOBAL_TAG_COLORS: std::sync::OnceLock<
-    std::sync::RwLock<std::collections::BTreeMap<String, String>>,
-> = std::sync::OnceLock::new();
-
-fn tag_color_store() -> &'static std::sync::RwLock<std::collections::BTreeMap<String, String>> {
-    GLOBAL_TAG_COLORS.get_or_init(|| std::sync::RwLock::new(std::collections::BTreeMap::new()))
-}
-
-pub fn set_global_tag_colors(map: &std::collections::BTreeMap<String, String>) {
-    if let Ok(mut guard) = tag_color_store().write() {
-        *guard = map
-            .iter()
-            .map(|(k, v)| (k.trim_start_matches('#').to_lowercase(), v.clone()))
-            .collect();
-    }
-}
-
-pub fn resolve_palette_color_by_name(name: &str) -> Option<[u8; 4]> {
-    let clean = name.trim().to_ascii_lowercase();
-    for (key, _, rgba) in TAG_PALETTE {
-        if *key == clean {
-            return Some(*rgba);
-        }
-    }
-    Color::from_hex(&clean).map(Color::to_rgba_u8)
-}
-
-pub fn next_palette_color_name(current: Option<&str>) -> &'static str {
-    let Some(cur) = current else {
-        return TAG_PALETTE[0].0;
-    };
-    let clean = cur.trim().to_ascii_lowercase();
-    if let Some(pos) = TAG_PALETTE.iter().position(|(k, _, _)| *k == clean) {
-        TAG_PALETTE[(pos + 1) % TAG_PALETTE.len()].0
-    } else {
-        TAG_PALETTE[0].0
-    }
-}
-
-pub fn resolve_tag_rgba(tag: &str) -> [u8; 4] {
-    let clean = tag.trim().trim_start_matches('#').to_lowercase();
-    if let Ok(guard) = tag_color_store().read()
-        && let Some(color_name) = guard.get(&clean)
-        && let Some(rgba) = resolve_palette_color_by_name(color_name)
-    {
-        return rgba;
-    }
-    let mut hash: usize = 5381;
-    for b in clean.bytes() {
-        hash = hash.wrapping_mul(33).wrapping_add(b as usize);
-    }
-    TAG_PALETTE[hash % TAG_PALETTE.len()].2
 }

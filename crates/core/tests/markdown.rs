@@ -147,25 +147,3 @@ fn incremental_equals_fresh() {
         "Incremental parse tree must match fresh parse tree exactly"
     );
 }
-
-#[test]
-fn test_extract_tags_unicode_and_nested() {
-    let md = r#"# Heading Not A Tag
-
-Paragraph with #zettelkasten and #важно and #project/v2.
-Color hex `<span style="color:#bf616a">text</span>` and inline `#not_a_tag`.
-
-```sql
-SELECT * FROM notes WHERE tag = '#code_tag'
-```
-
-Final line with #rust_lang!
-"#;
-
-    let facts = MarkdownFacts::extract(md).expect("Markdown parsing failed");
-    let tag_names: Vec<&str> = facts.tags.iter().map(|t| t.name.as_str()).collect();
-    assert_eq!(
-        tag_names,
-        vec!["zettelkasten", "важно", "project/v2", "rust_lang"]
-    );
-}

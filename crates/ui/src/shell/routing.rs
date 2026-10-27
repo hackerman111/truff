@@ -489,7 +489,7 @@ impl Shell {
                 }
 
                 if self.editor_vim.mode == Mode::Insert
-                    && matches!(key, Key::Enter | Key::Tab | Key::ShiftTab)
+                    && matches!(key, Key::Enter | Key::Tab | Key::ShiftTab | Key::Backspace)
                 {
                     let smart_tx = self.workspace.editor_parts_mut(view_id).and_then(
                         |(buffer, view)| match key {
@@ -497,6 +497,9 @@ impl Shell {
                             Key::Tab => truff_core::markdown::plan_tab(buffer, view.head()),
                             Key::ShiftTab => {
                                 truff_core::markdown::plan_shift_tab(buffer, view.head())
+                            }
+                            Key::Backspace => {
+                                truff_core::markdown::plan_backspace(buffer, view.head())
                             }
                             _ => None,
                         },

@@ -125,6 +125,9 @@ impl VimState {
             return self.error(e.to_string());
         }
         if let Some(register) = register {
+            if op == Operator::Yank {
+                self.last_yanked = Some(register.text.clone());
+            }
             self.registers.set(self.selected_reg.take(), register);
         }
         if op == Operator::Change {
@@ -272,7 +275,7 @@ impl VimState {
             }
             Key::Tab | Key::Enter | Key::ShiftEnter => {
                 let text = if key == Key::Tab {
-                    "\t"
+                    "    "
                 } else if buffer.line_ending() == LineEnding::CrLf {
                     "\r\n"
                 } else {

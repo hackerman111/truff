@@ -79,43 +79,13 @@ impl Application {
                         });
                     }
                 }
-                "template" => {
-                    for (alias, label) in [
-                        ("zk", "Zettelkasten: Вечная заметка"),
-                        ("lit", "Zettelkasten: Литературная заметка"),
-                        ("fleeting", "Zettelkasten: Мимолетная мысль"),
-                        ("wiki", "Вики-Мастер папки (index.md)"),
-                        ("kanban", "Интерактивная Канбан-доска"),
-                        ("sql", "База данных с SQL-таблицей"),
-                    ] {
-                        if alias.starts_with(&query) {
-                            suggestions.push(Completion {
-                                text: format!("template {alias}"),
-                                description: label.into(),
-                            });
-                        }
-                    }
-                }
                 _ => {}
             }
         } else if !text.trim().is_empty() {
             let ui_cmds = [
                 ("toc", "Оглавление документа / хранилища (Floating TOC)"),
                 ("wiki", "Вики-панель и дашборд папки (Folder Wiki)"),
-                ("wiki-sync", "Синхронизировать мастер-файл папки (index.md)"),
                 ("stream", "Лента заметок с фильтрами (Note Stream)"),
-                (
-                    "graph",
-                    "Интерактивный граф связей (Силовой / Дерево / Радиальный)",
-                ),
-                ("kanban", "Интерактивная Канбан-доска (Vim + мышь)"),
-                ("database", "SQL / псевдо-SQL база данных заметок"),
-                ("sql", "SQL / псевдо-SQL таблица заметок"),
-                ("tags", "Панель цветных тегов хранилища"),
-                (
-                    "template",
-                    "Применить шаблон заметки (Zettelkasten / Вики / Канбан / SQL)",
-                ),
                 ("reading", "Режим чтения без разметки"),
                 ("preview", "Интерактивный Live Preview"),
                 ("source", "Исходный Markdown код"),

@@ -38,25 +38,6 @@ impl NativeApp {
             self.handle_toc_action(action);
             return;
         }
-        if self.application.database_view_open && self.database.feed_key(key, &mut self.application)
-        {
-            return;
-        }
-        if self.application.graph_view_open {
-            match key {
-                Key::Esc | Key::Char('q') => {
-                    self.application.graph_view_open = false;
-                    self.application.status = "Редактор".into();
-                    return;
-                }
-                _ => {}
-            }
-        }
-        if self.application.is_active_note_kanban()
-            && self.kanban.feed_key(key, &mut self.application)
-        {
-            return;
-        }
         if self.application.file_operation_pending()
             || self.dialogs.is_any_open()
             || self.navigator.is_open()
@@ -138,8 +119,17 @@ impl NativeApp {
                 _ => {}
             }
         }
+        let prev_mode = self.application.shell.mode();
         let action = self.application.shell.feed_key(key);
         self.action(action);
+        let new_mode = self.application.shell.mode();
+        if prev_mode == Mode::Insert
+            && new_mode == Mode::Normal
+            && self.application.active_path().is_some()
+            && self.application.has_any_dirty_buffer()
+        {
+            let _ = self.application.save(false);
+        }
         if let Some((buffer, view)) = self
             .application
             .shell
@@ -165,8 +155,14 @@ impl NativeApp {
 
     pub(super) fn action(&mut self, action: ShellAction) {
         match action {
-            ShellAction::FocusChanged(_) if self.application.focus_mode => {
-                self.application.shell.set_focus(Focus::Editor);
+            ShellAction::FocusChanged(focus) => {
+                if self.application.focus_mode {
+                    self.application.shell.set_focus(Focus::Editor);
+                } else if focus == Focus::Sidebar
+                    && let Some(path) = self.application.active_relative_path()
+                {
+                    self.application.shell.select_sidebar_file(&path);
+                }
             }
             ShellAction::ScrollCursor(pos) => {
                 self.editor.scroll_cursor(pos);
@@ -284,8 +280,6 @@ impl NativeApp {
         if !help_owned
             && !navigator_owned
             && self.application.shell.command().is_none()
-            && !self.kanban.is_editing_text()
-            && !self.database.editing_query
             && context.egui_wants_keyboard_input()
         {
             // The only egui text fields live in these overlays; a closed field can retain focus for one frame.
@@ -417,17 +411,8 @@ impl NativeApp {
                         }
                         continue;
                     }
-                    if (self.kanban.is_editing_text() || self.database.editing_query)
-                        && !help
-                        && !self.navigator.is_open()
+                    if self.application.shell.mode() == Mode::Insert
                         && self.application.shell.command().is_none()
-                    {
-                        field_events.push(Event::Text(text));
-                    } else if self.application.shell.mode() == Mode::Insert
-                        && self.application.shell.command().is_none()
-                        && !self.application.graph_view_open
-                        && !self.application.database_view_open
-                        && !self.application.is_active_note_kanban()
                     {
                         if self.application.shell.focus() != Focus::Editor {
                             self.application.shell.set_focus(Focus::Editor);
@@ -453,12 +438,6 @@ impl NativeApp {
                         if help && self.application.shell.which_key().help.inserting {
                             field_events.push(Event::Paste(text));
                         }
-                        continue;
-                    }
-                    if (self.kanban.is_editing_text() || self.database.editing_query)
-                        && self.application.shell.command().is_none()
-                    {
-                        field_events.push(Event::Paste(text));
                         continue;
                     }
                     if self.application.shell.command().is_some() {
@@ -545,12 +524,6 @@ impl NativeApp {
                         self.handle_navigator_action(action);
                         continue;
                     }
-                    if (self.kanban.is_editing_text() || self.database.editing_query)
-                        && !matches!(key, egui::Key::Escape | egui::Key::Enter)
-                    {
-                        field_events.push(event);
-                        continue;
-                    }
                     let key = match key {
                         egui::Key::Escape => Key::Esc,
                         egui::Key::Enter if modifiers.shift => Key::ShiftEnter,
@@ -591,6 +564,9 @@ impl NativeApp {
             }
         }
         context.input_mut(|input| input.events = field_events);
+        if let Some(yanked) = self.application.shell.take_last_yank() {
+            context.copy_text(yanked);
+        }
     }
 }
 

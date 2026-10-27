@@ -28,23 +28,12 @@ pub struct BlockFact {
     pub range: Range<usize>,
 }
 
-/// Occurrence of a `#tag` in a Markdown document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TagFact {
-    /// Normalized tag name without the leading `#` (e.g. `zettelkasten`, `project/v2`).
-    pub name: String,
-    /// Source byte range of the tag including `#`.
-    pub range: Range<usize>,
-}
-
 /// Structured document facts extracted from a Markdown file.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DocFacts {
     pub headings: Vec<HeadingFact>,
     pub links: Vec<LinkOccurrence>,
     pub blocks: Vec<BlockFact>,
-    #[serde(default)]
-    pub tags: Vec<TagFact>,
 }
 
 /// Errors occurring during document facts extraction.
@@ -225,14 +214,10 @@ impl MarkdownFacts {
             }
         }
 
-        // 5. Pass 4: Extract inline `#tags` outside code blocks, links, HTML color hex, and headings
-        let tags = extract_inline_tags(text, &code_ranges, &all_links);
-
         Ok(DocFacts {
             headings,
             links: all_links,
             blocks,
-            tags,
         })
     }
 
@@ -340,94 +325,4 @@ fn slugify(text: &str) -> String {
         }
     }
     slug.trim_end_matches('-').to_string()
-}
-
-/// Extracts `#tag` occurrences from markdown text, excluding code blocks, links, headings, and hex colors.
-pub fn extract_inline_tags(
-    text: &str,
-    code_ranges: &[Range<usize>],
-    links: &[LinkOccurrence],
-) -> Vec<TagFact> {
-    let mut tags = Vec::new();
-    let mut code_cursor = CodeRangeCursor::new(code_ranges);
-    let mut link_idx = 0;
-    let bytes = text.as_bytes();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        if bytes[i] != b'#' {
-            i += 1;
-            continue;
-        }
-
-        // Skip multiple `#` (headings or `##`)
-        if i + 1 < bytes.len() && bytes[i + 1] == b'#' {
-            while i < bytes.len() && bytes[i] == b'#' {
-                i += 1;
-            }
-            continue;
-        }
-
-        // Must be preceded by start-of-line, whitespace, or opening punctuation `(` / `[` / `"`
-        if i > 0 {
-            let prev = text[..i].chars().next_back().unwrap_or(' ');
-            if !prev.is_whitespace() && !matches!(prev, '(' | '[' | '{' | '"' | '\'') {
-                i += 1;
-                continue;
-            }
-        }
-
-        // Skip if inside code block / inline code
-        if code_cursor.contains(i) {
-            i += 1;
-            continue;
-        }
-
-        // Skip if inside a link
-        while link_idx < links.len() && links[link_idx].range.end <= i {
-            link_idx += 1;
-        }
-        if link_idx < links.len() && links[link_idx].range.contains(&i) {
-            i = links[link_idx].range.end;
-            continue;
-        }
-
-        // Parse tag characters after `#`: must start with alphabetic or `_`
-        let after = &text[i + 1..];
-        let mut chars = after.char_indices();
-        let Some((_, first_ch)) = chars.next() else {
-            break;
-        };
-        if !first_ch.is_alphabetic() && first_ch != '_' {
-            i += 1;
-            continue;
-        }
-
-        let mut end_rel = first_ch.len_utf8();
-        let mut has_alpha = first_ch.is_alphabetic();
-        for (idx, ch) in chars {
-            if ch.is_alphanumeric() || matches!(ch, '_' | '-' | '/') {
-                if ch.is_alphabetic() {
-                    has_alpha = true;
-                }
-                end_rel = idx + ch.len_utf8();
-            } else {
-                break;
-            }
-        }
-
-        let tag_slice = after[..end_rel].trim_end_matches(['/', '-', '_']);
-        if !tag_slice.is_empty() && has_alpha {
-            let tag_end = i + 1 + tag_slice.len();
-            tags.push(TagFact {
-                name: tag_slice.to_string(),
-                range: i..tag_end,
-            });
-            i = tag_end;
-        } else {
-            i += 1;
-        }
-    }
-
-    tags
 }

@@ -113,7 +113,8 @@ impl OperationDialog {
                 if self.focus && matches!(operation, Operation::Trash { .. }) {
                     response.request_focus();
                 }
-                submit |= response.clicked();
+                submit |=
+                    response.clicked() || ui.input(|input| input.key_pressed(egui::Key::Enter));
                 close |= ui.button("Отмена · Esc").clicked();
             });
             close |= ui.input(|input| input.key_pressed(egui::Key::Escape));

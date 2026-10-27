@@ -60,31 +60,40 @@ pub(super) fn shape(
         if is_dark {
             Color32::from_rgb(235, 203, 139) // Nord Aurora Gold (#ebcb8b)
         } else {
-            Color32::from_rgb(166, 118, 28)
+            Color32::from_rgb(180, 120, 20)
         }
     } else if source_trim.starts_with("## ") {
+        if is_dark {
+            Color32::from_rgb(180, 142, 173) // Nord Aurora Purple (#b48ead)
+        } else {
+            Color32::from_rgb(130, 80, 150)
+        }
+    } else if source_trim.starts_with("### ") {
         if is_dark {
             Color32::from_rgb(136, 192, 208) // Nord Frost Cyan (#88c0d0)
         } else {
             Color32::from_rgb(43, 108, 176)
         }
-    } else if source_trim.starts_with("### ") {
+    } else if source_trim.starts_with("#### ") {
         if is_dark {
             Color32::from_rgb(129, 161, 193) // Nord Frost Blue (#81a1c1)
         } else {
             Color32::from_rgb(58, 110, 165)
         }
-    } else if source_trim.starts_with("#### ")
-        || source_trim.starts_with("##### ")
-        || source_trim.starts_with("###### ")
-    {
+    } else if source_trim.starts_with("##### ") {
+        if is_dark {
+            Color32::from_rgb(163, 190, 140) // Nord Aurora Green (#a3be8c)
+        } else {
+            Color32::from_rgb(60, 120, 70)
+        }
+    } else if source_trim.starts_with("###### ") {
         if is_dark {
             Color32::from_rgb(143, 188, 187) // Nord Frost Sage (#8fbcbb)
         } else {
             Color32::from_rgb(56, 132, 130)
         }
     } else if source_trim.starts_with('>') {
-        foreground.gamma_multiply(0.82)
+        foreground.gamma_multiply(0.85)
     } else {
         foreground
     };
@@ -168,11 +177,6 @@ pub(super) fn shape(
                             Color32::from_rgba_unmultiplied(136, 192, 208, 180),
                         );
                     }
-                    InlineStyle::Tag(tag_name) => {
-                        let [r, g, b, _] = crate::theme::resolve_tag_rgba(tag_name);
-                        format.color = Color32::from_rgb(r, g, b);
-                        format.background = Color32::from_rgba_unmultiplied(r, g, b, 52);
-                    }
                     InlineStyle::TextColor([r, g, b, a]) => {
                         format.color = Color32::from_rgba_unmultiplied(*r, *g, *b, *a);
                     }
@@ -201,8 +205,13 @@ pub(super) fn shape(
             format: base,
         });
     }
-    // A negative first-row indent reserves a hanging margin for subsequent rows.
-    job.sections[0].leading_space = -indent;
     job.wrap.max_width = (width - indent).max(1.0);
-    (painter.layout_job(job), indent)
+    let mut galley = painter.layout_job(job);
+    if indent > 0.0 && galley.rows.len() > 1 {
+        let galley_mut = std::sync::Arc::make_mut(&mut galley);
+        for row in galley_mut.rows.iter_mut().skip(1) {
+            row.pos.x += indent;
+        }
+    }
+    (galley, indent)
 }

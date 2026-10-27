@@ -281,13 +281,13 @@ fn test_markdown_smart_edit_and_undo() {
     buffer.undo().unwrap();
     assert_eq!(buffer.as_str(), initial);
 
-    // 4. Tab indent and ShiftTab outdent (default 2 spaces per MEBC-1 §3.2)
+    // 4. Tab indent and ShiftTab outdent (default 4 spaces)
     let mut buffer = Buffer::from_str("- Item");
     let tx_tab = plan_tab(&buffer, BytePos::new(2)).expect("Plan tab");
     buffer.apply(tx_tab).unwrap();
-    assert_eq!(buffer.as_str(), "  - Item");
+    assert_eq!(buffer.as_str(), "    - Item");
 
-    let tx_shift_tab = plan_shift_tab(&buffer, BytePos::new(4)).expect("Plan shift tab");
+    let tx_shift_tab = plan_shift_tab(&buffer, BytePos::new(6)).expect("Plan shift tab");
     buffer.apply(tx_shift_tab).unwrap();
     assert_eq!(buffer.as_str(), "- Item");
 }

@@ -58,6 +58,7 @@ fn has_markdown_syntax(text: &str) -> bool {
                 | b'='
                 | b'$'
                 | b'<'
+                | b'>'
                 | b'|'
                 | b'.'
                 | b')'
@@ -252,7 +253,7 @@ impl DisplayMap {
                 _ => {}
             }
         }
-        for range in text_ranges {
+        for range in &text_ranges {
             let mut start = range.start;
             while let Some(open) = text[start..range.end].find("[[") {
                 let open = start + open;
@@ -269,13 +270,37 @@ impl DisplayMap {
                 });
                 start = close + 2;
             }
-            for tag in
-                truff_core::markdown::facts::extract_inline_tags(&text[range.clone()], &[], &[])
-            {
-                self.styles.push(StyledSpan {
-                    content: (range.start + tag.range.start)..(range.start + tag.range.end),
-                    style: InlineStyle::Tag(tag.name),
-                });
+        }
+        let arrow_candidates = ["<-->", "-->", "<--", "<->", "->", "<-"];
+        for range in text_ranges {
+            let mut start = range.start;
+            while start < range.end {
+                let slice = &text[start..range.end];
+                let mut earliest: Option<(usize, &'static str)> = None;
+                for &cand in &arrow_candidates {
+                    if let Some(pos) = slice.find(cand) {
+                        match earliest {
+                            Some((best_pos, best_cand)) => {
+                                if pos < best_pos
+                                    || (pos == best_pos && cand.len() > best_cand.len())
+                                {
+                                    earliest = Some((pos, cand));
+                                }
+                            }
+                            None => {
+                                earliest = Some((pos, cand));
+                            }
+                        }
+                    }
+                }
+                if let Some((pos, cand)) = earliest {
+                    let idx = start + pos;
+                    self.markers
+                        .push((idx..idx + cand.len(), Some(idx..idx + cand.len())));
+                    start = idx + cand.len();
+                } else {
+                    break;
+                }
             }
         }
         // Obsidian ==highlight== syntax
@@ -377,6 +402,11 @@ impl DisplayMap {
         }
         for list in &mut self.lists {
             // Normalize marker spacing while keeping the source indentation intact.
+            while list.range.start < list.range.end
+                && matches!(text.as_bytes().get(list.range.start), Some(b' ' | b'\t'))
+            {
+                list.range.start += 1;
+            }
             while matches!(text.as_bytes().get(list.range.end), Some(b' ' | b'\t')) {
                 list.range.end += 1;
             }
@@ -420,6 +450,15 @@ impl DisplayMap {
             if trimmed == "---" || trimmed == "***" || trimmed == "___" {
                 return Some(Cow::Borrowed(" "));
             }
+            if trimmed == "-->" || trimmed == "->" {
+                return Some(Cow::Borrowed("→"));
+            }
+            if trimmed == "<--" || trimmed == "<-" {
+                return Some(Cow::Borrowed("←"));
+            }
+            if trimmed == "<-->" || trimmed == "<->" {
+                return Some(Cow::Borrowed("↔"));
+            }
             if (trimmed.starts_with("$$") && trimmed.ends_with("$$") && trimmed.len() >= 4)
                 || (trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() >= 2)
             {
@@ -428,10 +467,9 @@ impl DisplayMap {
         }
         let list = self.list_at_marker(range)?;
         match list.kind {
-            ListKind::Bullet => Some(Cow::Borrowed(match list.depth % 3 {
+            ListKind::Bullet => Some(Cow::Borrowed(match list.depth % 2 {
                 0 => "• ",
-                1 => "◦ ",
-                _ => "▪ ",
+                _ => "◦ ",
             })),
             ListKind::Task { checked: false, .. } => Some(Cow::Borrowed("☐ ")),
             ListKind::Task { checked: true, .. } => Some(Cow::Borrowed("☑ ")),

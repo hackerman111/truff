@@ -200,7 +200,7 @@ impl Paragraph {
                     Pos2::new(x_start.min(x_end) - HIGHLIGHT_PAD_X, min_y),
                     Pos2::new(x_start.max(x_end) + HIGHLIGHT_PAD_X, max_y),
                 );
-                painter.rect_filled(rect, 2.0, color);
+                painter.rect_filled(rect, 0.0, color);
             }
             row_char_start = row_char_end;
         }
@@ -236,14 +236,14 @@ impl Paragraph {
                         && selection.contains(&self.range.start))
                     || self.range.contains(&selection.start);
                 if is_selected {
-                    let width = (self.galley.size().x + self.text_indent).max(view.content_width);
+                    let width = self.galley.size().x.max(view.content_width);
                     let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
                     painter.rect_filled(
                         Rect::from_min_max(
-                            Pos2::new(origin.x - self.text_indent, min_y),
-                            Pos2::new(origin.x - self.text_indent + width, max_y),
+                            Pos2::new(origin.x, min_y),
+                            Pos2::new(origin.x + width, max_y),
                         ),
-                        2.0,
+                        0.0,
                         color(view.theme.selection),
                     );
                 }
@@ -254,85 +254,123 @@ impl Paragraph {
                     self.paint_selection_range(painter, origin, a, b, color(view.theme.selection));
                 }
             }
-        } else if view.mode == Mode::Normal
-            && let Some(cursor) = view
-                .cursor
-                .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
+        } else if let Some(cursor) = view
+            .cursor
+            .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
         {
             let caret = self.char_rect_at(origin, cursor);
-            let width = (self.galley.size().x + self.text_indent).max(view.content_width);
+            let width = self.galley.size().x.max(view.content_width);
             let line_rect = Rect::from_min_max(
-                Pos2::new(origin.x - self.text_indent, caret.min.y - HIGHLIGHT_PAD_Y),
-                Pos2::new(
-                    origin.x - self.text_indent + width,
-                    caret.max.y + HIGHLIGHT_PAD_Y,
-                ),
+                Pos2::new(origin.x, caret.min.y - HIGHLIGHT_PAD_Y),
+                Pos2::new(origin.x + width, caret.max.y + HIGHLIGHT_PAD_Y),
             );
-            let line_bg = color(view.theme.bg_secondary).gamma_multiply(0.4);
-            painter.rect_filled(line_rect, 2.0, line_bg);
+            let line_bg = if view.theme.is_dark() {
+                Color32::from_rgba_unmultiplied(180, 142, 173, 26) // Soft purple tint
+            } else {
+                Color32::from_rgba_unmultiplied(180, 142, 173, 35)
+            };
+            painter.rect_filled(line_rect, 0.0, line_bg);
+        }
+        if self.presentation.code {
+            let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
+            let width = self.galley.size().x.max(view.content_width);
+            let code_rect = Rect::from_min_max(
+                Pos2::new(origin.x, min_y - 1.0),
+                Pos2::new(origin.x + width, max_y + 1.0),
+            );
+            painter.rect_filled(
+                code_rect,
+                4.0,
+                color(view.theme.bg_panel).gamma_multiply(0.45),
+            );
         }
         if self.display.source_text().trim_start().starts_with('>') {
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
-            let bar_x = origin.x - self.text_indent + 2.0;
+            let width = self.galley.size().x.max(view.content_width);
+            let quote_rect = Rect::from_min_max(
+                Pos2::new(origin.x, min_y),
+                Pos2::new(origin.x + width, max_y),
+            );
+            painter.rect_filled(
+                quote_rect,
+                3.0,
+                color(view.theme.bg_panel).gamma_multiply(0.35),
+            );
+            let bar_x = origin.x + 2.0;
             painter.line_segment(
                 [Pos2::new(bar_x, min_y + 1.0), Pos2::new(bar_x, max_y - 1.0)],
                 egui::Stroke::new(2.5, color(view.theme.accent).gamma_multiply(0.65)),
             );
         }
-        let src = self.display.source_text();
-        let leading_ws = &src[..src.len() - src.trim_start_matches([' ', '\t']).len()];
-        if !leading_ws.is_empty() {
-            let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
-            let left_base_x = origin.x - self.text_indent;
-            let mut space_cols = 0usize;
-            let mut tab_levels = Vec::new();
-            for ch in leading_ws.chars() {
-                if ch == '\t' {
-                    let level = space_cols / 2;
-                    tab_levels.push((level, true));
-                    space_cols = (level + 1) * 2;
+        if let Some(list) = &self.presentation.list
+            && list.depth > 0
+        {
+            let guide_color = if view.theme.is_dark() {
+                color(view.theme.text_muted).gamma_multiply(0.65)
+            } else {
+                color(view.theme.text_muted).gamma_multiply(0.55)
+            };
+            let bullet_glyph = self
+                .galley
+                .rows
+                .first()
+                .and_then(|row| row.glyphs.iter().find(|g| !g.chr.is_whitespace()));
+            let (dot_half, circle_half, default_step) =
+                if let Some(section) = self.galley.job.sections.first() {
+                    let font = section.format.font_id.clone();
+                    let g_dot = painter.layout_no_wrap("•".to_owned(), font.clone(), self.color);
+                    let g_circle = painter.layout_no_wrap("◦".to_owned(), font.clone(), self.color);
+                    let g_space = painter.layout_no_wrap("    ".to_owned(), font, self.color);
+                    (
+                        g_dot.size().x * 0.5,
+                        g_circle.size().x * 0.5,
+                        g_space.size().x,
+                    )
                 } else {
-                    space_cols += 1;
-                    if space_cols.is_multiple_of(2) {
-                        tab_levels.push((space_cols / 2 - 1, false));
-                    }
-                }
-            }
-            let is_active_line = view
-                .cursor
-                .is_some_and(|cursor| self.range.contains(&cursor) || cursor == self.range.end);
-            let step_x = 14.0;
-            for (level, is_tab) in tab_levels {
-                let guide_x = (left_base_x + (level as f32) * step_x + 4.0).round();
-                let guide_color = if is_active_line {
-                    color(view.theme.accent).gamma_multiply(0.55)
-                } else {
-                    color(view.theme.accent).gamma_multiply(0.28)
+                    (3.1, 5.1, 16.0)
                 };
-                painter.line_segment(
-                    [
-                        Pos2::new(guide_x, min_y + 1.0),
-                        Pos2::new(guide_x, max_y - 1.0),
-                    ],
-                    egui::Stroke::new(if is_active_line { 1.8 } else { 1.2 }, guide_color),
-                );
-                if is_tab {
-                    let mid_y = (min_y + max_y) * 0.5;
-                    painter.line_segment(
-                        [
-                            Pos2::new(guide_x + 2.0, mid_y),
-                            Pos2::new(guide_x + step_x - 3.0, mid_y),
-                        ],
-                        egui::Stroke::new(1.4, color(view.theme.accent).gamma_multiply(0.5)),
-                    );
+            let step_width = if list.depth > 0 {
+                bullet_glyph.map_or(default_step, |g| g.pos.x / (list.depth as f32))
+            } else {
+                default_step
+            };
+            for level in 0..list.depth {
+                let half = if level % 2 == 0 {
+                    dot_half
+                } else {
+                    circle_half
+                };
+                let guide_x = (origin.x + (level as f32) * step_width + half).round();
+                for (row_idx, row) in self.galley.rows.iter().enumerate() {
+                    let has_text_collision = if row_idx == 0 {
+                        row.glyphs.iter().any(|g| {
+                            if g.chr.is_whitespace() {
+                                return false;
+                            }
+                            let g_left = origin.x + row.pos.x + g.pos.x;
+                            let g_right = g_left + g.size().x.max(g.advance_width);
+                            guide_x >= g_left - 1.0 && guide_x <= g_right + 1.0
+                        })
+                    } else {
+                        origin.x + row.pos.x <= guide_x + 4.0
+                    };
+                    if !has_text_collision {
+                        let row_top = origin.y + row.pos.y;
+                        let row_bottom = row_top + row.size.y.max(super::super::LINE_HEIGHT);
+                        painter.line_segment(
+                            [Pos2::new(guide_x, row_top), Pos2::new(guide_x, row_bottom)],
+                            egui::Stroke::new(1.0, guide_color),
+                        );
+                    }
                 }
             }
         }
         painter.galley(origin, self.galley.clone(), self.color);
         if self.display.is_rule_hidden() {
             let y = (origin.y + self.galley.size().y * 0.5).round();
-            let width = (self.galley.size().x + self.text_indent).max(view.content_width);
-            let stroke = egui::Stroke::new(1.0, color(view.theme.border_subtle));
+            let width = self.galley.size().x.max(view.content_width);
+            let stroke =
+                egui::Stroke::new(2.0, color(view.theme.border_subtle).gamma_multiply(1.5));
             painter.hline(origin.x..=(origin.x + width), y, stroke);
         }
         if let Some(cursor) = view
@@ -346,7 +384,7 @@ impl Paragraph {
             }
             painter.rect_filled(
                 caret,
-                2.0,
+                0.0,
                 color(view.theme.cursor).gamma_multiply(if view.mode == Mode::Insert {
                     1.0
                 } else {

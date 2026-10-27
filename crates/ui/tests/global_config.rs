@@ -173,7 +173,7 @@ fn typography_config_defaults_and_parsing() {
     let default_config = truff_ui::app::global_config::GlobalConfig::default();
     assert_eq!(default_config.typography.font_family, "proportional");
     assert_eq!(default_config.typography.base_font_size, 15.0);
-    assert_eq!(default_config.typography.line_height_multiplier, 1.5);
+    assert_eq!(default_config.typography.line_height_multiplier, 1.55);
     assert_eq!(default_config.typography.custom_font_path, None);
 }
 

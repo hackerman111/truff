@@ -23,7 +23,15 @@ fn default_base_font_size() -> f32 {
 }
 
 fn default_line_height_multiplier() -> f32 {
-    1.5
+    1.55
+}
+
+fn default_show_inline_title() -> bool {
+    true
+}
+
+fn default_max_content_width() -> f32 {
+    720.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,6 +44,10 @@ pub struct TypographyConfig {
     pub line_height_multiplier: f32,
     #[serde(default)]
     pub custom_font_path: Option<PathBuf>,
+    #[serde(default = "default_show_inline_title")]
+    pub show_inline_title: bool,
+    #[serde(default = "default_max_content_width")]
+    pub max_content_width: f32,
 }
 
 impl Default for TypographyConfig {
@@ -45,6 +57,8 @@ impl Default for TypographyConfig {
             base_font_size: default_base_font_size(),
             line_height_multiplier: default_line_height_multiplier(),
             custom_font_path: None,
+            show_inline_title: default_show_inline_title(),
+            max_content_width: default_max_content_width(),
         }
     }
 }
@@ -60,8 +74,6 @@ pub struct GlobalConfig {
     pub themes: BTreeMap<String, CustomThemeConfig>,
     #[serde(default)]
     pub typography: TypographyConfig,
-    #[serde(default)]
-    pub tag_colors: BTreeMap<String, String>,
 }
 
 impl Default for GlobalConfig {
@@ -72,7 +84,6 @@ impl Default for GlobalConfig {
             theme: default_theme(),
             themes: BTreeMap::new(),
             typography: TypographyConfig::default(),
-            tag_colors: BTreeMap::new(),
         }
     }
 }
@@ -80,7 +91,7 @@ impl Default for GlobalConfig {
 impl GlobalConfig {
     /// Resolves the configured active Theme.
     pub fn resolve_theme(&self) -> Theme {
-        match self.theme.as_str() {
+        let mut theme = match self.theme.as_str() {
             "nord" => Theme::nord(),
             "dark" | "obsidian-dark" => Theme::obsidian_dark(),
             "light" => Theme::light(),
@@ -91,7 +102,9 @@ impl GlobalConfig {
                     Theme::nord()
                 }
             }
-        }
+        };
+        theme.geometry.markdown_max_width = self.typography.max_content_width;
+        theme
     }
 
     /// Returns the canonical path to `config.toml` in `$XDG_CONFIG_HOME/truff` or `~/.config/truff`.
@@ -118,7 +131,6 @@ impl GlobalConfig {
         if config.prune_nonexistent() {
             let _ = config.save();
         }
-        crate::theme::set_global_tag_colors(&config.tag_colors);
         config
     }
 
@@ -143,7 +155,6 @@ impl GlobalConfig {
 
     /// Saves the global configuration atomically to `config.toml`.
     pub fn save(&self) -> io::Result<()> {
-        crate::theme::set_global_tag_colors(&self.tag_colors);
         let Some(path) = Self::config_path() else {
             return Ok(());
         };

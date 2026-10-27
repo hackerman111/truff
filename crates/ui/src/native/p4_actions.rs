@@ -115,15 +115,15 @@ impl NativeApp {
                     .set_focus(crate::focus::Focus::Editor);
             }
             WikiAction::CreateMasterNote { folder } => {
-                match self.application.sync_folder_wiki_master(&folder) {
-                    Ok(master_rel) => {
-                        self.wiki.open_folder(&folder, &self.application);
-                        self.application.status =
-                            format!("Мастер-файл {master_rel} собран и систематизирован");
-                    }
-                    Err(e) => {
-                        self.application.status = e.to_string();
-                    }
+                let path = if folder.is_empty() {
+                    "index.md".to_string()
+                } else {
+                    format!("{folder}/index.md")
+                };
+                if let Err(e) = self.application.create_note(&path) {
+                    self.application.status = e.to_string();
+                } else {
+                    self.wiki.open_folder(&folder, &self.application);
                 }
             }
             WikiAction::CreateNewNote { folder } => {
@@ -134,6 +134,7 @@ impl NativeApp {
                     format!("{folder}/")
                 };
                 self.dialogs.file.error = None;
+                self.dialogs.file.needs_cursor_end = true;
             }
             WikiAction::Close => {
                 self.wiki.close();

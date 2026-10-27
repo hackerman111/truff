@@ -3,14 +3,11 @@ mod backlinks;
 mod command_bar;
 mod content;
 pub mod creation;
-pub mod database;
 mod editor;
 mod events;
 mod file_commands;
-pub mod graph;
 mod hints;
 pub mod icons;
-pub mod kanban;
 mod navigator;
 mod navigator_search;
 mod outline;
@@ -59,6 +56,41 @@ pub fn configure_fonts(
             .or_default()
             .insert(0, "custom_font".to_owned());
     }
+
+    // Ensure Hack (bundled in egui) is a fallback for Proportional font family so
+    // Unicode arrows (→, ←, ↔) and symbols don't degrade into notdef square boxes.
+    if let Some(proportional) = fonts.families.get_mut(&egui::FontFamily::Proportional)
+        && !proportional.contains(&"Hack".to_owned())
+    {
+        proportional.push("Hack".to_owned());
+    }
+
+    // Add broad-coverage system fallback fonts if available on the system
+    let fallback_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+    ];
+    for fb in fallback_paths {
+        if std::path::Path::new(fb).exists()
+            && let Ok(bytes) = std::fs::read(fb)
+        {
+            fonts.font_data.insert(
+                "system_symbol_fallback".to_owned(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                prop.push("system_symbol_fallback".to_owned());
+            }
+            if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                mono.push("system_symbol_fallback".to_owned());
+            }
+            break;
+        }
+    }
+
     ctx.set_fonts(fonts);
 }
 
@@ -70,9 +102,6 @@ pub struct NativeApp {
     pub toc: toc::FloatingToc,
     pub wiki: wiki::FolderWiki,
     pub stream: stream::NoteStream,
-    pub graph: graph::GraphWidget,
-    pub kanban: kanban::KanbanWidget,
-    pub database: database::DatabaseWidget,
     hints_tick: Instant,
     last_typography: crate::app::global_config::TypographyConfig,
     last_theme: Option<crate::theme::Theme>,
@@ -100,9 +129,6 @@ impl NativeApp {
             toc: toc::FloatingToc::new(),
             wiki: wiki::FolderWiki::new(),
             stream: stream::NoteStream::new(),
-            graph: graph::GraphWidget::default(),
-            kanban: kanban::KanbanWidget::default(),
-            database: database::DatabaseWidget::default(),
             last_typography,
             last_theme: None,
             recent_vaults: recent::RecentVaults::default(),
@@ -230,13 +256,7 @@ impl NativeApp {
                 ui,
                 &theme,
             );
-            let dock_toc_action = backlinks::show(
-                &mut self.application,
-                &mut self.toc,
-                &mut self.graph,
-                ui,
-                &theme,
-            );
+            let dock_toc_action = backlinks::show(&mut self.application, &mut self.toc, ui, &theme);
             self.handle_toc_action(dock_toc_action);
         }
         self.editor.input_blocked = self.application.shell.command().is_some()
@@ -247,17 +267,11 @@ impl NativeApp {
             || (self.toc.is_open && !self.toc.is_pinned)
             || (self.application.shell.which_key().is_visible()
                 && self.application.shell.which_key().mode()
-                    == crate::overlays::WhichKeyMode::Help)
-            || self.application.graph_view_open
-            || self.application.database_view_open
-            || self.application.is_active_note_kanban();
+                    == crate::overlays::WhichKeyMode::Help);
         self.editor.retain_views(self.application.shell.workspace());
         let open_vault = content::show(
             &mut self.application,
             &mut self.editor,
-            &mut self.graph,
-            &mut self.kanban,
-            &mut self.database,
             &mut self.recent_vaults,
             ui,
             &theme,
@@ -301,12 +315,18 @@ impl NativeApp {
         if self.application.quit_requested
             || context.input(|input| input.viewport().close_requested())
         {
-            match self.application.shutdown() {
-                Ok(()) => context.send_viewport_cmd(egui::ViewportCommand::Close),
-                Err(error) => {
-                    self.application.status = error.to_string();
-                    self.application.quit_requested = false;
-                    context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.application.has_any_dirty_buffer() {
+                self.application.quit_requested = false;
+                self.dialogs.quit_confirm.open = true;
+                context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            } else {
+                match self.application.shutdown() {
+                    Ok(()) => context.send_viewport_cmd(egui::ViewportCommand::Close),
+                    Err(error) => {
+                        self.application.status = error.to_string();
+                        self.application.quit_requested = false;
+                        context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    }
                 }
             }
         }

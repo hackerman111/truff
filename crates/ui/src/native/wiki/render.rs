@@ -191,15 +191,10 @@ fn render_overview(
                                 line: None,
                             });
                         }
-                        if widgets::secondary_button(ui, "🔄 Автосбор в index.md").clicked() {
-                            *action = Some(WikiAction::CreateMasterNote {
-                                folder: data.folder_path.clone(),
-                            });
-                        }
                     } else if widgets::primary_button_with_icon(
                         ui,
                         icons::Icon::Plus,
-                        "Создать и собрать index.md",
+                        "Создать index.md",
                     )
                     .clicked()
                     {

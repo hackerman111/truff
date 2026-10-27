@@ -61,6 +61,34 @@ impl Application {
         Ok(())
     }
 
+    pub(crate) fn close_unused_scratch_views(&mut self) {
+        let scratch_views: Vec<_> = self
+            .shell
+            .workspace()
+            .views()
+            .iter()
+            .filter_map(|(&id, view)| {
+                let entry = self.shell.workspace().buffers().get(view.buffer_id())?;
+                if entry.path().is_none() {
+                    let is_empty_and_clean = entry
+                        .buffer()
+                        .is_none_or(|b| !b.is_dirty() && b.as_str().is_empty());
+                    if is_empty_and_clean {
+                        return Some((id, entry.id()));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if self.shell.workspace().views().len() > scratch_views.len() {
+            for (view_id, buffer_id) in scratch_views {
+                let _ = self.shell.workspace_mut().close_view(view_id);
+                let _ = self.shell.workspace_mut().close_buffer_force(buffer_id);
+            }
+        }
+    }
+
     pub(crate) fn close_other_views(&mut self, keep: ViewId) -> AppResult<()> {
         if self.shell.workspace().get_view(keep).is_none() {
             return Err("View was closed".into());

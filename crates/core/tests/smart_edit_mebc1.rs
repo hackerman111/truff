@@ -1,4 +1,4 @@
-use truff_core::markdown::smart_edit::{plan_enter, plan_shift_tab, plan_tab};
+use truff_core::markdown::smart_edit::{plan_backspace, plan_enter, plan_shift_tab, plan_tab};
 use truff_core::text::{Buffer, BytePos};
 
 #[test]
@@ -145,7 +145,7 @@ fn test_mebc1_quote_with_list() {
 
 #[test]
 fn test_mebc1_tab_and_shift_tab_subtrees() {
-    // Tab indents by 2 spaces and indents child items as well
+    // Tab indents by 4 spaces and indents child items as well
     let doc = "- Parent\n  - Child 1\n  - Child 2\n- Other\n";
     let mut b = Buffer::from_str(doc);
     let cursor = BytePos::new("- Par".len());
@@ -154,7 +154,7 @@ fn test_mebc1_tab_and_shift_tab_subtrees() {
     b.apply(tx).unwrap();
     assert_eq!(
         b.as_str(),
-        "  - Parent\n    - Child 1\n    - Child 2\n- Other\n"
+        "    - Parent\n      - Child 1\n      - Child 2\n- Other\n"
     );
 
     // Shift+Tab outdents by 2 spaces along with children
@@ -222,18 +222,22 @@ fn test_mebc1_enter_list_continuation_dedup() {
 }
 
 #[test]
-fn test_plan_enter_auto_aligns_list_indentation() {
-    // Tab-indented list item normalizes both current and new line to 2-space indent stops
-    let mut b = Buffer::from_str("\t- Sub item");
-    let cursor = BytePos::new("\t- Sub item".len());
-    let tx = plan_enter(&b, cursor).expect("enter on tab-indented list item");
+fn test_plan_backspace_removes_tab_or_indent_step() {
+    // 4 spaces indentation removed in one backspace
+    let mut b = Buffer::from_str("    text");
+    let tx = plan_backspace(&b, BytePos::new(4)).expect("backspace 4 spaces");
     b.apply(tx).unwrap();
-    assert_eq!(b.as_str(), "  - Sub item\n  - ");
+    assert_eq!(b.as_str(), "text");
 
-    // Odd 3-space indented list item aligns to 2-space step (4 spaces)
-    let mut b = Buffer::from_str("   - Misaligned item");
-    let cursor = BytePos::new("   - Misaligned item".len());
-    let tx = plan_enter(&b, cursor).expect("enter on 3-space misaligned item");
+    // 2 spaces indentation removed in one backspace
+    let mut b = Buffer::from_str("  text");
+    let tx = plan_backspace(&b, BytePos::new(2)).expect("backspace 2 spaces");
     b.apply(tx).unwrap();
-    assert_eq!(b.as_str(), "    - Misaligned item\n    - ");
+    assert_eq!(b.as_str(), "text");
+
+    // Empty list item backspace outdents
+    let mut b = Buffer::from_str("  - ");
+    let tx = plan_backspace(&b, BytePos::new(4)).expect("backspace on nested list item");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "- ");
 }

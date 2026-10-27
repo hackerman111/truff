@@ -41,12 +41,6 @@ pub struct Application {
     pub toc_requested: Option<String>,
     pub wiki_requested: Option<String>,
     pub stream_requested: Option<String>,
-    pub graph_view_open: bool,
-    pub database_view_open: bool,
-    pub kanban_mode_override: Option<bool>,
-    pub right_dock_visible: bool,
-    pub right_dock_tab_requested: Option<usize>,
-    pub pending_template: Option<(String, truff_core::markdown::NoteTemplateKind)>,
     pub link_completion: crate::overlays::LinkCompletionOverlay,
     store: Option<Store>,
     catalog: Option<CatalogWorker>,
@@ -97,12 +91,6 @@ impl Application {
             toc_requested: None,
             wiki_requested: None,
             stream_requested: None,
-            graph_view_open: false,
-            database_view_open: false,
-            kanban_mode_override: None,
-            right_dock_visible: false,
-            right_dock_tab_requested: None,
-            pending_template: None,
             link_completion: crate::overlays::LinkCompletionOverlay::default(),
             store: None,
             catalog: None,
@@ -130,17 +118,6 @@ impl Application {
             document_facts: None,
             recent_notes: VecDeque::new(),
         }
-    }
-
-    pub fn is_active_note_kanban(&self) -> bool {
-        if let Some(override_val) = self.kanban_mode_override {
-            return override_val;
-        }
-        let Some(buf) = self.shell.editor_buffer() else {
-            return false;
-        };
-        let path_str = self.active_relative_path().unwrap_or_default();
-        truff_core::markdown::is_kanban_document(&path_str, &buf.as_str())
     }
 
     pub fn vault_path(&self) -> Option<&Path> {
