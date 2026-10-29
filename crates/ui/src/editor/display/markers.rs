@@ -253,6 +253,15 @@ impl DisplayMap {
                 _ => {}
             }
         }
+        let trimmed_start = text.trim_start();
+        if trimmed_start.starts_with('>') {
+            let ws_before = text.len() - trimmed_start.len();
+            let gt_count = trimmed_start.bytes().take_while(|b| *b == b'>').count();
+            let after_gt = &trimmed_start[gt_count..];
+            let ws_after = if after_gt.starts_with(' ') { 1 } else { 0 };
+            let marker_len = ws_before + gt_count + ws_after;
+            self.markers.push((0..marker_len, None));
+        }
         for range in &text_ranges {
             let mut start = range.start;
             while let Some(open) = text[start..range.end].find("[[") {

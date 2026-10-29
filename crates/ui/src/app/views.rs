@@ -19,7 +19,7 @@ pub(super) struct ViewHistory {
 }
 
 impl Application {
-    pub(crate) fn view_is_pinned(&self, id: ViewId) -> bool {
+    pub fn view_is_pinned(&self, id: ViewId) -> bool {
         self.view_history.pinned.contains(&id)
     }
 

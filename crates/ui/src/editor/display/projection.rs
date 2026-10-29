@@ -44,7 +44,9 @@ impl DisplayMap {
             }
             let caret_touches =
                 |range: &Range<usize>| cursor_offset >= range.start && cursor_offset <= range.end;
-            let revealed = if self.mode == ProjectionMode::Reading {
+            let is_quote_marker =
+                self.source_text.trim_start().starts_with('>') && marker_range.start == 0;
+            let revealed = if self.mode == ProjectionMode::Reading || is_quote_marker {
                 false
             } else {
                 caret_touches(marker_range)

@@ -77,6 +77,7 @@ impl NavigatorState {
         self.search_mode = false;
         self.jump_labels_active = false;
         self.cached_preview = None;
+        self.preview_visible = true;
         for item in &mut items {
             if item.char_mask == 0 {
                 item.update_char_mask();

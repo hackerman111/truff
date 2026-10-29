@@ -3,6 +3,7 @@ use crate::{components, theme::Theme};
 
 mod chrome;
 mod list;
+pub mod markdown;
 mod preview;
 
 pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) -> NavigatorAction {
@@ -31,7 +32,9 @@ fn show_inner(
     egui::Modal::new(egui::Id::new("universal_navigator"))
         .frame(components::overlay_frame(theme))
         .show(context, |ui| {
-            ui.set_width((size.x - theme.spacing_lg * 2.0).max(1.0));
+            let modal_width = (size.x - theme.spacing_lg * 2.0).max(1.0);
+            ui.set_width(modal_width);
+            ui.set_max_width(modal_width);
             ui.set_height((size.y - theme.spacing_lg * 2.0).max(1.0));
             if handle_input && let Some(next) = handle_window_input(state, ui) {
                 action = next;
@@ -85,6 +88,7 @@ fn show_inner(
                         egui::vec2(remaining_width, height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
+                            ui.set_max_width(remaining_width);
                             if state.actions_menu_open {
                                 chrome::actions(ui, state, theme, height, &mut action);
                             } else {

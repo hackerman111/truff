@@ -749,3 +749,42 @@ fn test_color_palette_expanded_style_highlight_callout_remove_and_undo() {
         "Styled <span style=\"color:#BF616A\">note</span> text line"
     );
 }
+
+#[test]
+fn session_pin_and_unpin_with_p_does_not_hide_preview_in_files() {
+    let ctx = egui::Context::default();
+    let mut application = Application::new();
+    application.shell.set_editor_text("content\n");
+    let view_id = application.shell.workspace().active_view().unwrap();
+    let mut app = NativeApp::new(application, &ctx);
+
+    app.open_navigator(NavigatorMode::Sessions);
+    assert!(app.navigator.preview_visible);
+
+    // Press 'p' to toggle pin in Sessions mode
+    let action = app.navigator.handle_key_event(NavKey::Char('p'), false);
+    assert_eq!(action, NavigatorAction::PinView { view_id });
+    app.handle_navigator_action(action);
+    assert!(app.application.view_is_pinned(view_id));
+    assert!(
+        app.navigator.preview_visible,
+        "pinning must not hide preview"
+    );
+
+    // Press 'p' again to unpin in Sessions mode
+    let action = app.navigator.handle_key_event(NavKey::Char('p'), false);
+    assert_eq!(action, NavigatorAction::PinView { view_id });
+    app.handle_navigator_action(action);
+    assert!(!app.application.view_is_pinned(view_id));
+    assert!(
+        app.navigator.preview_visible,
+        "unpinning must not hide preview"
+    );
+
+    // Switch to Files mode
+    app.open_navigator(NavigatorMode::Files);
+    assert!(
+        app.navigator.preview_visible,
+        "preview must remain visible in files panel"
+    );
+}

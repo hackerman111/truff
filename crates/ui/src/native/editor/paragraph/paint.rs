@@ -286,21 +286,145 @@ impl Paragraph {
         }
         if self.display.source_text().trim_start().starts_with('>') {
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
-            let width = self.galley.size().x.max(view.content_width);
+            let width = (self.galley.size().x + 24.0).max(view.content_width);
             let quote_rect = Rect::from_min_max(
-                Pos2::new(origin.x, min_y),
-                Pos2::new(origin.x + width, max_y),
+                Pos2::new(origin.x, min_y - 2.5),
+                Pos2::new(origin.x + width, max_y + 2.5),
             );
             painter.rect_filled(
                 quote_rect,
-                3.0,
+                4.0,
                 color(view.theme.bg_panel).gamma_multiply(0.35),
             );
-            let bar_x = origin.x + 2.0;
+            let bar_x = origin.x + 4.0;
             painter.line_segment(
-                [Pos2::new(bar_x, min_y + 1.0), Pos2::new(bar_x, max_y - 1.0)],
-                egui::Stroke::new(2.5, color(view.theme.accent).gamma_multiply(0.65)),
+                [Pos2::new(bar_x, min_y - 0.5), Pos2::new(bar_x, max_y + 0.5)],
+                egui::Stroke::new(3.0, color(view.theme.accent).gamma_multiply(0.85)),
             );
+        }
+        if self.presentation.table_header {
+            let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
+            let width = self.galley.size().x.max(view.content_width);
+            let header_rect = Rect::from_min_max(
+                Pos2::new(origin.x, min_y - 1.0),
+                Pos2::new(origin.x + width, max_y + 1.0),
+            );
+            painter.rect_filled(
+                header_rect,
+                2.0,
+                color(view.theme.bg_panel).gamma_multiply(0.4),
+            );
+            let line_y = max_y + 1.0;
+            let border_stroke =
+                egui::Stroke::new(1.0, color(view.theme.border_subtle).gamma_multiply(1.5));
+            painter.hline(origin.x..=(origin.x + width), line_y, border_stroke);
+        }
+        if self.presentation.table_delimiter {
+            let y = (origin.y + self.galley.size().y * 0.5).round();
+            let width = self.galley.size().x.max(view.content_width);
+            painter.hline(
+                origin.x..=(origin.x + width),
+                y,
+                egui::Stroke::new(1.0, color(view.theme.border_subtle).gamma_multiply(1.2)),
+            );
+        }
+        let code_bg = if view.theme.is_dark() {
+            Color32::from_rgba_unmultiplied(128, 128, 128, 50)
+        } else {
+            Color32::from_rgba_unmultiplied(100, 100, 100, 40)
+        };
+        for span in self.display.styled_spans() {
+            if span.style == crate::editor::InlineStyle::Code {
+                let visual_start = self
+                    .display
+                    .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
+                    .get();
+                let visual_end = self
+                    .display
+                    .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
+                    .get();
+                let visual_text = self.display.visual_text();
+                let start_chars = visual_text[..visual_start.min(visual_text.len())]
+                    .chars()
+                    .count();
+                let end_chars = visual_text[..visual_end.min(visual_text.len())]
+                    .chars()
+                    .count();
+                if start_chars >= end_chars {
+                    continue;
+                }
+                let mut row_char_start = 0;
+                for row in &self.galley.rows {
+                    let row_char_count = row.char_count_including_newline().0;
+                    let row_char_end = row_char_start + row_char_count;
+                    let s_start = start_chars.max(row_char_start);
+                    let s_end = end_chars.min(row_char_end);
+                    if s_start < s_end {
+                        let col_start = s_start - row_char_start;
+                        let col_end = s_end - row_char_start;
+                        let x_start =
+                            row.x_offset(egui::text::CharIndex(col_start)) + row.pos.x + origin.x;
+                        let x_end =
+                            row.x_offset(egui::text::CharIndex(col_end)) + row.pos.x + origin.x;
+                        let (min_y, max_y) = row_vertical_bounds(origin.y, row);
+                        let pad_x = 3.5;
+                        let pad_y = 1.0;
+                        let rect = Rect::from_min_max(
+                            Pos2::new(x_start.min(x_end) - pad_x, min_y - pad_y),
+                            Pos2::new(x_start.max(x_end) + pad_x, max_y + pad_y),
+                        );
+                        painter.rect_filled(rect, 4.0, code_bg);
+                    }
+                    row_char_start = row_char_end;
+                }
+            } else if span.style == crate::editor::InlineStyle::Link {
+                let visual_start = self
+                    .display
+                    .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
+                    .get();
+                let visual_end = self
+                    .display
+                    .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
+                    .get();
+                let visual_text = self.display.visual_text();
+                let start_chars = visual_text[..visual_start.min(visual_text.len())]
+                    .chars()
+                    .count();
+                let end_chars = visual_text[..visual_end.min(visual_text.len())]
+                    .chars()
+                    .count();
+                if start_chars >= end_chars {
+                    continue;
+                }
+                let link_color = Color32::from_rgba_unmultiplied(136, 192, 208, 220);
+                let mut row_char_start = 0;
+                for row in &self.galley.rows {
+                    let row_char_count = row.char_count_including_newline().0;
+                    let row_char_end = row_char_start + row_char_count;
+                    let s_start = start_chars.max(row_char_start);
+                    let s_end = end_chars.min(row_char_end);
+                    if s_start < s_end {
+                        let col_start = s_start - row_char_start;
+                        let col_end = s_end - row_char_start;
+                        let x_start =
+                            row.x_offset(egui::text::CharIndex(col_start)) + row.pos.x + origin.x;
+                        let x_end =
+                            row.x_offset(egui::text::CharIndex(col_end)) + row.pos.x + origin.x;
+                        let line_y = if let Some(g) = row.glyphs.get(col_start) {
+                            (origin.y + row.pos.y + g.pos.y + 1.5).round()
+                        } else {
+                            let (_min_y, max_y) = row_vertical_bounds(origin.y, row);
+                            (max_y - HIGHLIGHT_PAD_Y + 1.0).round()
+                        };
+                        painter.hline(
+                            x_start.min(x_end)..=x_start.max(x_end),
+                            line_y,
+                            egui::Stroke::new(1.0, link_color),
+                        );
+                    }
+                    row_char_start = row_char_end;
+                }
+            }
         }
         if let Some(list) = &self.presentation.list
             && list.depth > 0

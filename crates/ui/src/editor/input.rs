@@ -45,6 +45,8 @@ pub enum EditorInput {
     Paste(String),
     /// Toggle the source character inside a task checkbox, preserving cursor and selection.
     ToggleTask { checkbox: usize },
+    /// Follow an internal link to a document heading or note.
+    FollowLink(String),
 }
 
 /// Unified input adapter maintaining transient IME composition state and executing edits.
@@ -192,6 +194,7 @@ impl InputAdapter {
                 *cursor = buffer.byte_len();
                 Ok(None)
             }
+            EditorInput::FollowLink(_) => Ok(None),
         }
     }
 

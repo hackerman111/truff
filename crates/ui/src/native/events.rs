@@ -571,6 +571,10 @@ impl NativeApp {
 }
 
 pub(super) fn input(application: &mut crate::app::Application, input: EditorInput) {
+    if let EditorInput::FollowLink(target) = input {
+        application.navigate_to_link(&target);
+        return;
+    }
     if application.shell.mode() == Mode::Insert && application.shell.focus() != Focus::Editor {
         application.shell.set_focus(Focus::Editor);
     }

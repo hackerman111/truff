@@ -189,7 +189,6 @@ impl EditorWidget {
             // A pathological logical line uses a bounded source window around its caret.
             // Other lines remain visible; the Rope and source offsets stay authoritative.
             let long = end - start > MAX_LINE_BYTES;
-            let width = if long { f32::INFINITY } else { content_width };
             if long {
                 let center = if line == cursor_line { cursor } else { start };
                 range.start = center.saturating_sub(MAX_LINE_BYTES / 2).max(start);
@@ -206,6 +205,12 @@ impl EditorWidget {
             {
                 range.end -= 1;
             }
+            let is_table = slice_is_table_row(&buffer.slice(range.clone()));
+            let width = if long || is_table {
+                f32::INFINITY
+            } else {
+                content_width
+            };
             let style = ParagraphStyle {
                 foreground,
                 pixels_per_point: ui.ctx().pixels_per_point(),
@@ -253,13 +258,17 @@ impl EditorWidget {
                             *checkbox = checkbox.saturating_sub(range.start);
                         }
                     }
-                    if slice_is_table_row(&slice) {
-                        let next_start = line_start(buffer, line + 1);
-                        let next_end = line_start(buffer, line + 2);
-                        if next_start < buffer.byte_len()
-                            && slice_is_table_delimiter(&buffer.slice(next_start..next_end))
-                        {
-                            presentation.table_header = true;
+                    if is_table {
+                        if slice_is_table_delimiter(&slice) {
+                            presentation.table_delimiter = true;
+                        } else {
+                            let next_start = line_start(buffer, line + 1);
+                            let next_end = line_start(buffer, line + 2);
+                            if next_start < buffer.byte_len()
+                                && slice_is_table_delimiter(&buffer.slice(next_start..next_end))
+                            {
+                                presentation.table_header = true;
+                            }
                         }
                     }
                     presentation
@@ -323,7 +332,7 @@ impl EditorWidget {
             if entry.refresh(&painter, style, paragraph_cursor, paragraph_selection) {
                 self.builds += 1;
             }
-            if long && line == cursor_line && follow {
+            if (long || is_table) && line == cursor_line && follow {
                 let caret = entry.char_rect_at(egui::Pos2::ZERO, cursor);
                 if caret.left() < self.horizontal {
                     self.horizontal = caret.left().max(0.0);
@@ -458,6 +467,32 @@ impl EditorWidget {
                 }
             }
             if intersects_viewport
+                && let Some(pointer_pos) = response.hover_pos()
+                && pointer_pos.y >= origin.y
+                && pointer_pos.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
+            {
+                let index = entry.galley.cursor_from_pos(pointer_pos - origin).index;
+                let visual = entry
+                    .display
+                    .visual_text()
+                    .char_indices()
+                    .nth(index.0)
+                    .map_or(entry.display.visual_text().len(), |(offset, _)| offset);
+                let source_offset = entry
+                    .display
+                    .visual_to_source(VisualPos::new(visual))
+                    .pos
+                    .get();
+                let is_on_link = entry.display.styled_spans().iter().any(|span| {
+                    span.style == crate::editor::InlineStyle::Link
+                        && source_offset >= span.content.start
+                        && source_offset <= span.content.end
+                });
+                if is_on_link {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+            }
+            if intersects_viewport
                 && (!self.input_blocked && (response.clicked() || response.dragged()))
                 && let Some(position) = response.interact_pointer_pos()
                 && let position = if response.dragged() {
@@ -483,12 +518,44 @@ impl EditorWidget {
                     });
                     continue;
                 }
-                let source = entry.range.start
-                    + entry
-                        .display
-                        .visual_to_source(VisualPos::new(visual))
-                        .pos
-                        .get();
+                let source_offset = entry
+                    .display
+                    .visual_to_source(VisualPos::new(visual))
+                    .pos
+                    .get();
+                if response.clicked() {
+                    let link_span = entry.display.styled_spans().iter().find(|span| {
+                        span.style == crate::editor::InlineStyle::Link
+                            && source_offset >= span.content.start
+                            && source_offset <= span.content.end
+                    });
+                    if let Some(span) = link_span
+                        && let Some(dest) =
+                            extract_link_destination(entry.display.source_text(), &span.content)
+                    {
+                        match dest {
+                            LinkDestination::External(url) => {
+                                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                                clicked = Some(EditorInput::SetSelection {
+                                    anchor: entry.range.start + source_offset,
+                                    head: entry.range.start + source_offset,
+                                });
+                            }
+                            LinkDestination::InternalHeading(heading) => {
+                                clicked = Some(EditorInput::FollowLink(format!("#{heading}")));
+                            }
+                            LinkDestination::Note { path, heading } => {
+                                let target = match heading {
+                                    Some(h) => format!("{path}#{h}"),
+                                    None => path,
+                                };
+                                clicked = Some(EditorInput::FollowLink(target));
+                            }
+                        }
+                        continue;
+                    }
+                }
+                let source = entry.range.start + source_offset;
                 clicked = Some(EditorInput::SetSelection {
                     anchor: if response.dragged() {
                         view.anchor().get()
@@ -573,4 +640,168 @@ fn slice_is_table_delimiter(slice: &truff_core::RopeSlice<'_>) -> bool {
             .chunks()
             .flat_map(str::bytes)
             .all(|b| b.is_ascii_whitespace() || matches!(b, b'|' | b'-' | b':'))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LinkDestination {
+    External(String),
+    InternalHeading(String),
+    Note {
+        path: String,
+        heading: Option<String>,
+    },
+}
+
+pub(crate) fn extract_link_destination(
+    source_text: &str,
+    span_content: &std::ops::Range<usize>,
+) -> Option<LinkDestination> {
+    let is_wikilink = source_text
+        .get(..span_content.start)
+        .is_some_and(|prefix| prefix.ends_with("[["))
+        && source_text
+            .get(span_content.end..)
+            .is_some_and(|suffix| suffix.starts_with("]]"));
+    if is_wikilink {
+        let inner = source_text.get(span_content.clone())?;
+        let target = inner.split('|').next().unwrap_or(inner).trim();
+        if let Some(heading) = target.strip_prefix('#') {
+            let h_trim = heading.trim();
+            if !h_trim.is_empty() {
+                return Some(LinkDestination::InternalHeading(h_trim.to_string()));
+            }
+        } else if let Some((note, heading)) = target.split_once('#') {
+            let n_trim = note.trim();
+            let h_trim = heading.trim();
+            if !n_trim.is_empty() {
+                return Some(LinkDestination::Note {
+                    path: n_trim.to_string(),
+                    heading: (!h_trim.is_empty()).then(|| h_trim.to_string()),
+                });
+            }
+        } else if !target.is_empty() {
+            return Some(LinkDestination::Note {
+                path: target.to_string(),
+                heading: None,
+            });
+        }
+    }
+    if let Some(tail) = source_text.get(span_content.end..)
+        && let Some(after_paren) = tail.strip_prefix("](")
+        && let Some(close_paren) = after_paren.find(')')
+    {
+        let raw_url = &after_paren[..close_paren];
+        let mut url = raw_url.trim();
+        if let Some(first_word) = url.split_whitespace().next() {
+            url = first_word;
+        }
+        let clean = url.trim_matches(['<', '>']);
+        if clean.starts_with("http://")
+            || clean.starts_with("https://")
+            || clean.starts_with("mailto:")
+            || clean.starts_with("ftp://")
+        {
+            return Some(LinkDestination::External(clean.to_string()));
+        }
+        if clean.starts_with("www.") {
+            return Some(LinkDestination::External(format!("https://{clean}")));
+        }
+        if let Some(heading) = clean.strip_prefix('#') {
+            let h_trim = heading.trim();
+            if !h_trim.is_empty() {
+                return Some(LinkDestination::InternalHeading(h_trim.to_string()));
+            }
+        }
+        if let Some((note, heading)) = clean.split_once('#') {
+            let n_trim = note.trim();
+            let h_trim = heading.trim();
+            if !n_trim.is_empty() {
+                return Some(LinkDestination::Note {
+                    path: n_trim.to_string(),
+                    heading: (!h_trim.is_empty()).then(|| h_trim.to_string()),
+                });
+            }
+        } else if !clean.is_empty() {
+            return Some(LinkDestination::Note {
+                path: clean.to_string(),
+                heading: None,
+            });
+        }
+    }
+    if let Some(slice) = source_text.get(span_content.clone()) {
+        let trimmed = slice.trim().trim_matches(['<', '>']);
+        if trimmed.starts_with("http://")
+            || trimmed.starts_with("https://")
+            || trimmed.starts_with("mailto:")
+        {
+            return Some(LinkDestination::External(trimmed.to_string()));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_link_destination_markdown_internal_heading() {
+        let text = "Check [TOC](#heading-1) now";
+        let start = text.find("TOC").unwrap();
+        let span = start..start + 3;
+        assert_eq!(
+            extract_link_destination(text, &span),
+            Some(LinkDestination::InternalHeading("heading-1".into()))
+        );
+    }
+
+    #[test]
+    fn test_extract_link_destination_markdown_note_and_heading() {
+        let text = "See [doc](notes/guide.md#setup) here";
+        let start = text.find("doc").unwrap();
+        let span = start..start + 3;
+        assert_eq!(
+            extract_link_destination(text, &span),
+            Some(LinkDestination::Note {
+                path: "notes/guide.md".into(),
+                heading: Some("setup".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_extract_link_destination_wikilink_heading_only() {
+        let text = "Go to [[#Section Two]]";
+        let start = text.find("#Section Two").unwrap();
+        let span = start..start + "#Section Two".len();
+        assert_eq!(
+            extract_link_destination(text, &span),
+            Some(LinkDestination::InternalHeading("Section Two".into()))
+        );
+    }
+
+    #[test]
+    fn test_extract_link_destination_wikilink_note_and_heading() {
+        let text = "Refer to [[My Note#Important Points|Important]]";
+        let start = text.find("My Note#Important Points|Important").unwrap();
+        let span = start..start + "My Note#Important Points|Important".len();
+        assert_eq!(
+            extract_link_destination(text, &span),
+            Some(LinkDestination::Note {
+                path: "My Note".into(),
+                heading: Some("Important Points".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_extract_link_destination_external_url() {
+        let text = "Visit [Google](https://google.com)";
+        let start = text.find("Google").unwrap();
+        let span = start..start + 6;
+        assert_eq!(
+            extract_link_destination(text, &span),
+            Some(LinkDestination::External("https://google.com".into()))
+        );
+    }
 }

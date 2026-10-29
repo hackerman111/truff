@@ -852,20 +852,35 @@ fn test_native_heading_hierarchy_and_reading_mode_and_inline_paint() {
 
     let has_code_section = job.sections.iter().any(|sec| {
         let sec_text = sec_slice(&sec.byte_range);
-        sec_text.contains("inline code")
-            && sec.format.font_id.family == egui::FontFamily::Monospace
-            && sec.format.background != egui::Color32::TRANSPARENT
+        sec_text.contains("inline code") && sec.format.font_id.family == egui::FontFamily::Monospace
     });
     assert!(
         has_code_section,
         "Must have monospace code formatted section"
     );
 
+    let has_code_pill = output.shapes.iter().any(|shape| match &shape.shape {
+        egui::Shape::Rect(rect) => rect.corner_radius.nw > 0,
+        _ => false,
+    });
+    assert!(
+        has_code_pill,
+        "Must have rounded corner pill for inline code"
+    );
+
     let has_link_section = job.sections.iter().any(|sec| {
         let sec_text = sec_slice(&sec.byte_range);
-        sec_text.contains("a link") && sec.format.underline.width > 0.0
+        sec_text.contains("a link") && sec.format.color == egui::Color32::from_rgb(136, 192, 208)
     });
-    assert!(has_link_section, "Must have underlined link section");
+    assert!(has_link_section, "Must have colored link section");
+
+    let has_link_line = output.shapes.iter().any(|shape| match &shape.shape {
+        egui::Shape::LineSegment { stroke, .. } => {
+            stroke.color == egui::Color32::from_rgba_unmultiplied(136, 192, 208, 220)
+        }
+        _ => false,
+    });
+    assert!(has_link_line, "Must have tight custom underline for link");
 
     let has_highlight_section = job.sections.iter().any(|sec| {
         let sec_text = sec_slice(&sec.byte_range);
@@ -983,4 +998,46 @@ fn test_lateral_margin_max_content_width_setting() {
     let (content_width, margin_x) = application.shell.theme().geometry.column_metrics(1400.0);
     assert_eq!(content_width, 950.0);
     assert_eq!(margin_x, (1400.0 - 950.0) / 2.0);
+}
+
+#[test]
+fn test_table_rendering_does_not_wrap_and_renders_cleanly() {
+    let table = "| Header 1 | Header 2 | Header 3 |\n|---|---|---|\n| Very long cell content that would ordinarily wrap if width was constrained to content_width | Another long cell with details | Final cell |\n";
+    let (mut app, context) = scratch(table);
+    let output = frame(&mut app, &context, vec![]);
+
+    // Find the long table row
+    let long_row_text = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("Very long cell content") => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .expect("missing long table row galley");
+
+    // Must be a single line (NOT wrapped into multiple lines!)
+    assert_eq!(
+        long_row_text.galley.rows.len(),
+        1,
+        "Table row must not wrap into multiple visual lines"
+    );
+}
+
+#[test]
+fn test_link_tight_underline_and_url_extraction() {
+    let text = "Check [LibriSpeech — OpenSLR](http://www.openslr.org/12/) today.";
+    let (mut app, context) = scratch(text);
+    let output = frame(&mut app, &context, vec![]);
+
+    // Verify tight custom underline line segment exists
+    let has_underline = output.shapes.iter().any(|shape| match &shape.shape {
+        egui::Shape::LineSegment { stroke, .. } => {
+            stroke.color == egui::Color32::from_rgba_unmultiplied(136, 192, 208, 220)
+        }
+        _ => false,
+    });
+    assert!(has_underline, "Must paint tight custom underline for link");
 }

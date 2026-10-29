@@ -312,7 +312,7 @@ fn merge_sorted_links(
     merged
 }
 
-fn slugify(text: &str) -> String {
+pub fn slugify(text: &str) -> String {
     let mut slug = String::new();
     for c in text.chars() {
         if c.is_alphanumeric() {

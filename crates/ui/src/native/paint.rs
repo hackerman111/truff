@@ -45,7 +45,7 @@ pub fn resolve_font_and_line_height(source: &str, typography: &TypographyConfig)
     }
 }
 
-pub(super) fn shape(
+pub fn shape(
     painter: &Painter,
     display: &DisplayMap,
     foreground: Color32,
@@ -98,7 +98,10 @@ pub(super) fn shape(
         foreground
     };
 
-    let indent = display.list_content_start().map_or(0.0, |start| {
+    let is_quote = source_trim.starts_with('>');
+    let quote_indent = if is_quote { 24.0 } else { 0.0 };
+
+    let list_indent = display.list_content_start().map_or(0.0, |start| {
         painter
             .layout_no_wrap(
                 display.visual_text()[..start.get()].to_owned(),
@@ -108,6 +111,7 @@ pub(super) fn shape(
             .size()
             .x
     });
+    let total_indent = quote_indent + list_indent;
 
     let mut job = egui::text::LayoutJob::simple(
         display.visual_text().to_owned(),
@@ -168,14 +172,11 @@ pub(super) fn shape(
                     InlineStyle::Code => {
                         format.font_id =
                             FontId::new((font.size * 0.95).max(9.0), egui::FontFamily::Monospace);
-                        format.background = Color32::from_rgba_unmultiplied(128, 128, 128, 45);
+                        format.background = Color32::TRANSPARENT;
                     }
                     InlineStyle::Link => {
                         format.color = Color32::from_rgb(136, 192, 208);
-                        format.underline = egui::Stroke::new(
-                            1.0,
-                            Color32::from_rgba_unmultiplied(136, 192, 208, 180),
-                        );
+                        format.underline = egui::Stroke::NONE;
                     }
                     InlineStyle::TextColor([r, g, b, a]) => {
                         format.color = Color32::from_rgba_unmultiplied(*r, *g, *b, *a);
@@ -205,13 +206,22 @@ pub(super) fn shape(
             format: base,
         });
     }
-    job.wrap.max_width = (width - indent).max(1.0);
+    job.wrap.max_width = if width.is_infinite() {
+        f32::INFINITY
+    } else {
+        (width - total_indent).max(1.0)
+    };
     let mut galley = painter.layout_job(job);
-    if indent > 0.0 && galley.rows.len() > 1 {
+    if quote_indent > 0.0 || (list_indent > 0.0 && galley.rows.len() > 1) {
         let galley_mut = std::sync::Arc::make_mut(&mut galley);
-        for row in galley_mut.rows.iter_mut().skip(1) {
-            row.pos.x += indent;
+        for (i, row) in galley_mut.rows.iter_mut().enumerate() {
+            if quote_indent > 0.0 {
+                row.pos.x += quote_indent;
+            }
+            if list_indent > 0.0 && i > 0 {
+                row.pos.x += list_indent;
+            }
         }
     }
-    (galley, indent)
+    (galley, total_indent)
 }

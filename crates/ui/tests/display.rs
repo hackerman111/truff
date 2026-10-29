@@ -595,3 +595,54 @@ fn test_thematic_break_highlight_and_math() {
     });
     output.textures_delta.clear();
 }
+
+#[test]
+fn test_blockquote_marker_and_code_spans() {
+    let text = " > **Обозначения происхождения:** `R02`, `R03`, `R04` — `README02.md`";
+    let mut map = DisplayMap::new(text, ProjectionMode::LivePreview);
+    // When cursor is elsewhere (usize::MAX), the quote marker ' > ' is hidden!
+    map.set_cursor(BytePos::new(usize::MAX));
+    assert!(
+        !map.visual_text().starts_with('>'),
+        "Blockquote marker should be hidden in live preview when cursor is elsewhere: {:?}",
+        map.visual_text()
+    );
+
+    // In LivePreview, the quote marker > is never rendered into visual text even when cursor touches position 0
+    map.set_cursor(BytePos::new(0));
+    assert!(
+        !map.visual_text().starts_with('>'),
+        "Blockquote marker should stay hidden in live preview even when cursor touches position 0: {:?}",
+        map.visual_text()
+    );
+
+    // Verify code spans are properly extracted
+    let code_spans: Vec<_> = map
+        .styled_spans()
+        .iter()
+        .filter(|s| s.style == InlineStyle::Code)
+        .collect();
+    assert_eq!(code_spans.len(), 4);
+    assert_eq!(&text[code_spans[0].content.clone()], "R02");
+    assert_eq!(&text[code_spans[1].content.clone()], "R03");
+    assert_eq!(&text[code_spans[2].content.clone()], "R04");
+    assert_eq!(&text[code_spans[3].content.clone()], "README02.md");
+}
+
+#[test]
+fn test_shape_quote_indent_and_code_transparent_bg() {
+    let ctx = egui::Context::default();
+    let typo = truff_ui::app::global_config::TypographyConfig::default();
+    let text = "> Some quote with `code` here and [link](https://example.com)";
+    let map = DisplayMap::new(text, ProjectionMode::LivePreview);
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let (galley, indent) =
+            truff_ui::native::shape(ui.painter(), &map, egui::Color32::WHITE, 720.0, &typo);
+        assert_eq!(indent, 24.0, "Quote line must have 24.0px left indent");
+        assert!(
+            galley.rows[0].pos.x >= 24.0,
+            "Galley row must start at or past 24.0px"
+        );
+    });
+    output.textures_delta.clear();
+}

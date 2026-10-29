@@ -31,6 +31,7 @@ const FILES: &[QuickActionSpec] = &[
 ];
 const SESSIONS: &[QuickActionSpec] = &[
     spec("↵", "Перейти", "Активировать вкладку"),
+    spec("p", "Закрепить", "Закрепить / открепить вкладку"),
     spec("d", "Закрыть", "Закрыть буфер"),
     spec("/", "Поиск", "Фильтр буферов"),
     spec("?", "Действия", "Все операции со вкладками"),
@@ -66,7 +67,10 @@ impl NavigatorState {
         }
         self.context_actions()
             .into_iter()
-            .find(|action| action.key == key)
+            .find(|action| {
+                action.key == key
+                    || (key.eq_ignore_ascii_case("p") && (action.key == "p" || action.key == "P"))
+            })
             .map_or(NavigatorAction::None, |action| action.action)
     }
 }
@@ -204,7 +208,7 @@ impl NavigatorState {
                     action: NavigatorAction::CloseView { view_id: *view_id },
                 },
                 QuickAction {
-                    key: "P".into(),
+                    key: "p".into(),
                     label: "Закрепить / открепить".into(),
                     description: "Сохранить вкладку при закрытии остальных".into(),
                     action: NavigatorAction::PinView { view_id: *view_id },
@@ -268,7 +272,7 @@ mod tests {
         let mut state = NavigatorState::new();
         for (mode, keys) in [
             (NavigatorMode::Files, &["↵", "a", "r", "d", "/", "?"][..]),
-            (NavigatorMode::Sessions, &["↵", "d", "/", "?"][..]),
+            (NavigatorMode::Sessions, &["↵", "p", "d", "/", "?"][..]),
             (NavigatorMode::Commands, &["↵", "/", "?"][..]),
             (NavigatorMode::Boards, &["↵", "/"][..]),
             (NavigatorMode::Outline, &["↵", "/"][..]),

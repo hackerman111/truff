@@ -49,7 +49,10 @@ impl NavigatorState {
             NavKey::Char(c) => {
                 let c_str = c.to_string();
                 let actions = self.context_actions();
-                if let Some(act) = actions.iter().find(|a| a.key == c_str) {
+                if let Some(act) = actions.iter().find(|a| {
+                    a.key == c_str
+                        || (c.eq_ignore_ascii_case(&'p') && (a.key == "p" || a.key == "P"))
+                }) {
                     let action = act.action.clone();
                     self.actions_menu_open = false;
                     action
@@ -200,7 +203,11 @@ impl NavigatorState {
                 self.expand_or_child();
                 NavigatorAction::None
             }
-            NavKey::Char(' ' | 'p') => {
+            NavKey::Char('p') if self.mode != NavigatorMode::Sessions => {
+                self.preview_visible = !self.preview_visible;
+                NavigatorAction::None
+            }
+            NavKey::Char(' ') => {
                 self.preview_visible = !self.preview_visible;
                 NavigatorAction::None
             }
@@ -235,9 +242,9 @@ impl NavigatorState {
             NavKey::Char('y') => self.quick_action("y"),
             NavKey::Char('r') => self.quick_action("r"),
             NavKey::Char('d') => self.quick_action("d"),
-            NavKey::Char('P' | 'o' | 'u') if self.mode == NavigatorMode::Sessions => {
+            NavKey::Char('p' | 'P' | 'o' | 'u') if self.mode == NavigatorMode::Sessions => {
                 let wanted = match key {
-                    NavKey::Char('P') => "P",
+                    NavKey::Char('p' | 'P') => "p",
                     NavKey::Char('o') => "o",
                     _ => "u",
                 };
@@ -246,7 +253,7 @@ impl NavigatorState {
                 }
                 self.context_actions()
                     .into_iter()
-                    .find(|action| action.key == wanted)
+                    .find(|action| action.key == wanted || (wanted == "p" && action.key == "P"))
                     .map_or(NavigatorAction::None, |action| action.action)
             }
             NavKey::Escape => {

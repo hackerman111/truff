@@ -22,6 +22,7 @@ pub struct LinePresentation {
     pub list: Option<ListMarker>,
     pub code: bool,
     pub table_header: bool,
+    pub table_delimiter: bool,
 }
 
 /// Builds a one-character task edit; stale or invalid targets are ignored.
