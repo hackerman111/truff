@@ -91,3 +91,31 @@ fn test_gui_renders_which_key_overlay() {
     )
     .drop_without_applying_deltas();
 }
+
+#[test]
+fn test_which_key_omits_task_hints_and_space_x_still_works() {
+    let mut shell = Shell::new();
+    shell.set_editor_text("- [ ] buy milk\n");
+    assert_eq!(shell.mode(), Mode::Normal);
+
+    // Press Space: which-key hints should be populated for navigation
+    let action = shell.feed_key(Key::Char(' '));
+    assert_eq!(action, ShellAction::Incomplete);
+
+    let hints = shell.which_key().hints();
+    assert!(!hints.is_empty(), "Space should produce which-key hints");
+    for hint in hints {
+        let desc = hint.description.to_lowercase();
+        assert!(
+            !desc.contains("task") && !desc.contains("таск") && !desc.contains("задач"),
+            "Hint for key {:?} contains task text: {}",
+            hint.key,
+            hint.description
+        );
+    }
+
+    // Space x completes cycling the task status
+    let action_x = shell.feed_key(Key::Char('x'));
+    assert_eq!(action_x, ShellAction::EditorEdit);
+    assert_eq!(shell.editor_text(), "- [/] buy milk\n");
+}

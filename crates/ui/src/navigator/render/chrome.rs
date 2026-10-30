@@ -10,24 +10,60 @@ pub(super) fn header(
     theme: &Theme,
     action: &mut NavigatorAction,
 ) {
+    let is_hub = matches!(
+        state.mode,
+        crate::navigator::NavigatorMode::Outline | crate::navigator::NavigatorMode::Links
+    );
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("navigator_provider")
-            .selected_text(state.mode.title())
-            .show_ui(ui, |ui| {
-                for mode in crate::navigator::NavigatorMode::ALL {
-                    if ui
-                        .selectable_label(mode == state.mode, mode.title())
-                        .clicked()
-                    {
-                        *action = NavigatorAction::SwitchProvider { mode };
+        if is_hub {
+            if ui
+                .selectable_label(
+                    state.mode == crate::navigator::NavigatorMode::Outline,
+                    "Оглавление",
+                )
+                .clicked()
+            {
+                state.hub_tasks.focus_tasks = false;
+                *action = NavigatorAction::SwitchProvider {
+                    mode: crate::navigator::NavigatorMode::Outline,
+                };
+            }
+            if ui
+                .selectable_label(
+                    state.mode == crate::navigator::NavigatorMode::Links,
+                    "Backlinks",
+                )
+                .clicked()
+            {
+                state.hub_tasks.focus_tasks = false;
+                *action = NavigatorAction::SwitchProvider {
+                    mode: crate::navigator::NavigatorMode::Links,
+                };
+            }
+            ui.label(
+                egui::RichText::new("Tab — переключить · h/l — фокус")
+                    .size(theme.geometry.ui_font_size - 2.0)
+                    .color(color(theme.text_muted)),
+            );
+        } else {
+            egui::ComboBox::from_id_salt("navigator_provider")
+                .selected_text(state.mode.title())
+                .show_ui(ui, |ui| {
+                    for mode in crate::navigator::NavigatorMode::ALL {
+                        if ui
+                            .selectable_label(mode == state.mode, mode.title())
+                            .clicked()
+                        {
+                            *action = NavigatorAction::SwitchProvider { mode };
+                        }
                     }
-                }
-            });
-        ui.label(
-            egui::RichText::new("Tab / Shift-Tab")
-                .size(theme.geometry.ui_font_size - 2.0)
-                .color(color(theme.text_primary)),
-        );
+                });
+            ui.label(
+                egui::RichText::new("Tab / Shift-Tab")
+                    .size(theme.geometry.ui_font_size - 2.0)
+                    .color(color(theme.text_primary)),
+            );
+        }
         ui.add(
             egui::Label::new(
                 egui::RichText::new(&state.context_title).color(color(theme.text_muted)),
@@ -39,14 +75,17 @@ pub(super) fn header(
                 state.close();
                 *action = NavigatorAction::Close;
             }
+            let mode_badge = if state.search_mode || state.hub_tasks.editing.is_some() {
+                "Ввод"
+            } else if is_hub && state.hub_tasks.focus_tasks {
+                "Задачи"
+            } else {
+                "Normal"
+            };
             ui.label(
-                egui::RichText::new(if state.search_mode {
-                    "Ввод"
-                } else {
-                    "Normal"
-                })
-                .monospace()
-                .color(color(theme.accent_primary)),
+                egui::RichText::new(mode_badge)
+                    .monospace()
+                    .color(color(theme.accent_primary)),
             );
         });
     });
@@ -58,9 +97,23 @@ pub(super) fn footer(
     theme: &Theme,
     action: &mut NavigatorAction,
 ) {
+    let is_hub = matches!(
+        state.mode,
+        crate::navigator::NavigatorMode::Outline | crate::navigator::NavigatorMode::Links
+    );
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().button_padding = egui::vec2(theme.spacing_sm, theme.spacing_xs);
         ui.spacing_mut().interact_size.y = theme.geometry.list_row_height - theme.spacing_sm;
+        if is_hub && state.hub_tasks.focus_tasks {
+            ui.label(
+                egui::RichText::new(
+                    "Space/x статус · a добавить · e изменить · d удалить · 1/2/3 категория · j/k выбор · h к списку · Tab связи",
+                )
+                .size(theme.geometry.ui_font_size - 2.0)
+                .color(color(theme.text_muted)),
+            );
+            return;
+        }
         for quick in state.quick_actions() {
             let display_key = if quick.key == "↵" {
                 "Enter"
@@ -83,6 +136,13 @@ pub(super) fn footer(
                     }
                 }
             }
+        }
+        if is_hub {
+            ui.label(
+                egui::RichText::new("Tab Оглавление/Backlinks · l к задачам · j/k навигация")
+                    .size(theme.geometry.ui_font_size - 2.0)
+                    .color(color(theme.text_muted)),
+            );
         }
         if matches!(
             state.mode,

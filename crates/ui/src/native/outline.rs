@@ -1,17 +1,35 @@
 use truff_core::{Buffer, markdown::facts::DocFacts};
 
 pub(super) fn items(buffer: &Buffer, facts: &DocFacts) -> Vec<crate::navigator::NavigatorItem> {
+    let len = buffer.byte_len();
     facts
         .headings
         .iter()
-        .map(|heading| {
+        .enumerate()
+        .map(|(idx, heading)| {
             let line = buffer.line_of_byte(heading.range.start) + 1;
-            crate::navigator::NavigatorItem::new_heading(
+            let mut item = crate::navigator::NavigatorItem::new_heading(
                 line as u64,
                 line,
                 heading.level as usize,
                 heading.text.clone(),
-            )
+            );
+            let start = heading.range.start.min(len);
+            let next_start = facts
+                .headings
+                .get(idx + 1)
+                .map_or(len, |next| next.range.start.min(len));
+            let end = buffer
+                .snap_to_grapheme_boundary(truff_core::BytePos::new(
+                    next_start.min(start.saturating_add(4096)),
+                ))
+                .get()
+                .max(start);
+            let section_md = buffer.slice(start..end).to_string();
+            if !section_md.trim().is_empty() {
+                item.preview = Some(section_md.into_boxed_str());
+            }
+            item
         })
         .collect()
 }

@@ -25,47 +25,67 @@ pub(super) fn show(ui: &mut egui::Ui, state: &mut NavigatorState, theme: &Theme,
             .cached_preview
             .as_ref()
             .is_none_or(|(id, _)| *id != item_id)
-        && let NavigatorItemPayload::File { path, is_dir } = &item.payload
     {
-        let full_path = if let Some(root) = &state.vault_root {
-            root.join(path)
-        } else {
-            std::path::PathBuf::from(path)
-        };
-        let loaded = if *is_dir {
-            if let Ok(entries) = std::fs::read_dir(&full_path) {
-                let mut files = 0usize;
-                let mut dirs = 0usize;
-                for e in entries.flatten() {
-                    if e.file_type().is_ok_and(|ft| ft.is_dir()) {
-                        dirs += 1;
+        match &item.payload {
+            NavigatorItemPayload::File { path, is_dir } => {
+                let full_path = if let Some(root) = &state.vault_root {
+                    root.join(path)
+                } else {
+                    std::path::PathBuf::from(path)
+                };
+                let loaded = if *is_dir {
+                    if let Ok(entries) = std::fs::read_dir(&full_path) {
+                        let mut files = 0usize;
+                        let mut dirs = 0usize;
+                        for e in entries.flatten() {
+                            if e.file_type().is_ok_and(|ft| ft.is_dir()) {
+                                dirs += 1;
+                            } else {
+                                files += 1;
+                            }
+                        }
+                        format!("Заметок: {files} · Вложенных папок: {dirs}").into_boxed_str()
                     } else {
-                        files += 1;
+                        Box::from("Папка хранилища")
                     }
-                }
-                format!("Заметок: {files} · Вложенных папок: {dirs}").into_boxed_str()
-            } else {
-                Box::from("Папка хранилища")
-            }
-        } else if let Ok(file) = std::fs::File::open(&full_path) {
-            let mut bytes = Vec::with_capacity(4096);
-            if file.take(4096).read_to_end(&mut bytes).is_ok() {
-                let text = String::from_utf8_lossy(&bytes);
-                let mut out = String::new();
-                for (i, line) in text.lines().take(30).enumerate() {
-                    if i > 0 {
-                        out.push('\n');
+                } else if let Ok(file) = std::fs::File::open(&full_path) {
+                    let mut bytes = Vec::with_capacity(4096);
+                    if file.take(4096).read_to_end(&mut bytes).is_ok() {
+                        let text = String::from_utf8_lossy(&bytes);
+                        let mut out = String::new();
+                        for (i, line) in text.lines().take(30).enumerate() {
+                            if i > 0 {
+                                out.push('\n');
+                            }
+                            out.push_str(line);
+                        }
+                        out.into_boxed_str()
+                    } else {
+                        Box::from("Файл не открыт")
                     }
-                    out.push_str(line);
-                }
-                out.into_boxed_str()
-            } else {
-                Box::from("Файл не открыт")
+                } else {
+                    Box::from("Файл не открыт")
+                };
+                state.cached_preview = Some((item_id, loaded));
             }
-        } else {
-            Box::from("Файл не открыт")
-        };
-        state.cached_preview = Some((item_id, loaded));
+            NavigatorItemPayload::Location { path, byte } => {
+                let full_path = if let Some(root) = &state.vault_root {
+                    root.join(path)
+                } else {
+                    std::path::PathBuf::from(path)
+                };
+                if let Ok(text) = std::fs::read_to_string(&full_path) {
+                    let target_line = text[..(*byte).min(text.len())]
+                        .lines()
+                        .count()
+                        .saturating_sub(1);
+                    let start_line = target_line.saturating_sub(4);
+                    let snippet: Vec<&str> = text.lines().skip(start_line).take(20).collect();
+                    state.cached_preview = Some((item_id, snippet.join("\n").into_boxed_str()));
+                }
+            }
+            _ => {}
+        }
     }
 
     let Some(item) = state.items.get(item_idx) else {
@@ -327,12 +347,17 @@ pub(super) fn show(ui: &mut egui::Ui, state: &mut NavigatorState, theme: &Theme,
                         egui::RichText::new(format!("H{level} · Строка {line}"))
                             .color(color(theme.accent_primary)),
                     );
-                    ui.label(
-                        egui::RichText::new(text)
-                            .strong()
-                            .size(theme.geometry.ui_font_size + 1.0)
-                            .color(color(theme.text_primary)),
-                    );
+                    if let Some(preview) = item.preview.as_deref().or(cached_text) {
+                        ui.separator();
+                        super::markdown::render(ui, preview, theme);
+                    } else {
+                        ui.label(
+                            egui::RichText::new(text)
+                                .strong()
+                                .size(theme.geometry.ui_font_size + 1.0)
+                                .color(color(theme.text_primary)),
+                        );
+                    }
                 }
                 NavigatorItemPayload::Link { target } => {
                     ui.label(egui::RichText::new("Ссылка:").color(color(theme.text_muted)));
@@ -341,20 +366,21 @@ pub(super) fn show(ui: &mut egui::Ui, state: &mut NavigatorState, theme: &Theme,
                             .strong()
                             .color(color(theme.accent_primary)),
                     );
-                    if let Some(preview) = &item.preview {
-                        ui.add_space(theme.spacing_sm);
-                        ui.label(
-                            egui::RichText::new(preview.as_ref())
-                                .color(color(theme.text_secondary)),
-                        );
+                    if let Some(preview) = item.preview.as_deref().or(cached_text) {
+                        ui.separator();
+                        super::markdown::render(ui, preview, theme);
+                    }
+                }
+                NavigatorItemPayload::Location { path, .. } => {
+                    ui.label(egui::RichText::new(path).color(color(theme.text_secondary)));
+                    if let Some(preview) = item.preview.as_deref().or(cached_text) {
+                        ui.separator();
+                        super::markdown::render(ui, preview, theme);
                     }
                 }
                 _ => {
-                    if let Some(preview) = &item.preview {
-                        ui.label(
-                            egui::RichText::new(preview.as_ref())
-                                .color(color(theme.text_secondary)),
-                        );
+                    if let Some(preview) = item.preview.as_deref().or(cached_text) {
+                        super::markdown::render(ui, preview, theme);
                     } else if let Some(sub) = item.display_subtitle() {
                         ui.label(egui::RichText::new(sub).color(color(theme.text_secondary)));
                     } else {

@@ -3,10 +3,21 @@ use super::model::*;
 impl NavigatorState {
     /// Handles keyboard input in a unified, deterministic manner.
     pub fn handle_key_event(&mut self, key: NavKey, ctrl: bool) -> NavigatorAction {
+        let is_hub = matches!(self.mode, NavigatorMode::Outline | NavigatorMode::Links);
+        if is_hub && self.hub_tasks.editing.is_some() {
+            return self.hub_tasks.handle_key(key);
+        }
         if matches!(key, NavKey::Tab | NavKey::BackTab) {
-            return NavigatorAction::SwitchProvider {
-                mode: self.mode.next(key == NavKey::BackTab),
+            let mode = if is_hub {
+                if self.mode == NavigatorMode::Outline {
+                    NavigatorMode::Links
+                } else {
+                    NavigatorMode::Outline
+                }
+            } else {
+                self.mode.next(key == NavKey::BackTab)
             };
+            return NavigatorAction::SwitchProvider { mode };
         }
         if self.actions_menu_open {
             return self.handle_actions_menu_key(key);
@@ -14,6 +25,26 @@ impl NavigatorState {
 
         if self.search_mode {
             self.handle_search_mode_key(key, ctrl)
+        } else if is_hub && self.hub_tasks.focus_tasks {
+            if key == NavKey::Escape {
+                self.close();
+                NavigatorAction::Close
+            } else {
+                self.hub_tasks.handle_key(key)
+            }
+        } else if is_hub
+            && !self.jump_labels_active
+            && matches!(
+                key,
+                NavKey::Char(
+                    '1' | '2' | '3' | 'a' | 'd' | 'D' | 'e' | 'x' | 'ф' | 'в' | 'В' | 'у' | 'ч'
+                ) | NavKey::Delete
+                    | NavKey::Backspace
+            )
+        {
+            self.motion_parser.reset();
+            self.hub_tasks.focus_tasks = true;
+            self.hub_tasks.handle_key(key)
         } else {
             self.handle_normal_mode_key(key)
         }
@@ -199,8 +230,12 @@ impl NavigatorState {
                 self.collapse_or_parent();
                 NavigatorAction::None
             }
-            NavKey::Char('l') | NavKey::Right => {
-                self.expand_or_child();
+            NavKey::Char('l' | 'д') | NavKey::Right => {
+                if matches!(self.mode, NavigatorMode::Outline | NavigatorMode::Links) {
+                    self.hub_tasks.focus_tasks = true;
+                } else {
+                    self.expand_or_child();
+                }
                 NavigatorAction::None
             }
             NavKey::Char('p') if self.mode != NavigatorMode::Sessions => {

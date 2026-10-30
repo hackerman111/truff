@@ -236,7 +236,9 @@ impl EditorWidget {
                 } else {
                     let mut presentation = syntax
                         .as_ref()
-                        .map(|syntax| syntax.line_presentation(range.clone()))
+                        .map(|syntax| {
+                            syntax.line_presentation_in_rope(buffer.rope(), range.clone())
+                        })
                         .unwrap_or_default();
                     if let Some(list) = &mut presentation.list {
                         list.range.start = list.range.start.saturating_sub(range.start);
@@ -341,11 +343,14 @@ impl EditorWidget {
                     self.horizontal = (caret.right() + margin_x - rect.width()).max(0.0);
                 }
             }
-            self.heights.update_block_height(
-                line,
-                entry.galley.size().y.max(LINE_HEIGHT),
-                Some(&mut anchor),
-            );
+            let block_height =
+                if entry.presentation.task_fence && style.projection != ProjectionMode::Source {
+                    2.0
+                } else {
+                    entry.galley.size().y.max(LINE_HEIGHT)
+                };
+            self.heights
+                .update_block_height(line, block_height, Some(&mut anchor));
         }
         self.scroll = anchor.scroll_offset_y;
         if scroll_pos.is_none()

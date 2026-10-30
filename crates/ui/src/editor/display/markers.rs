@@ -75,6 +75,18 @@ impl DisplayMap {
             self.colors.clear();
             return;
         }
+        if self
+            .presentation
+            .as_ref()
+            .is_some_and(|line| line.task_fence)
+        {
+            self.colors.clear();
+            if !self.source_text.is_empty() {
+                let len = self.source_text.len();
+                self.markers.push((0..len, Some(0..len)));
+            }
+            return;
+        }
         let text = &self.source_text;
         let has_list_presentation = self
             .presentation
@@ -409,6 +421,7 @@ impl DisplayMap {
             self.lists.clear();
             self.lists.extend(list.iter().cloned());
         }
+        let has_presentation = self.presentation.is_some();
         for list in &mut self.lists {
             // Normalize marker spacing while keeping the source indentation intact.
             while list.range.start < list.range.end
@@ -422,8 +435,37 @@ impl DisplayMap {
             let end = text[list.range.end..]
                 .find('\n')
                 .map_or(text.len(), |len| list.range.end + len);
+            if has_presentation && list.range.start > 0 {
+                self.markers.push((0..list.range.start, None));
+            }
             self.markers
                 .push((list.range.clone(), Some(list.range.start..end)));
+            if let ListKind::Task { checked, checkbox } = list.kind {
+                let status_byte = text.as_bytes().get(checkbox).copied().unwrap_or(b' ');
+                let is_in_progress = !checked && matches!(status_byte, b'/' | b'-');
+                if checked {
+                    self.styles.push(StyledSpan {
+                        content: list.range.start..end,
+                        style: InlineStyle::TextColor([163, 190, 140, 235]),
+                    });
+                    if list.range.end < end {
+                        self.styles.push(StyledSpan {
+                            content: list.range.end..end,
+                            style: InlineStyle::Strikethrough,
+                        });
+                    }
+                } else if is_in_progress {
+                    self.styles.push(StyledSpan {
+                        content: list.range.start..end,
+                        style: InlineStyle::TextColor([235, 203, 139, 255]),
+                    });
+                } else {
+                    self.styles.push(StyledSpan {
+                        content: list.range.start..end,
+                        style: InlineStyle::TextColor([191, 97, 106, 255]),
+                    });
+                }
+            }
         }
         for span in &self.colors {
             self.markers.retain(|(range, _)| {
@@ -454,6 +496,28 @@ impl DisplayMap {
 
     pub(super) fn replacement(&self, range: &Range<usize>) -> Option<std::borrow::Cow<'_, str>> {
         use std::borrow::Cow;
+        if self.presentation.is_some()
+            && range.start == 0
+            && let Some(list) = self.lists.first()
+            && list.range.start == range.end
+            && range.end > 0
+        {
+            const INDENTS: [&str; 7] = [
+                "",
+                "    ",
+                "        ",
+                "            ",
+                "                ",
+                "                    ",
+                "                        ",
+            ];
+            return Some(
+                INDENTS
+                    .get(list.depth)
+                    .copied()
+                    .map_or_else(|| Cow::Owned("    ".repeat(list.depth)), Cow::Borrowed),
+            );
+        }
         if let Some(slice) = self.source_text.get(range.clone()) {
             let trimmed = slice.trim();
             if trimmed == "---" || trimmed == "***" || trimmed == "___" {
@@ -480,7 +544,21 @@ impl DisplayMap {
                 0 => "• ",
                 _ => "◦ ",
             })),
-            ListKind::Task { checked: false, .. } => Some(Cow::Borrowed("☐ ")),
+            ListKind::Task {
+                checked: false,
+                checkbox,
+            } => {
+                if self
+                    .source_text
+                    .as_bytes()
+                    .get(checkbox)
+                    .is_some_and(|&b| b == b'/' || b == b'-')
+                {
+                    Some(Cow::Borrowed("◐ "))
+                } else {
+                    Some(Cow::Borrowed("☐ "))
+                }
+            }
             ListKind::Task { checked: true, .. } => Some(Cow::Borrowed("☑ ")),
             ListKind::Ordered => None,
         }

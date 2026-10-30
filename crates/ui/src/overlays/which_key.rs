@@ -85,7 +85,12 @@ impl WhichKeyOverlay {
     }
 
     /// Sets candidate hints with a specific title when a key prefix is entered.
-    pub fn set_prefix_hints_with_title(&mut self, title: impl Into<String>, hints: Vec<KeyHint>) {
+    pub fn set_prefix_hints_with_title(
+        &mut self,
+        title: impl Into<String>,
+        mut hints: Vec<KeyHint>,
+    ) {
+        hints.retain(|h| !is_task_hint(&h.description));
         self.mode = WhichKeyMode::Prefix;
         self.title = title.into();
         self.hints = hints;
@@ -95,7 +100,8 @@ impl WhichKeyOverlay {
     }
 
     /// Shows which-key immediately (e.g. via explicit command).
-    pub fn show_immediately(&mut self, hints: Vec<KeyHint>) {
+    pub fn show_immediately(&mut self, mut hints: Vec<KeyHint>) {
+        hints.retain(|h| !is_task_hint(&h.description));
         self.mode = WhichKeyMode::Prefix;
         self.title.clear();
         self.hints = hints;
@@ -108,7 +114,14 @@ impl WhichKeyOverlay {
         self.mode = WhichKeyMode::Help;
         self.title = "Справка по горячим клавишам".to_string();
         self.hints.clear();
-        self.categories = categories;
+        self.categories = categories
+            .into_iter()
+            .map(|mut cat| {
+                cat.hints.retain(|h| !is_task_hint(&h.description));
+                cat
+            })
+            .filter(|cat| !cat.hints.is_empty())
+            .collect();
         self.help = help_state::HelpState::default();
         self.help.set_items(
             self.categories
@@ -163,4 +176,9 @@ impl WhichKeyOverlay {
             .map(|h| format!("{:<8} -> {}", h.key, h.description))
             .collect()
     }
+}
+
+fn is_task_hint(description: &str) -> bool {
+    let lower = description.to_lowercase();
+    lower.contains("task") || lower.contains("таск") || lower.contains("задач")
 }

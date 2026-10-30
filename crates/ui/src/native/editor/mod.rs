@@ -105,3 +105,111 @@ impl EditorWidget {
             .map(|entry| entry.char_rect_at(egui::Pos2::ZERO, source_byte))
     }
 }
+
+/// Renders a read-only Markdown fragment or document using the canonical editor `Paragraph` pipeline.
+pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::theme::Theme) {
+    use crate::app::global_config::TypographyConfig;
+    use crate::editor::ProjectionMode;
+    use paragraph::{ParagraphStyle, ParagraphView};
+    use truff_core::markdown::IncrementalSyntaxTree;
+
+    let available_width = ui.available_width().max(1.0);
+    let foreground = color(theme.text_primary);
+    let pixels_per_point = ui.ctx().pixels_per_point();
+    let typography = TypographyConfig {
+        base_font_size: theme.geometry.ui_font_size,
+        ..TypographyConfig::default()
+    };
+    let snapshot = IncrementalSyntaxTree::parse_fresh(text).snapshot();
+
+    let mut line_ranges = Vec::new();
+    let mut start = 0usize;
+    for raw_line in text.split_inclusive('\n') {
+        let trimmed = raw_line.trim_end_matches(['\n', '\r']);
+        line_ranges.push(start..(start + trimmed.len()));
+        start += raw_line.len();
+    }
+    if line_ranges.is_empty() {
+        line_ranges.push(0..0);
+    }
+
+    let is_table_row = |s: &str| {
+        let t = s.trim();
+        t.starts_with('|') && t.ends_with('|') && t.len() > 1
+    };
+    let is_table_delimiter = |s: &str| {
+        let t = s.trim();
+        is_table_row(t) && t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
+    };
+
+    for (idx, range) in line_ranges.iter().enumerate() {
+        let line_str = &text[range.clone()];
+        let mut presentation = snapshot.line_presentation_in_str(text, range.clone());
+        if presentation.task_fence {
+            continue;
+        }
+        if let Some(list) = &mut presentation.list {
+            list.range.start = list.range.start.saturating_sub(range.start);
+            list.range.end = list
+                .range
+                .end
+                .saturating_sub(range.start)
+                .min(line_str.len());
+            let ws_len = line_str[list.range.start..list.range.end]
+                .bytes()
+                .take_while(|b| *b == b' ' || *b == b'\t')
+                .count();
+            list.range.start += ws_len;
+            if let truff_core::markdown::presentation::ListKind::Task { checkbox, .. } =
+                &mut list.kind
+            {
+                *checkbox = checkbox.saturating_sub(range.start);
+            }
+        }
+        if is_table_row(line_str) {
+            if is_table_delimiter(line_str) {
+                presentation.table_delimiter = true;
+            } else if line_ranges
+                .get(idx + 1)
+                .is_some_and(|next| is_table_delimiter(&text[next.clone()]))
+            {
+                presentation.table_header = true;
+            }
+        }
+
+        let style = ParagraphStyle {
+            foreground,
+            pixels_per_point,
+            width: available_width,
+            projection: ProjectionMode::Reading,
+            typography: &typography,
+        };
+        let para = Paragraph::new(
+            range.clone(),
+            line_str.to_owned(),
+            presentation,
+            ui.painter(),
+            style,
+        );
+        let row_h = para.galley.size().y.max(LINE_HEIGHT * 0.85);
+        let row_w = para.galley.size().x.min(available_width);
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(row_w, row_h), egui::Sense::hover());
+        let painter = ui.painter_at(egui::Rect::from_min_size(
+            rect.min,
+            egui::vec2(available_width, row_h + 4.0),
+        ));
+        para.paint(
+            &painter,
+            rect.min,
+            &ParagraphView {
+                cursor: None,
+                selection: None,
+                preedit: None,
+                flash: &[],
+                mode: truff_core::vim::Mode::Normal,
+                theme,
+                content_width: available_width,
+            },
+        );
+    }
+}

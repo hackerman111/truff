@@ -56,11 +56,11 @@ fn native_lists_keep_depth_code_context_and_toggle_tasks_with_undo() {
             .unwrap_or_else(|| panic!("missing {needle}"))
     };
     assert_eq!(text("parent").galley.job.text, "1. parent");
-    assert_eq!(text("child").galley.job.text, "   ◦ child");
+    assert_eq!(text("child").galley.job.text, "    ◦ child");
     let task = text("task");
-    assert_eq!(task.galley.job.text, "     ☐ task");
+    assert_eq!(task.galley.job.text, "        ☐ task");
     assert_eq!(text("literal").galley.job.text, "- [ ] literal **bold**");
-    let glyph = &task.galley.rows[0].glyphs[5];
+    let glyph = &task.galley.rows[0].glyphs[8];
     let position = task.pos
         + egui::vec2(
             glyph.pos.x + glyph.advance_width * 0.2,
@@ -644,7 +644,12 @@ fn test_native_tab_enter_subitem() {
             egui::Shape::Text(t) => {
                 if t.galley.job.text == "• item" {
                     let g = &t.galley.rows[0].glyphs[0];
-                    bullet_center_x = Some(t.pos.x + g.pos.x + g.size().x * 0.5);
+                    let center = if !g.uv_rect.is_nothing() {
+                        t.pos.x + g.pos.x + g.uv_rect.offset.x + g.uv_rect.size.x * 0.5
+                    } else {
+                        t.pos.x + g.pos.x + g.size().x * 0.5
+                    };
+                    bullet_center_x = Some(center);
                     line_origins.push(t.pos.x);
                 } else if t.galley.job.text.starts_with("    ") {
                     line_origins.push(t.pos.x);
@@ -667,8 +672,8 @@ fn test_native_tab_enter_subitem() {
     );
     for &gx in &guide_xs {
         assert!(
-            (gx - bullet_x).abs() <= 1.0,
-            "guide_x {gx} must align with bullet_x {bullet_x}"
+            (gx - bullet_x).abs() < 0.01,
+            "guide_x {gx} must strictly align with bullet_x {bullet_x}"
         );
     }
     assert!(line_origins.len() >= 3);
@@ -1040,4 +1045,143 @@ fn test_link_tight_underline_and_url_extraction() {
         _ => false,
     });
     assert!(has_underline, "Must paint tight custom underline for link");
+}
+
+#[test]
+fn test_list_guide_sticks_strictly_align_with_circle_centers() {
+    let text = "- item\n    - sub\n        - subsub\n";
+    let (mut app, context) = scratch(text);
+    // Move cursor down so line 0 renders in reading mode with bullet "•"
+    frame(
+        &mut app,
+        &context,
+        vec![Event::Text("j".into()), Event::Text("j".into())],
+    );
+    let output = frame(&mut app, &context, vec![]);
+
+    let mut dot_center_x = None;
+    let mut circle_center_x = None;
+    let mut guide_xs = Vec::new();
+
+    for s in &output.shapes {
+        match &s.shape {
+            egui::Shape::Text(t) => {
+                if t.galley.job.text == "• item" {
+                    let g = &t.galley.rows[0].glyphs[0];
+                    let center = if !g.uv_rect.is_nothing() {
+                        t.pos.x + g.pos.x + g.uv_rect.offset.x + g.uv_rect.size.x * 0.5
+                    } else {
+                        t.pos.x + g.pos.x + g.size().x * 0.5
+                    };
+                    dot_center_x = Some(center);
+                } else if t.galley.job.text.starts_with("    ◦") {
+                    let g = t.galley.rows[0]
+                        .glyphs
+                        .iter()
+                        .find(|g| g.chr == '◦')
+                        .unwrap();
+                    let center = if !g.uv_rect.is_nothing() {
+                        t.pos.x + g.pos.x + g.uv_rect.offset.x + g.uv_rect.size.x * 0.5
+                    } else {
+                        t.pos.x + g.pos.x + g.size().x * 0.5
+                    };
+                    circle_center_x = Some(center);
+                }
+            }
+            egui::Shape::LineSegment { points, .. }
+                if (points[0].x - points[1].x).abs() < 0.1
+                    && (points[1].y - points[0].y).abs() > 10.0
+                    && points[0].x > 280.0 =>
+            {
+                guide_xs.push(points[0].x);
+            }
+            _ => {}
+        }
+    }
+
+    let dot_x = dot_center_x.expect("bullet dot glyph must exist on line 0");
+    let circle_x = circle_center_x.expect("bullet circle glyph must exist on line 1");
+
+    assert!(guide_xs.len() >= 3, "expected guide lines on nested items");
+    for &gx in &guide_xs {
+        let matches_dot = (gx - dot_x).abs() < 0.01;
+        let matches_circle = (gx - circle_x).abs() < 0.01;
+        assert!(
+            matches_dot || matches_circle,
+            "guide stick at x={gx} must strictly align with either dot_x={dot_x} or circle_x={circle_x}"
+        );
+    }
+}
+
+#[test]
+fn test_nested_list_mixed_tabs_and_deep_items_render_and_align() {
+    let text = "- Реализовать cer, wer, ctc decode\n\t- Что такое расстояние Левинштейна\n    \t- Почему именно так считается\n    \t\t\t- Смысл в том, что если мы идем по столбцам\n\nКонец\n";
+    let (mut app, context) = scratch(text);
+    // Move cursor to the last line ("Конец") so all 4 list items render in LivePreview bullet mode
+    frame(&mut app, &context, vec![Event::Text("G".into())]);
+    let output = frame(&mut app, &context, vec![]);
+
+    let mut bullet_centers = [None, None, None, None];
+    let mut guide_xs = Vec::new();
+
+    for s in &output.shapes {
+        match &s.shape {
+            egui::Shape::Text(t) => {
+                let txt = &t.galley.job.text;
+                let level = if txt.starts_with("• Реализовать") {
+                    Some((0, '•'))
+                } else if txt.starts_with("    ◦ Что такое") {
+                    Some((1, '◦'))
+                } else if txt.starts_with("        • Почему") {
+                    Some((2, '•'))
+                } else if txt.starts_with("            ◦ Смысл") {
+                    Some((3, '◦'))
+                } else {
+                    None
+                };
+                if let Some((lvl, chr)) = level {
+                    let g = t.galley.rows[0]
+                        .glyphs
+                        .iter()
+                        .find(|g| g.chr == chr)
+                        .unwrap();
+                    let center = if !g.uv_rect.is_nothing() {
+                        t.pos.x + g.pos.x + g.uv_rect.offset.x + g.uv_rect.size.x * 0.5
+                    } else {
+                        t.pos.x + g.pos.x + g.size().x * 0.5
+                    };
+                    bullet_centers[lvl] = Some(center);
+                }
+            }
+            egui::Shape::LineSegment { points, .. }
+                if (points[0].x - points[1].x).abs() < 0.1
+                    && (points[1].y - points[0].y).abs() > 10.0
+                    && points[0].x > 280.0 =>
+            {
+                guide_xs.push(points[0].x);
+            }
+            _ => {}
+        }
+    }
+
+    for (lvl, center) in bullet_centers.iter().enumerate() {
+        assert!(
+            center.is_some(),
+            "level {lvl} must render with normalized 4-space indent and bullet"
+        );
+    }
+    let c0 = bullet_centers[0].unwrap();
+    let c1 = bullet_centers[1].unwrap();
+    let c2 = bullet_centers[2].unwrap();
+    assert!(
+        guide_xs.len() >= 6,
+        "expected 1+2+3=6 guide sticks across levels 1..=3, got {}",
+        guide_xs.len()
+    );
+    for &gx in &guide_xs {
+        assert!(
+            (gx - c0).abs() < 0.01 || (gx - c1).abs() < 0.01 || (gx - c2).abs() < 0.01,
+            "guide stick at x={gx} must strictly align with c0={c0}, c1={c1}, or c2={c2}"
+        );
+    }
 }

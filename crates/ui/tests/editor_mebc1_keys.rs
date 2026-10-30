@@ -234,3 +234,123 @@ fn test_gf_on_link_emits_follow_link_action() {
         "gf on a link should emit note.follow_link action, got {action:?}"
     );
 }
+
+#[test]
+fn test_normal_mode_task_status_cycle_hotkey() {
+    let mut shell = Shell::new();
+    shell.set_editor_text("- [ ] task item\n");
+
+    // 1. Space x cycles [ ] -> [/]
+    shell.feed_key(Key::Char(' '));
+    shell.feed_key(Key::Char('x'));
+    assert_eq!(shell.editor_text(), "- [/] task item\n");
+
+    // 2. Space t cycles [/] -> [x]
+    shell.feed_key(Key::Char(' '));
+    shell.feed_key(Key::Char('t'));
+    assert_eq!(shell.editor_text(), "- [x] task item\n");
+
+    // 3. Enter in Normal mode cycles [x] -> [ ]
+    shell.feed_key(Key::Enter);
+    assert_eq!(shell.editor_text(), "- [ ] task item\n");
+}
+
+#[test]
+fn test_tasks_fence_is_hidden_and_tasks_highlighted_by_status() {
+    use truff_core::markdown::IncrementalSyntaxTree;
+    use truff_ui::editor::{DisplayMap, InlineStyle, ProjectionMode};
+
+    let md = "```tasks\n- [ ] Todo\n- [/] Doing\n- [x] Done\n```\n";
+    let snapshot = IncrementalSyntaxTree::parse_fresh(md).snapshot();
+
+    // Opening fence: "```tasks" (0..8)
+    let open_pres = snapshot.line_presentation_in_str(md, 0..8);
+    assert!(open_pres.task_fence);
+    assert!(!open_pres.code);
+    let open_map = DisplayMap::from_owned_with_presentation(
+        "```tasks".into(),
+        ProjectionMode::LivePreview,
+        Some(open_pres),
+    );
+    assert_eq!(open_map.visual_text(), "");
+
+    // Closing fence: "```" (43..46)
+    let close_pres = snapshot.line_presentation_in_str(md, 43..46);
+    assert!(close_pres.task_fence);
+    assert!(!close_pres.code);
+    let close_map = DisplayMap::from_owned_with_presentation(
+        "```".into(),
+        ProjectionMode::LivePreview,
+        Some(close_pres),
+    );
+    assert_eq!(close_map.visual_text(), "");
+
+    // Todo task: "- [ ] Todo" (9..19)
+    let mut todo_pres = snapshot.line_presentation_in_str(md, 9..19);
+    if let Some(list) = &mut todo_pres.list {
+        list.range.start -= 9;
+        list.range.end -= 9;
+        if let truff_core::markdown::ListKind::Task { checkbox, .. } = &mut list.kind {
+            *checkbox -= 9;
+        }
+    }
+    let todo_map = DisplayMap::from_owned_with_presentation(
+        "- [ ] Todo".into(),
+        ProjectionMode::Reading,
+        Some(todo_pres),
+    );
+    assert!(
+        todo_map
+            .styled_spans()
+            .iter()
+            .any(|s| { s.style == InlineStyle::TextColor([191, 97, 106, 255]) })
+    );
+
+    // InProgress task: "- [/] Doing" (20..31)
+    let mut doing_pres = snapshot.line_presentation_in_str(md, 20..31);
+    if let Some(list) = &mut doing_pres.list {
+        list.range.start -= 20;
+        list.range.end -= 20;
+        if let truff_core::markdown::ListKind::Task { checkbox, .. } = &mut list.kind {
+            *checkbox -= 20;
+        }
+    }
+    let doing_map = DisplayMap::from_owned_with_presentation(
+        "- [/] Doing".into(),
+        ProjectionMode::Reading,
+        Some(doing_pres),
+    );
+    assert!(
+        doing_map
+            .styled_spans()
+            .iter()
+            .any(|s| { s.style == InlineStyle::TextColor([235, 203, 139, 255]) })
+    );
+
+    // Done task: "- [x] Done" (32..42)
+    let mut done_pres = snapshot.line_presentation_in_str(md, 32..42);
+    if let Some(list) = &mut done_pres.list {
+        list.range.start -= 32;
+        list.range.end -= 32;
+        if let truff_core::markdown::ListKind::Task { checkbox, .. } = &mut list.kind {
+            *checkbox -= 32;
+        }
+    }
+    let done_map = DisplayMap::from_owned_with_presentation(
+        "- [x] Done".into(),
+        ProjectionMode::Reading,
+        Some(done_pres),
+    );
+    assert!(
+        done_map
+            .styled_spans()
+            .iter()
+            .any(|s| { s.style == InlineStyle::TextColor([163, 190, 140, 235]) })
+    );
+    assert!(
+        done_map
+            .styled_spans()
+            .iter()
+            .any(|s| { s.style == InlineStyle::Strikethrough })
+    );
+}

@@ -14,10 +14,10 @@ pub use facts::{BlockFact, DocFacts, HeadingFact, MarkdownError, MarkdownFacts};
 pub use flash::{FlashMode, FlashTarget, FlashTargetKind, collect_flash_targets};
 pub use link_selection::{ExtractNotePlan, LinkSelection, LinkTarget};
 pub use links::LinkOccurrence;
-pub use presentation::{LinePresentation, ListKind, ListMarker, toggle_task};
+pub use presentation::{LinePresentation, ListKind, ListMarker, cycle_task_status, toggle_task};
 pub use smart_edit::{
-    find_task_checkbox_on_line, plan_backspace, plan_enter, plan_shift_tab, plan_tab,
-    plan_toggle_task,
+    find_task_checkbox_on_line, plan_backspace, plan_cycle_task, plan_enter, plan_shift_tab,
+    plan_tab, plan_toggle_task,
 };
 pub use snapshot::{
     CalloutFact, CodeBlockFact, FrontmatterFact, MarkdownSnapshot, SectionFact, SemanticKind,

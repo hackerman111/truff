@@ -82,11 +82,11 @@ fn parse_line_prefix(buffer: &Buffer, line_idx: usize) -> Option<ParsedLinePrefi
         let after_bullet = &rest[2..];
         if after_bullet.len() >= 4
             && after_bullet.as_bytes()[0] == b'['
-            && matches!(after_bullet.as_bytes()[1], b' ' | b'x' | b'X')
+            && matches!(after_bullet.as_bytes()[1], b' ' | b'x' | b'X' | b'/' | b'-')
             && after_bullet.as_bytes()[2] == b']'
             && after_bullet.as_bytes()[3] == b' '
         {
-            let checked = after_bullet.as_bytes()[1] != b' ';
+            let checked = matches!(after_bullet.as_bytes()[1], b'x' | b'X');
             let content_start = line_start + idx + 6;
             return Some(ParsedLinePrefix {
                 line_start,
@@ -447,6 +447,12 @@ pub fn find_task_checkbox_on_line(buffer: &Buffer, cursor: BytePos) -> Option<us
 pub fn plan_toggle_task(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     let checkbox = find_task_checkbox_on_line(buffer, cursor)?;
     super::presentation::toggle_task(buffer, checkbox)
+}
+
+/// Plans cycling the task checkbox status (`[ ]` -> `[/]` -> `[x]` -> `[ ]`) on the line containing `cursor`.
+pub fn plan_cycle_task(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
+    let checkbox = find_task_checkbox_on_line(buffer, cursor)?;
+    super::presentation::cycle_task_status(buffer, checkbox)
 }
 
 /// Plans smart Backspace: deletes an entire indentation step (tab / spaces) or outdents empty list item.

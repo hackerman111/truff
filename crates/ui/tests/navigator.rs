@@ -285,9 +285,9 @@ fn test_navigator_normal_mode_shortcuts_and_native_app_integration() {
     app.handle_navigator_action(NavigatorAction::Close);
     assert_eq!(app.application.shell.focus(), Focus::Editor);
 
-    // 3. Space o -> opens Outline navigator
+    // 3. Space Enter -> opens Outline/Backlinks/Tasks hub
     let _ = app.application.shell.feed_key(Key::Char(' '));
-    let action = app.application.shell.feed_key(Key::Char('o'));
+    let action = app.application.shell.feed_key(Key::Enter);
     assert_eq!(
         action,
         truff_ui::shell::ShellAction::OpenNavigator(NavigatorMode::Outline)
@@ -295,10 +295,36 @@ fn test_navigator_normal_mode_shortcuts_and_native_app_integration() {
     app.open_navigator(NavigatorMode::Outline);
     assert!(app.navigator.is_open());
     assert_eq!(app.navigator.mode, NavigatorMode::Outline);
-    // Check heading extraction
+    // Check heading extraction and section preview
     assert_eq!(app.navigator.visible_count(), 2);
     assert_eq!(app.navigator.items[0].display_title(), "# Hello World");
+    assert!(
+        app.navigator.items[0]
+            .preview
+            .as_deref()
+            .unwrap()
+            .contains("Some content")
+    );
     assert_eq!(app.navigator.items[1].display_title(), "## Section 2");
+
+    // Tab toggles directly between Outline and Links (Backlinks)
+    let tab_action = app.navigator.handle_key_event(NavKey::Tab, false);
+    assert_eq!(
+        tab_action,
+        NavigatorAction::SwitchProvider {
+            mode: NavigatorMode::Links
+        }
+    );
+    app.handle_navigator_action(tab_action);
+    assert_eq!(app.navigator.mode, NavigatorMode::Links);
+
+    let back_action = app.navigator.handle_key_event(NavKey::Tab, false);
+    assert_eq!(
+        back_action,
+        NavigatorAction::SwitchProvider {
+            mode: NavigatorMode::Outline
+        }
+    );
 }
 #[test]
 fn file_labels_borrow_path_and_preserve_explicit_names() {
@@ -362,4 +388,119 @@ fn closing_navigator_releases_items_and_search_buffers() {
             path: "new.md".into()
         }
     );
+}
+
+#[test]
+fn test_space_enter_hub_three_task_categories_and_persistence() {
+    use truff_ui::app::Application;
+    use truff_ui::native::NativeApp;
+    use truff_ui::navigator::{HubTaskCategory, HubTaskStatus};
+
+    let vault_root_buf = std::env::temp_dir().join(format!(
+        "truff_space_enter_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&vault_root_buf);
+    let vault_root = vault_root_buf.as_path();
+    let project_dir = vault_root.join("project_alpha");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    // 1. Vault index.md (Общие задачи)
+    std::fs::write(
+        vault_root.join("index.md"),
+        "# Убежище\n\n- [ ] Глобальная задача 1\n- [x] Глобальная задача 2\n",
+    )
+    .unwrap();
+
+    // 2. Project index.md (Задачи проекта)
+    std::fs::write(
+        project_dir.join("index.md"),
+        "# Проект Alpha\n\n- [ ] Задача проекта А\n",
+    )
+    .unwrap();
+
+    // 3. Active note inside project_alpha with ```tasks fenced block (Задачи файла)
+    let note_path = project_dir.join("spec.md");
+    std::fs::write(
+        &note_path,
+        "# Раздел 1\nТекст раздела 1.\n\n## Раздел 2\nТекст раздела 2.\n\n```tasks\n- [ ] Задача файла 1\n```\n",
+    )
+    .unwrap();
+
+    let ctx = egui::Context::default();
+    let mut app = NativeApp::new(Application::new(), &ctx);
+    app.application.open_vault(vault_root).unwrap();
+    for _ in 0..50 {
+        app.application.poll();
+        if !app.application.needs_poll() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    app.application.open_note("project_alpha/spec.md").unwrap();
+    for _ in 0..50 {
+        app.application.poll();
+        if !app.application.needs_poll() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    // Open Space+Enter hub (Outline mode)
+    app.open_navigator(NavigatorMode::Outline);
+    assert_eq!(app.navigator.hub_tasks.lists[0].len(), 2); // Vault
+    assert_eq!(app.navigator.hub_tasks.lists[1].len(), 1); // File (```tasks)
+    assert_eq!(app.navigator.hub_tasks.lists[2].len(), 1); // Project
+
+    // Press 'l' to focus tasks column
+    app.navigator.handle_key_event(NavKey::Char('l'), false);
+    assert!(app.navigator.hub_tasks.focus_tasks);
+    assert_eq!(app.navigator.hub_tasks.category(), HubTaskCategory::Vault);
+
+    // Cycle status of first Vault task (' ' -> InProgress '[/]')
+    let act = app.navigator.handle_key_event(NavKey::Char(' '), false);
+    app.handle_navigator_action(act);
+    assert_eq!(
+        app.navigator.hub_tasks.lists[0][0].status,
+        HubTaskStatus::InProgress
+    );
+    let vault_disk = std::fs::read_to_string(vault_root.join("index.md")).unwrap();
+    assert!(vault_disk.contains("- [/] Глобальная задача 1"));
+
+    // Switch to category 2 (Задачи файла) via '2', add a new task via 'a'
+    app.navigator.handle_key_event(NavKey::Char('2'), false);
+    assert_eq!(app.navigator.hub_tasks.category(), HubTaskCategory::File);
+    app.navigator.handle_key_event(NavKey::Char('a'), false);
+    for ch in "Новая задача файла".chars() {
+        app.navigator.handle_key_event(NavKey::Char(ch), false);
+    }
+    let add_act = app.navigator.handle_key_event(NavKey::Enter, false);
+    app.handle_navigator_action(add_act);
+    assert_eq!(app.navigator.hub_tasks.lists[1].len(), 2);
+    assert_eq!(
+        app.navigator.hub_tasks.lists[1][1].text,
+        "Новая задача файла"
+    );
+    let buf_text = app.application.shell.editor_buffer().unwrap().as_str();
+    assert!(buf_text.contains("```tasks\n- [ ] Задача файла 1\n- [ ] Новая задача файла\n```"));
+
+    // Switch to category 3 (Задачи проекта) via '3', edit existing task via 'e', then delete via 'd'
+    app.navigator.handle_key_event(NavKey::Char('3'), false);
+    assert_eq!(app.navigator.hub_tasks.category(), HubTaskCategory::Project);
+    app.navigator.handle_key_event(NavKey::Char('e'), false);
+    app.navigator.handle_key_event(NavKey::Backspace, false);
+    app.navigator.handle_key_event(NavKey::Char('Б'), false);
+    let edit_act = app.navigator.handle_key_event(NavKey::Enter, false);
+    app.handle_navigator_action(edit_act);
+    let proj_disk = std::fs::read_to_string(project_dir.join("index.md")).unwrap();
+    assert!(proj_disk.contains("- [ ] Задача проекта Б"));
+
+    let del_act = app.navigator.handle_key_event(NavKey::Char('d'), false);
+    app.handle_navigator_action(del_act);
+    assert!(app.navigator.hub_tasks.lists[2].is_empty());
+    let _ = std::fs::remove_dir_all(&vault_root_buf);
 }

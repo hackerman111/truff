@@ -142,6 +142,26 @@ impl Shell {
                 return ShellAction::Incomplete;
             }
             "row.activate" => return self.feed_key(Key::Enter),
+            "note.cycle_task" => {
+                if let Some(view_id) = self.workspace.active_view() {
+                    let cycle_tx =
+                        self.workspace
+                            .editor_parts_mut(view_id)
+                            .and_then(|(buffer, view)| {
+                                truff_core::markdown::plan_cycle_task(buffer, view.head())
+                            });
+                    if let Some(tx) = cycle_tx {
+                        if let Err(e) = self.apply_transaction(tx) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        if let Err(e) = self.publish_vim_changes(view_id) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        return ShellAction::EditorEdit;
+                    }
+                }
+                return ShellAction::Ignored;
+            }
             "focus.left" | "focus.right" | "focus.up" | "focus.down" => {
                 let next = match (id.as_str(), self.focus) {
                     ("focus.left", Focus::RightPanel) | ("focus.right", Focus::Sidebar) => {
@@ -486,6 +506,27 @@ impl Shell {
                         return ShellAction::EditorEdit;
                     }
                     return ShellAction::Ignored;
+                }
+
+                if self.editor_vim.mode == Mode::Normal
+                    && self.key_prefix.is_empty()
+                    && key == Key::Enter
+                {
+                    let cycle_tx =
+                        self.workspace
+                            .editor_parts_mut(view_id)
+                            .and_then(|(buffer, view)| {
+                                truff_core::markdown::plan_cycle_task(buffer, view.head())
+                            });
+                    if let Some(tx) = cycle_tx {
+                        if let Err(e) = self.apply_transaction(tx) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        if let Err(e) = self.publish_vim_changes(view_id) {
+                            return ShellAction::Error(e.to_string());
+                        }
+                        return ShellAction::EditorEdit;
+                    }
                 }
 
                 if self.editor_vim.mode == Mode::Insert

@@ -61,7 +61,7 @@ static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn test_app_auto_opens_saved_vault() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = std::env::temp_dir().join(format!("truff-test-autoopen-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let config_dir = tmp.join("config");
@@ -76,6 +76,7 @@ fn test_app_auto_opens_saved_vault() {
 
     let mut config = GlobalConfig::default();
     config.record_vault(&vault_dir);
+    config.save().unwrap();
 
     let mut app = truff_ui::app::Application::new();
     assert_eq!(app.vault_path(), None);
@@ -100,7 +101,7 @@ fn test_app_auto_opens_saved_vault() {
 
 #[test]
 fn test_create_and_open_vault() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = std::env::temp_dir().join(format!("truff-test-create-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     let target_vault = tmp.join("new_created_vault");

@@ -125,8 +125,17 @@ pub fn shape(
     let visual_len = display.visual_text().len();
     let mut mapped_styles: Vec<(std::ops::Range<usize>, &InlineStyle)> = Vec::new();
     for span in display.styled_spans() {
+        let start_affinity = if display
+            .list_markers()
+            .iter()
+            .any(|l| l.range.start == span.content.start)
+        {
+            Affinity::Left
+        } else {
+            Affinity::Right
+        };
         let start = display
-            .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
+            .source_to_visual(BytePos::new(span.content.start), start_affinity)
             .get();
         let end = display
             .source_to_visual(BytePos::new(span.content.end), Affinity::Left)

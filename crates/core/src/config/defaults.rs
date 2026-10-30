@@ -180,15 +180,21 @@ impl Default for KeymapConfig {
             },
             KeyBinding {
                 mode: Mode::Normal,
-                keys: vec![Key::Char(' '), Key::Char('o')],
+                keys: vec![Key::Char(' '), Key::Enter],
                 command: CommandId::from_static("panel.outline"),
-                description: "Document outline".to_string(),
+                description: "Outline and backlinks".to_string(),
             },
             KeyBinding {
                 mode: Mode::Normal,
-                keys: vec![Key::Char(' '), Key::Char('l')],
-                command: CommandId::from_static("panel.links"),
-                description: "Links & backlinks".to_string(),
+                keys: vec![Key::Char(' '), Key::Char('x')],
+                command: CommandId::from_static("note.cycle_task"),
+                description: "Cycle task status ([ ] -> [/] -> [x])".to_string(),
+            },
+            KeyBinding {
+                mode: Mode::Normal,
+                keys: vec![Key::Char(' '), Key::Char('t')],
+                command: CommandId::from_static("note.cycle_task"),
+                description: "Cycle task status ([ ] -> [/] -> [x])".to_string(),
             },
             // Non-text list/tree contextual commands (Rows / Navigator only)
             KeyBinding {

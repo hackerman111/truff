@@ -254,9 +254,11 @@ impl Paragraph {
                     self.paint_selection_range(painter, origin, a, b, color(view.theme.selection));
                 }
             }
-        } else if let Some(cursor) = view
-            .cursor
-            .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
+        } else if (!self.presentation.task_fence
+            || self.display.mode() == crate::editor::ProjectionMode::Source)
+            && let Some(cursor) = view
+                .cursor
+                .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
         {
             let caret = self.char_rect_at(origin, cursor);
             let width = self.galley.size().x.max(view.content_width);
@@ -270,6 +272,38 @@ impl Paragraph {
                 Color32::from_rgba_unmultiplied(180, 142, 173, 35)
             };
             painter.rect_filled(line_rect, 0.0, line_bg);
+        }
+        if let Some(list) = &self.presentation.list
+            && let truff_core::markdown::presentation::ListKind::Task { checked, checkbox } =
+                list.kind
+        {
+            let status_byte = self
+                .display
+                .source_text()
+                .as_bytes()
+                .get(checkbox)
+                .copied()
+                .unwrap_or(b' ');
+            let is_in_progress = !checked && matches!(status_byte, b'/' | b'-');
+            let (status_color, bg_alpha) = if checked {
+                (color(view.theme.callout_tip), 0.14)
+            } else if is_in_progress {
+                (color(view.theme.callout_warning), 0.16)
+            } else {
+                (color(view.theme.callout_important), 0.12)
+            };
+            let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
+            let width = self.galley.size().x.max(view.content_width);
+            let task_rect = Rect::from_min_max(
+                Pos2::new(origin.x - 6.0, min_y - 1.5),
+                Pos2::new(origin.x + width, max_y + 1.5),
+            );
+            painter.rect_filled(task_rect, 4.0, status_color.gamma_multiply(bg_alpha));
+            let bar_x = origin.x - 6.0;
+            painter.line_segment(
+                [Pos2::new(bar_x, min_y - 0.5), Pos2::new(bar_x, max_y + 0.5)],
+                egui::Stroke::new(3.0, status_color.gamma_multiply(0.85)),
+            );
         }
         if self.presentation.code {
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
@@ -434,37 +468,43 @@ impl Paragraph {
             } else {
                 color(view.theme.text_muted).gamma_multiply(0.55)
             };
-            let bullet_glyph = self
+            let font = self
                 .galley
-                .rows
+                .job
+                .sections
                 .first()
-                .and_then(|row| row.glyphs.iter().find(|g| !g.chr.is_whitespace()));
-            let (dot_half, circle_half, default_step) =
-                if let Some(section) = self.galley.job.sections.first() {
-                    let font = section.format.font_id.clone();
-                    let g_dot = painter.layout_no_wrap("•".to_owned(), font.clone(), self.color);
-                    let g_circle = painter.layout_no_wrap("◦".to_owned(), font.clone(), self.color);
-                    let g_space = painter.layout_no_wrap("    ".to_owned(), font, self.color);
-                    (
-                        g_dot.size().x * 0.5,
-                        g_circle.size().x * 0.5,
-                        g_space.size().x,
-                    )
-                } else {
-                    (3.1, 5.1, 16.0)
-                };
-            let step_width = if list.depth > 0 {
-                bullet_glyph.map_or(default_step, |g| g.pos.x / (list.depth as f32))
-            } else {
-                default_step
-            };
+                .map(|s| s.format.font_id.clone())
+                .unwrap_or_else(|| egui::FontId::new(15.0, egui::FontFamily::Proportional));
+
             for level in 0..list.depth {
-                let half = if level % 2 == 0 {
-                    dot_half
+                const STANDARD_PREFIXES: [&str; 6] = [
+                    "•",
+                    "    ◦",
+                    "        •",
+                    "            ◦",
+                    "                •",
+                    "                    ◦",
+                ];
+                let prefix = STANDARD_PREFIXES
+                    .get(level)
+                    .map(|&s| s.to_owned())
+                    .unwrap_or_else(|| {
+                        let bullet_chr = if level % 2 == 0 { "•" } else { "◦" };
+                        format!("{}{bullet_chr}", "    ".repeat(level))
+                    });
+                let prefix_galley = painter.layout_no_wrap(prefix, font.clone(), self.color);
+                let center_x = if let Some(row) = prefix_galley.rows.first()
+                    && let Some(g) = row.glyphs.iter().find(|g| !g.chr.is_whitespace())
+                {
+                    if !g.uv_rect.is_nothing() {
+                        g.pos.x + g.uv_rect.offset.x + g.uv_rect.size.x * 0.5
+                    } else {
+                        g.pos.x + g.size().x * 0.5
+                    }
                 } else {
-                    circle_half
+                    (level as f32) * 16.0 + 2.5
                 };
-                let guide_x = (origin.x + (level as f32) * step_width + half).round();
+                let guide_x = origin.x + center_x;
                 for (row_idx, row) in self.galley.rows.iter().enumerate() {
                     let has_text_collision = if row_idx == 0 {
                         row.glyphs.iter().any(|g| {

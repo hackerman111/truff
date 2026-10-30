@@ -40,10 +40,10 @@ impl CommandRegistry {
             ),
             cmd(
                 "panel.outline",
-                "Оглавление (Outline)",
-                "Показать иерархию заголовков и структуру заметки",
+                "Оглавление (Outline / Backlinks)",
+                "Показать оглавление и обратные ссылки заметки (Tab — переключение)",
                 "Панели",
-                Some("Space o"),
+                Some("Space Enter"),
                 vec![CommandContext::Global],
             ),
             cmd(
@@ -51,7 +51,7 @@ impl CommandRegistry {
                 "Ссылки и связи",
                 "Показать входящие и исходящие связи и backlinks",
                 "Панели",
-                Some("Space l"),
+                None,
                 vec![CommandContext::Global],
             ),
             cmd(
@@ -449,6 +449,14 @@ impl CommandRegistry {
                 "Выделить узел синтаксического дерева по метке",
                 "Навигация",
                 None,
+                vec![CommandContext::Editor],
+            ),
+            cmd(
+                "note.cycle_task",
+                "Сменить статус задачи",
+                "Циклически переключить статус задачи на строке курсора ([ ] -> [/] -> [x])",
+                "Задачи",
+                Some("Space x / Enter"),
                 vec![CommandContext::Editor],
             ),
             // Buffers & Files

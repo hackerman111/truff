@@ -46,7 +46,7 @@ impl DisplayMap {
         Self::from_owned_with_presentation(text, mode, None)
     }
 
-    pub(crate) fn from_owned_with_presentation(
+    pub fn from_owned_with_presentation(
         text: String,
         mode: ProjectionMode,
         presentation: Option<truff_core::markdown::presentation::LinePresentation>,
@@ -116,6 +116,10 @@ impl DisplayMap {
         &self.styles
     }
 
+    pub fn list_markers(&self) -> &[truff_core::markdown::presentation::ListMarker] {
+        &self.lists
+    }
+
     pub(crate) fn task_at_visual(&self, position: VisualPos) -> Option<usize> {
         let hit = self.visual_to_source(position);
         self.lists.iter().find_map(|list| {
@@ -138,7 +142,11 @@ impl DisplayMap {
     }
 
     pub(crate) fn list_content_start(&self) -> Option<VisualPos> {
-        (self.mode == ProjectionMode::LivePreview).then_some(())?;
+        matches!(
+            self.mode,
+            ProjectionMode::LivePreview | ProjectionMode::Reading
+        )
+        .then_some(())?;
         let list = self.lists.first()?;
         Some(self.source_to_visual(BytePos::new(list.range.end), Affinity::Right))
     }

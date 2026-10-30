@@ -46,7 +46,20 @@ impl DisplayMap {
                 |range: &Range<usize>| cursor_offset >= range.start && cursor_offset <= range.end;
             let is_quote_marker =
                 self.source_text.trim_start().starts_with('>') && marker_range.start == 0;
-            let revealed = if self.mode == ProjectionMode::Reading || is_quote_marker {
+            let is_list_indent = self.presentation.is_some()
+                && marker_range.start == 0
+                && self.lists.first().is_some_and(|list| {
+                    list.range.start == marker_range.end && marker_range.end > 0
+                });
+            let is_task_fence = self
+                .presentation
+                .as_ref()
+                .is_some_and(|line| line.task_fence);
+            let revealed = if self.mode == ProjectionMode::Reading
+                || is_quote_marker
+                || is_list_indent
+                || is_task_fence
+            {
                 false
             } else {
                 caret_touches(marker_range)

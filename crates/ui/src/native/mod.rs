@@ -26,7 +26,7 @@ pub mod widgets;
 pub mod wiki;
 
 use crate::app::Application;
-pub use editor::EditorWidget;
+pub use editor::{EditorWidget, render_markdown_preview};
 pub use paint::{resolve_font_and_line_height, shape};
 pub use runner::{Storage, get_value, run_native, set_value};
 use std::sync::Arc;

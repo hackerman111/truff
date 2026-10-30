@@ -524,6 +524,7 @@ pub enum NavigatorAction {
         id: String,
         data: String,
     },
+    HubTask(super::tasks::HubTaskOp),
 }
 
 impl NavigatorAction {
@@ -565,6 +566,7 @@ pub enum NavKey {
     Enter,
     Escape,
     Backspace,
+    Delete,
     Up,
     Down,
     Left,
@@ -585,6 +587,7 @@ impl NavKey {
             Key::Esc => Self::Escape,
             Key::Enter => Self::Enter,
             Key::Backspace => Self::Backspace,
+            Key::Delete => Self::Delete,
             Key::Up => Self::Up,
             Key::Down => Self::Down,
             Key::Left => Self::Left,

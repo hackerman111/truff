@@ -164,6 +164,9 @@ fn app_theme_command_and_persistence() {
     assert_eq!(app.shell.theme(), &Theme::nord());
 
     let _ = app.shutdown();
+    unsafe {
+        std::env::remove_var("XDG_CONFIG_HOME");
+    }
     let _ = std::fs::remove_dir_all(&tmp);
 }
 

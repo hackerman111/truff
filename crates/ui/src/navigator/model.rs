@@ -1,3 +1,4 @@
+pub use super::tasks::*;
 pub use super::types::*;
 use std::borrow::Cow;
 use truff_core::text::BufferId;
@@ -18,6 +19,7 @@ pub struct NavigatorState {
     pub actions_menu_open: bool,
     pub actions_menu_selected: usize,
     pub last_filtered_query: String,
+    pub hub_tasks: HubTasksState,
     pub(crate) search_page: usize,
     pub(crate) search_total: usize,
     pub(crate) results_query: Option<String>,
@@ -49,6 +51,7 @@ impl NavigatorState {
             actions_menu_open: false,
             actions_menu_selected: 0,
             last_filtered_query: String::new(),
+            hub_tasks: HubTasksState::default(),
             search_page: 0,
             search_total: 0,
             results_query: None,
@@ -66,6 +69,9 @@ impl NavigatorState {
         context_title: impl Into<String>,
         mut items: Vec<NavigatorItem>,
     ) {
+        let was_hub =
+            self.open && matches!(self.mode, NavigatorMode::Outline | NavigatorMode::Links);
+        let is_hub = matches!(mode, NavigatorMode::Outline | NavigatorMode::Links);
         self.open = true;
         self.mode = mode;
         self.context_title = context_title.into();
@@ -78,6 +84,11 @@ impl NavigatorState {
         self.jump_labels_active = false;
         self.cached_preview = None;
         self.preview_visible = true;
+        if !(was_hub && is_hub) {
+            self.hub_tasks.focus_tasks = false;
+            self.hub_tasks.editing = None;
+            self.hub_tasks.pending_g = false;
+        }
         for item in &mut items {
             if item.char_mask == 0 {
                 item.update_char_mask();
@@ -109,6 +120,7 @@ impl NavigatorState {
         self.cached_preview = None;
         self.selected_index = 0;
         self.actions_menu_selected = 0;
+        self.hub_tasks = HubTasksState::default();
     }
 
     /// Checks if Navigator is currently open.
