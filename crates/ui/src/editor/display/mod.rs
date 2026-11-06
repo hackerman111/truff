@@ -21,6 +21,7 @@ use std::ops::Range;
 use truff_core::text::BytePos;
 
 /// The visual projection map translating between source buffer and layout coordinates.
+#[derive(Clone)]
 pub struct DisplayMap {
     source_text: String,
     mode: ProjectionMode,

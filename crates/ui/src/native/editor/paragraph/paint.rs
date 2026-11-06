@@ -84,6 +84,10 @@ fn paragraph_vertical_bounds(origin_y: f32, rows: &[PlacedRow]) -> (f32, f32) {
 
 impl Paragraph {
     pub(in crate::native::editor) fn char_rect_at(&self, origin: Pos2, source: usize) -> Rect {
+        if let Some(table) = &self.table_row {
+            let rel_source = source.saturating_sub(self.range.start);
+            return table.char_rect_at(origin, rel_source);
+        }
         use unicode_segmentation::UnicodeSegmentation;
 
         let rel_source = source.saturating_sub(self.range.start);
@@ -206,6 +210,30 @@ impl Paragraph {
         view: &ParagraphView<'_>,
     ) -> Option<Rect> {
         let mut cursor_rect = None;
+        if let Some(table) = &self.table_row {
+            table.paint(painter, origin, self.presentation.table_header, view);
+            if let Some(cursor) = view
+                .cursor
+                .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
+            {
+                let mut caret = self.char_rect_at(origin, cursor);
+                if view.mode == Mode::Insert {
+                    caret.min.x += HIGHLIGHT_PAD_X;
+                    caret.max.x = caret.min.x + 1.5;
+                }
+                painter.rect_filled(
+                    caret,
+                    0.0,
+                    color(view.theme.cursor).gamma_multiply(if view.mode == Mode::Insert {
+                        1.0
+                    } else {
+                        0.45
+                    }),
+                );
+                cursor_rect = Some(caret);
+            }
+            return cursor_rect;
+        }
         let is_task = self.is_task();
         let text_pad_x = if is_task { super::TASK_PADDING_X } else { 0.0 };
         let text_origin = Pos2::new(origin.x + text_pad_x, origin.y);

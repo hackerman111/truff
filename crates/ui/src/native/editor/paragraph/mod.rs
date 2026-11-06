@@ -1,4 +1,5 @@
 mod paint;
+pub(super) mod table;
 use crate::app::global_config::TypographyConfig;
 use crate::editor::{DisplayMap, ProjectionMode};
 use egui::{Color32, Galley, Painter};
@@ -19,6 +20,7 @@ pub(super) struct Paragraph {
     pixels_per_point: f32,
     pub(super) width: f32,
     typography: TypographyKey,
+    pub(super) table_row: Option<table::TableRowLayout>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -61,13 +63,22 @@ impl Paragraph {
             Some(presentation.clone()),
         );
         display.set_insert_mode(style.in_insert_mode);
-        let (galley, text_indent) = super::super::paint::shape(
+        let table_row =
+            table::TableRowLayout::build(display.source_text(), &presentation, painter, style);
+        let (mut galley, text_indent) = super::super::paint::shape(
             painter,
             &display,
             style.foreground,
             style.width,
             style.typography,
         );
+        if let Some(table) = &table_row {
+            let galley_mut = std::sync::Arc::make_mut(&mut galley);
+            galley_mut.rect = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(table.total_width, table.height),
+            );
+        }
         Self {
             range,
             display,
@@ -80,6 +91,7 @@ impl Paragraph {
             pixels_per_point: style.pixels_per_point,
             width: style.width,
             typography: style.typography.into(),
+            table_row,
         }
     }
     /// Synchronizes view-dependent markers and reshapes only if the rendered paragraph changes.
@@ -111,18 +123,40 @@ impl Paragraph {
         {
             return false;
         }
-        (self.galley, self.text_indent) = super::super::paint::shape(
+        self.table_row = table::TableRowLayout::build(
+            self.display.source_text(),
+            &self.presentation,
+            painter,
+            style,
+        );
+        let (mut galley, text_indent) = super::super::paint::shape(
             painter,
             &self.display,
             style.foreground,
             style.width,
             style.typography,
         );
+        if let Some(table) = &self.table_row {
+            let galley_mut = std::sync::Arc::make_mut(&mut galley);
+            galley_mut.rect = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(table.total_width, table.height),
+            );
+        }
+        self.galley = galley;
+        self.text_indent = text_indent;
         self.color = style.foreground;
         self.pixels_per_point = style.pixels_per_point;
         self.width = style.width;
         self.typography = style.typography.into();
         true
+    }
+
+    pub(super) fn cursor_from_pos(&self, local_pos: egui::Vec2) -> egui::text::CCursor {
+        if let Some(table) = &self.table_row {
+            return table.cursor_from_pos(local_pos, &self.display);
+        }
+        self.galley.cursor_from_pos(local_pos)
     }
 
     pub(super) fn is_task(&self) -> bool {

@@ -215,6 +215,64 @@ where
     Some(dash_widths)
 }
 
+/// Computes the pixel width of each table column based on available container width,
+/// allocating space proportionally to column content lengths and constraining wide columns
+/// so cells can wrap neatly to fit the container.
+pub fn compute_column_pixel_widths(
+    content_widths_chars: &[usize],
+    available_width: f32,
+    char_width: f32,
+) -> Vec<f32> {
+    if content_widths_chars.is_empty() {
+        return Vec::new();
+    }
+    let n = content_widths_chars.len();
+    let min_col_w = (5.0 * char_width).max(50.0);
+
+    if available_width.is_infinite() || available_width <= 0.0 {
+        return content_widths_chars
+            .iter()
+            .map(|&cw| ((cw as f32 + 2.0) * char_width).max(min_col_w))
+            .collect();
+    }
+
+    let natural_widths: Vec<f32> = content_widths_chars
+        .iter()
+        .map(|&cw| ((cw as f32 + 2.0) * char_width).max(min_col_w))
+        .collect();
+    let total_natural: f32 = natural_widths.iter().sum();
+
+    if total_natural <= available_width {
+        let scale = available_width / total_natural;
+        natural_widths
+            .iter()
+            .map(|&w| (w * scale).round())
+            .collect()
+    } else {
+        let total_avail = available_width.max((n as f32) * min_col_w);
+        let mut allocated = vec![min_col_w; n];
+        let remaining_width = total_avail - (n as f32) * min_col_w;
+        let excess_weights: Vec<f32> = natural_widths
+            .iter()
+            .map(|&w| (w - min_col_w).max(0.0))
+            .collect();
+        let total_excess: f32 = excess_weights.iter().sum();
+
+        if total_excess > 0.0 {
+            for i in 0..n {
+                let share = remaining_width * (excess_weights[i] / total_excess);
+                allocated[i] += share;
+            }
+        } else {
+            let share = remaining_width / (n as f32);
+            for slot in allocated.iter_mut().take(n) {
+                *slot += share;
+            }
+        }
+        allocated
+    }
+}
+
 /// Formats a raw Markdown table text into an aligned table with uniform column widths.
 pub fn format_table_str(raw: &str) -> Option<String> {
     let raw_lines: Vec<&str> = raw.lines().collect();

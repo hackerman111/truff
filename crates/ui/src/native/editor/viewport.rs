@@ -207,11 +207,7 @@ impl EditorWidget {
                 range.end -= 1;
             }
             let is_table = slice_is_table_row(&buffer.slice(range.clone()));
-            let width = if long || is_table {
-                f32::INFINITY
-            } else {
-                content_width
-            };
+            let width = if long { f32::INFINITY } else { content_width };
             let style = ParagraphStyle {
                 foreground,
                 pixels_per_point: ui.ctx().pixels_per_point(),
@@ -360,7 +356,7 @@ impl EditorWidget {
             let block_height = if is_collapsed_task_fence {
                 2.0
             } else if is_hidden_delimiter {
-                1.0
+                0.001
             } else {
                 entry.galley.size().y.max(LINE_HEIGHT)
             };
@@ -496,15 +492,12 @@ impl EditorWidget {
                 && pointer_pos.y >= origin.y
                 && pointer_pos.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
             {
-                let index = entry
-                    .galley
-                    .cursor_from_pos(pointer_pos - galley_origin)
-                    .index;
+                let index = entry.cursor_from_pos(pointer_pos - galley_origin);
                 let visual = entry
                     .display
                     .visual_text()
                     .char_indices()
-                    .nth(index.0)
+                    .nth(index.index.0)
                     .map_or(entry.display.visual_text().len(), |(offset, _)| offset);
                 let source_offset = entry
                     .display
@@ -531,12 +524,12 @@ impl EditorWidget {
                 && position.y >= origin.y
                 && position.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
             {
-                let index = entry.galley.cursor_from_pos(position - galley_origin).index;
+                let index = entry.cursor_from_pos(position - galley_origin);
                 let visual = entry
                     .display
                     .visual_text()
                     .char_indices()
-                    .nth(index.0)
+                    .nth(index.index.0)
                     .map_or(entry.display.visual_text().len(), |(offset, _)| offset);
                 if response.clicked()
                     && let Some(checkbox) = entry.display.task_at_visual(VisualPos::new(visual))
@@ -664,6 +657,7 @@ fn slice_is_table_row(slice: &truff_core::RopeSlice<'_>) -> bool {
 
 fn slice_is_table_delimiter(slice: &truff_core::RopeSlice<'_>) -> bool {
     slice_is_table_row(slice)
+        && slice.chunks().flat_map(str::bytes).any(|b| b == b'-')
         && slice
             .chunks()
             .flat_map(str::bytes)

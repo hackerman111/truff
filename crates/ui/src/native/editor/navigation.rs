@@ -28,7 +28,7 @@ impl EditorWidget {
                 buffer.byte_of_line(target_line)
             };
         };
-        let index = entry.galley.cursor_from_pos(egui::vec2(0.0, local)).index.0;
+        let index = entry.cursor_from_pos(egui::vec2(0.0, local)).index.0;
         let visual = entry
             .display
             .visual_text()
@@ -74,7 +74,6 @@ impl EditorWidget {
         let (target_line, local_y) = self.heights.block_at_y(y.max(0.0));
         let target = self.cache.get(&target_line)?;
         let index = target
-            .galley
             .cursor_from_pos(egui::vec2(caret.left(), local_y))
             .index
             .0;

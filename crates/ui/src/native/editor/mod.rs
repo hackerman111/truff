@@ -141,7 +141,7 @@ pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::the
     };
     let is_table_delimiter = |s: &str| {
         let t = s.trim();
-        is_table_row(t) && t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
+        is_table_row(t) && t.contains('-') && t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
     };
 
     for (idx, range) in line_ranges.iter().enumerate() {
@@ -212,7 +212,7 @@ pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::the
         let is_hidden_delimiter =
             para.presentation.table_delimiter && para.display.has_hidden_content();
         let row_h = if is_hidden_delimiter {
-            1.0
+            0.001
         } else {
             para.galley.size().y.max(LINE_HEIGHT * 0.85)
         };

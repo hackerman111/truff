@@ -1,5 +1,5 @@
 use truff_core::markdown::table::{
-    find_table_range_at, format_table_str, format_table_transaction,
+    compute_column_pixel_widths, find_table_range_at, format_table_str, format_table_transaction,
 };
 use truff_core::text::Buffer;
 
@@ -72,6 +72,29 @@ fn test_format_table_russian_unicode() {
 
     let formatted = format_table_str(raw).expect("should format unicode table");
     assert_eq!(formatted, expected);
+}
+
+#[test]
+fn test_compute_column_pixel_widths_proportional_wrap() {
+    let chars = [22, 86, 74];
+    let available_w = 750.0;
+    let char_w = 8.5;
+
+    let widths = compute_column_pixel_widths(&chars, available_w, char_w);
+    assert_eq!(widths.len(), 3);
+    let total: f32 = widths.iter().sum();
+    assert!(
+        (total - available_w).abs() < 1.0,
+        "Total must equal available width: total={}, available={}",
+        total,
+        available_w
+    );
+    assert!(widths[0] < widths[1]);
+    assert!(widths[0] < widths[2]);
+    assert!(widths[1] > widths[2]);
+    for &w in &widths {
+        assert!(w >= 50.0);
+    }
 }
 
 #[test]
