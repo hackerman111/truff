@@ -145,6 +145,7 @@ impl Application {
             "mkdir" => self.create_folder(argument),
             "theme" => self.apply_theme_command(argument),
             "settings" | "config" => self.apply_settings_command(argument),
+            "format-table" | "table-format" | "table" => self.format_table_command(),
             "source" => {
                 self.set_projection(ProjectionMode::Source);
                 Ok(())

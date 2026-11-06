@@ -42,4 +42,20 @@ impl Application {
         }
         Ok(start..end)
     }
+
+    pub(super) fn format_table_command(&mut self) -> AppResult<()> {
+        let (view_id, cursor) = {
+            let view = self.shell.editor_view().ok_or("Open a note first")?;
+            (view.id(), view.head().get())
+        };
+        let buffer = self.shell.editor_buffer().ok_or("Note is still loading")?;
+        let tx = truff_core::markdown::table::format_table_transaction(buffer, cursor)
+            .ok_or("No markdown table found under cursor")?;
+        self.dispatch(truff_core::commands::Action::ApplyEdit {
+            view_id,
+            transaction: tx,
+        })?;
+        self.status = "Table formatted".into();
+        Ok(())
+    }
 }

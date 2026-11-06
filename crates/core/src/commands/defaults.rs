@@ -241,6 +241,14 @@ impl CommandRegistry {
                 vec![CommandContext::Editor],
             ),
             cmd(
+                "markdown.format_table",
+                "Форматировать таблицу",
+                "Выровнять ячейки и колонки текущей таблицы",
+                "Редактирование",
+                None,
+                vec![CommandContext::Editor],
+            ),
+            cmd(
                 "edit.undo",
                 "Отменить",
                 "Отменить последнее изменение (Undo)",
