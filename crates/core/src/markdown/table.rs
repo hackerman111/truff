@@ -10,10 +10,73 @@ pub enum ColumnAlignment {
     Right,
 }
 
+/// Finds all cell-delimiting pipe (`|`) byte offsets in a table row,
+/// ignoring pipes that are escaped (`\|`), inside code spans (``` `...` ```),
+/// or inside LaTeX math (`$...$` or `$$...$$`).
+pub fn find_table_pipe_indices(line: &str) -> Vec<usize> {
+    let bytes = line.as_bytes();
+    let mut pipes = Vec::new();
+    let mut in_code = false;
+    let mut code_len = 0;
+    let mut in_math = false;
+    let mut math_double = false;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        let is_escaped = i > 0 && bytes[i - 1] == b'\\';
+
+        if !is_escaped {
+            if b == b'`' {
+                let start = i;
+                while i < bytes.len() && bytes[i] == b'`' {
+                    i += 1;
+                }
+                let len = i - start;
+                if in_code {
+                    if len == code_len {
+                        in_code = false;
+                        code_len = 0;
+                    }
+                } else if !in_math {
+                    in_code = true;
+                    code_len = len;
+                }
+                continue;
+            } else if b == b'$' && !in_code {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'$' {
+                    i += 2;
+                    if in_math && math_double {
+                        in_math = false;
+                        math_double = false;
+                    } else if !in_math {
+                        in_math = true;
+                        math_double = true;
+                    }
+                    continue;
+                } else {
+                    i += 1;
+                    if in_math && !math_double {
+                        in_math = false;
+                    } else if !in_math {
+                        in_math = true;
+                        math_double = false;
+                    }
+                    continue;
+                }
+            } else if b == b'|' && !in_code && !in_math {
+                pipes.push(i);
+            }
+        }
+        i += 1;
+    }
+    pipes
+}
+
 /// Checks whether a single line string matches Markdown table row syntax.
 pub fn is_table_row(line: &str) -> bool {
-    let t = line.trim();
-    t.starts_with('|') && t.ends_with('|') && t.len() > 1
+    let pipes = find_table_pipe_indices(line);
+    pipes.len() >= 2
 }
 
 /// Checks whether a cell string consists only of Markdown delimiter characters (`-`, `:`).
@@ -27,41 +90,28 @@ fn is_cell_delimiter(cell: &str) -> bool {
 
 /// Checks whether a line string is a Markdown table delimiter row (`|---|:---:|---:|`).
 pub fn is_table_delimiter(line: &str) -> bool {
-    if !is_table_row(line) {
+    let pipes = find_table_pipe_indices(line);
+    if pipes.len() < 2 {
         return false;
     }
     let cells = split_row_cells(line);
     !cells.is_empty() && cells.iter().all(|c| is_cell_delimiter(c))
 }
 
-/// Splits a table row line into trimmed cell contents, respecting escaped pipes (`\|`).
+/// Splits a table row line into trimmed cell contents, respecting math, code, and escaped pipes.
 pub fn split_row_cells(line: &str) -> Vec<String> {
-    let t = line.trim();
-    if !t.starts_with('|') || !t.ends_with('|') || t.len() <= 1 {
+    let pipes = find_table_pipe_indices(line);
+    if pipes.len() < 2 {
         return Vec::new();
     }
-    // Strip outer '|'
-    let inner = &t[1..t.len() - 1];
-
-    let mut cells = Vec::new();
-    let mut current = String::new();
-    let mut is_escaped = false;
-
-    for c in inner.chars() {
-        if is_escaped {
-            current.push(c);
-            is_escaped = false;
-        } else if c == '\\' {
-            current.push(c);
-            is_escaped = true;
-        } else if c == '|' {
-            cells.push(current.trim().to_string());
-            current.clear();
-        } else {
-            current.push(c);
+    let mut cells = Vec::with_capacity(pipes.len() - 1);
+    for col in 0..pipes.len() - 1 {
+        let start = pipes[col] + 1;
+        let end = pipes[col + 1];
+        if start <= end && end <= line.len() {
+            cells.push(line[start..end].trim().to_string());
         }
     }
-    cells.push(current.trim().to_string());
     cells
 }
 
@@ -79,9 +129,46 @@ fn parse_alignment(cell: &str) -> ColumnAlignment {
     }
 }
 
-/// Returns the visible width of a cell in Unicode graphemes.
-fn cell_visible_width(cell: &str) -> usize {
-    cell.graphemes(true).count()
+/// Returns the visible width of a cell in Unicode graphemes, discounting markdown formatting markers.
+pub fn cell_visual_width(cell: &str) -> usize {
+    let trimmed = cell.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+    let mut s = String::with_capacity(trimmed.len());
+    let mut chars = trimmed.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' | '~' | '`' | '$' => {}
+            '\\' => {
+                if let Some(&next) = chars.peek()
+                    && (next == '|' || next == '*' || next == '_' || next == '[' || next == ']')
+                {
+                    s.push(next);
+                    chars.next();
+                    continue;
+                }
+                let mut cmd = String::new();
+                while let Some(&next) = chars.peek() {
+                    if next.is_alphabetic() {
+                        cmd.push(next);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                match cmd.as_str() {
+                    "epsilon" => s.push('ε'),
+                    "sum" => s.push('∑'),
+                    "log" => s.push_str("log"),
+                    _ if !cmd.is_empty() => s.push_str(&cmd),
+                    _ => s.push('\\'),
+                }
+            }
+            _ => s.push(c),
+        }
+    }
+    s.graphemes(true).count()
 }
 
 /// Computes the column inner widths (`dash_widths`) for a slice or iterator of table rows.
@@ -117,7 +204,7 @@ where
             continue;
         }
         for (col, cell) in row.iter().enumerate() {
-            content_widths[col] = content_widths[col].max(cell_visible_width(cell));
+            content_widths[col] = content_widths[col].max(cell_visual_width(cell));
         }
     }
 
@@ -166,7 +253,7 @@ pub fn format_table_str(raw: &str) -> Option<String> {
             continue;
         }
         for (col, cell) in row.iter().enumerate() {
-            content_widths[col] = content_widths[col].max(cell_visible_width(cell));
+            content_widths[col] = content_widths[col].max(cell_visual_width(cell));
         }
     }
 
@@ -210,7 +297,7 @@ pub fn format_table_str(raw: &str) -> Option<String> {
             output.push('|');
             for (col, &dash_w) in dash_widths.iter().enumerate() {
                 let cell_text = row.get(col).map(String::as_str).unwrap_or("");
-                let cell_w = cell_visible_width(cell_text);
+                let cell_w = cell_visual_width(cell_text);
                 // Total available space inside cell is dash_w.
                 // Subtract 2 for the outer padding spaces.
                 let target_content_w = dash_w - 2;

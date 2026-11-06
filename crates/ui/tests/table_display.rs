@@ -122,3 +122,70 @@ fn test_table_rows_visually_aligned() {
         display1.source_to_visual(BytePos::new(0), truff_ui::editor::display::Affinity::Right);
     assert_eq!(vis_pipe0.get(), 0);
 }
+
+#[test]
+fn test_table_with_math_and_bold_alignment() {
+    let rows = [
+        "| Представление | Как получают | Когда применяют |",
+        "|---|---|---|",
+        "| **Waveform** | Сырые отсчёты $x[n]$ | Waveform-frontends, wav2vec 2.0 |",
+        "| **STFT** | Оконная DFT по участкам сигнала | Базовый временно-частотный анализ |",
+        "| **Spectrogram** | $|X(t,f)|$ либо $|X(t,f)|^2$ | Визуализация и дальнейшая фильтрация |",
+        "| **Log-Mel** | $S_{t,m}=\\log(\\epsilon+\\sum_f H_m(f)|X(t,f)|^2)$ | Стандартный feature input многих ASR |",
+        "| **MFCC** | DCT от log-mel-энергий | Классические speech/HMM pipelines |",
+        "| **Learned features** | Обучаемый CNN и/или SSL-энкодер | Pretrained wav2vec 2.0 / HuBERT / WavLM |",
+    ];
+
+    let widths =
+        truff_core::markdown::table::compute_table_col_widths(rows.iter().copied()).unwrap();
+    let arc_widths = std::sync::Arc::new(widths);
+
+    let mut expected_pipes = None;
+
+    for (idx, &row) in rows.iter().enumerate() {
+        if idx == 1 {
+            continue; // delimiter row
+        }
+        let pres = LinePresentation {
+            table_header: idx == 0,
+            table_col_widths: Some(arc_widths.clone()),
+            ..LinePresentation::default()
+        };
+        let display = DisplayMap::from_owned_with_presentation(
+            row.to_string(),
+            ProjectionMode::LivePreview,
+            Some(pres),
+        );
+        let visual = display.visual_text();
+        println!("Row {}: {:?}", idx, visual);
+        let source_pipes = truff_core::markdown::table::find_table_pipe_indices(row);
+        let pipes: Vec<usize> = source_pipes
+            .iter()
+            .map(|&p| {
+                let vis_byte = display
+                    .source_to_visual(BytePos::new(p), truff_ui::editor::display::Affinity::Right)
+                    .get();
+                visual[..vis_byte.min(visual.len())].chars().count()
+            })
+            .collect();
+
+        assert_eq!(
+            pipes.len(),
+            4,
+            "Row {} must have exactly 4 delimiter pipes, got {}: visual={:?}",
+            idx,
+            pipes.len(),
+            visual
+        );
+
+        if let Some(ref exp) = expected_pipes {
+            assert_eq!(
+                &pipes, exp,
+                "Row {} pipes must align with row 0: visual={:?}",
+                idx, visual
+            );
+        } else {
+            expected_pipes = Some(pipes);
+        }
+    }
+}

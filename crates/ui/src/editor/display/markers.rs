@@ -408,48 +408,43 @@ impl DisplayMap {
             } else {
                 let is_header = self.presentation.as_ref().is_some_and(|p| p.table_header);
                 let mut cell_start = None;
-                let mut pipe_indices = Vec::new();
-                for (idx, b) in text.bytes().enumerate() {
-                    if b == b'|' && (idx == 0 || text.as_bytes().get(idx - 1) != Some(&b'\\')) {
-                        pipe_indices.push(idx);
-                        self.styles.push(StyledSpan {
-                            content: idx..idx + 1,
-                            style: InlineStyle::TextColor([94, 129, 172, 220]),
-                        });
-                        if is_header {
-                            if let Some(start) = cell_start
-                                && start < idx
-                            {
-                                self.styles.push(StyledSpan {
-                                    content: start..idx,
-                                    style: InlineStyle::Bold,
-                                });
-                            }
-                            cell_start = Some(idx + 1);
+                let pipe_indices = truff_core::markdown::table::find_table_pipe_indices(text);
+                for &idx in &pipe_indices {
+                    self.styles.push(StyledSpan {
+                        content: idx..idx + 1,
+                        style: InlineStyle::TextColor([94, 129, 172, 220]),
+                    });
+                    if is_header {
+                        if let Some(start) = cell_start
+                            && start < idx
+                        {
+                            self.styles.push(StyledSpan {
+                                content: start..idx,
+                                style: InlineStyle::Bold,
+                            });
                         }
+                        cell_start = Some(idx + 1);
                     }
                 }
                 if let Some(col_widths) = self
                     .presentation
                     .as_ref()
                     .and_then(|p| p.table_col_widths.as_deref())
+                    && pipe_indices.len() >= 2
                 {
-                    use unicode_segmentation::UnicodeSegmentation;
-                    if pipe_indices.len() >= 2 {
-                        for col in 0..pipe_indices.len() - 1 {
-                            let open_pipe = pipe_indices[col];
-                            let close_pipe = pipe_indices[col + 1];
-                            let cell_slice = &text[open_pipe + 1..close_pipe];
-                            let cell_graphemes = cell_slice.graphemes(true).count();
-                            if let Some(&target_w) = col_widths.get(col)
-                                && target_w > cell_graphemes
-                            {
-                                let padding = target_w - cell_graphemes;
-                                let pad_range = close_pipe..close_pipe;
-                                self.markers
-                                    .push((pad_range.clone(), Some(pad_range.clone())));
-                                self.table_paddings.push((pad_range, " ".repeat(padding)));
-                            }
+                    for col in 0..pipe_indices.len() - 1 {
+                        let open_pipe = pipe_indices[col];
+                        let close_pipe = pipe_indices[col + 1];
+                        let cell_range = open_pipe + 1..close_pipe;
+                        let visual_graphemes = self.visual_cell_graphemes(cell_range);
+                        if let Some(&target_w) = col_widths.get(col)
+                            && target_w > visual_graphemes
+                        {
+                            let padding = target_w - visual_graphemes;
+                            let pad_range = close_pipe..close_pipe;
+                            self.markers
+                                .push((pad_range.clone(), Some(pad_range.clone())));
+                            self.table_paddings.push((pad_range, " ".repeat(padding)));
                         }
                     }
                 }
@@ -624,6 +619,34 @@ impl DisplayMap {
             .binary_search_by_key(&range.start, |list| list.range.start)
             .ok()?;
         self.lists.get(index).filter(|list| list.range == *range)
+    }
+
+    fn visual_cell_graphemes(&self, cell_range: Range<usize>) -> usize {
+        use unicode_segmentation::UnicodeSegmentation;
+
+        let mut visual_graphemes = 0;
+        let mut last = cell_range.start;
+
+        for (marker_range, _) in &self.markers {
+            if marker_range.start < last || marker_range.start >= cell_range.end {
+                continue;
+            }
+            if marker_range.start > last {
+                let non_marker = &self.source_text[last..marker_range.start];
+                visual_graphemes += non_marker.graphemes(true).count();
+            }
+            if let Some(rep) = self.replacement(marker_range) {
+                visual_graphemes += rep.graphemes(true).count();
+            }
+            last = marker_range.end.min(cell_range.end);
+        }
+
+        if last < cell_range.end {
+            let non_marker = &self.source_text[last..cell_range.end];
+            visual_graphemes += non_marker.graphemes(true).count();
+        }
+
+        visual_graphemes
     }
 }
 
