@@ -9,6 +9,7 @@ pub mod smart_edit;
 pub mod snapshot;
 pub mod style;
 pub mod syntax;
+pub mod table;
 
 pub use facts::{BlockFact, DocFacts, HeadingFact, MarkdownError, MarkdownFacts};
 pub use flash::{FlashMode, FlashTarget, FlashTargetKind, collect_flash_targets};
