@@ -34,6 +34,7 @@ pub struct DisplayMap {
     markers: Vec<(Range<usize>, Option<Range<usize>>)>,
     lists: Vec<truff_core::markdown::presentation::ListMarker>,
     presentation: Option<truff_core::markdown::presentation::LinePresentation>,
+    in_insert_mode: bool,
 }
 
 impl DisplayMap {
@@ -69,10 +70,53 @@ impl DisplayMap {
             markers: Vec::new(),
             lists: Vec::new(),
             presentation,
+            in_insert_mode: false,
         };
         map.scan_markers();
         map.rebuild();
         map
+    }
+
+    /// Whether editor is in insert mode.
+    pub fn in_insert_mode(&self) -> bool {
+        self.in_insert_mode
+    }
+
+    /// Updates whether editor is in insert mode, rebuilding if it changed.
+    pub fn set_insert_mode(&mut self, in_insert_mode: bool) {
+        if self.in_insert_mode != in_insert_mode {
+            self.in_insert_mode = in_insert_mode;
+            self.visual_revision = self.visual_revision.wrapping_add(1);
+            self.rebuild();
+        }
+    }
+
+    /// Whether this paragraph represents a task item.
+    pub fn is_task(&self) -> bool {
+        if let Some(p) = &self.presentation
+            && let Some(list) = &p.list
+        {
+            return matches!(
+                list.kind,
+                truff_core::markdown::presentation::ListKind::Task { .. }
+            );
+        }
+        self.lists.iter().any(|l| {
+            matches!(
+                l.kind,
+                truff_core::markdown::presentation::ListKind::Task { .. }
+            )
+        })
+    }
+
+    /// Returns projected display chunks.
+    pub fn chunks(&self) -> &[DisplayChunk] {
+        &self.chunks
+    }
+
+    /// Whether any chunk is currently projected as hidden.
+    pub fn has_hidden_content(&self) -> bool {
+        self.chunks.iter().any(|c| c.hidden)
     }
 
     /// Monotonic revision of the projected visual text representation.

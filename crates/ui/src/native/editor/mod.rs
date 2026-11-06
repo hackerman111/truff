@@ -6,6 +6,7 @@ mod syntax;
 mod viewport;
 
 use paragraph::Paragraph;
+pub use paragraph::TASK_PADDING_X;
 use std::collections::BTreeMap;
 use std::ops::Range;
 
@@ -183,6 +184,7 @@ pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::the
             width: available_width,
             projection: ProjectionMode::Reading,
             typography: &typography,
+            in_insert_mode: false,
         };
         let para = Paragraph::new(
             range.clone(),
@@ -191,7 +193,13 @@ pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::the
             ui.painter(),
             style,
         );
-        let row_h = para.galley.size().y.max(LINE_HEIGHT * 0.85);
+        let is_hidden_delimiter = para.presentation.table_delimiter
+            && para.display.has_hidden_content();
+        let row_h = if is_hidden_delimiter {
+            8.0
+        } else {
+            para.galley.size().y.max(LINE_HEIGHT * 0.85)
+        };
         let row_w = para.galley.size().x.min(available_width);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(row_w, row_h), egui::Sense::hover());
         let painter = ui.painter_at(egui::Rect::from_min_size(

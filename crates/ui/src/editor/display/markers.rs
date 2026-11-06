@@ -384,11 +384,20 @@ impl DisplayMap {
         }
         // Table row styling
         let trimmed_text = text.trim();
-        if trimmed_text.starts_with('|') && trimmed_text.ends_with('|') && trimmed_text.len() > 1 {
-            let is_delimiter = trimmed_text
-                .chars()
-                .all(|c| c == '|' || c == '-' || c == ':' || c == ' ');
+        let is_del_from_pres = self
+            .presentation
+            .as_ref()
+            .is_some_and(|p| p.table_delimiter);
+        if is_del_from_pres
+            || (trimmed_text.starts_with('|') && trimmed_text.ends_with('|') && trimmed_text.len() > 1)
+        {
+            let is_delimiter = is_del_from_pres
+                || (trimmed_text
+                    .chars()
+                    .all(|c| c == '|' || c == '-' || c == ':' || c == ' ')
+                    && trimmed_text.contains('-'));
             if is_delimiter {
+                self.markers.push((0..text.len(), Some(0..text.len())));
                 self.styles.push(StyledSpan {
                     content: 0..text.len(),
                     style: InlineStyle::TextColor([76, 86, 106, 200]),
@@ -520,6 +529,17 @@ impl DisplayMap {
         }
         if let Some(slice) = self.source_text.get(range.clone()) {
             let trimmed = slice.trim();
+            if self
+                .presentation
+                .as_ref()
+                .is_some_and(|p| p.table_delimiter)
+                || (trimmed.starts_with('|')
+                    && trimmed.ends_with('|')
+                    && trimmed.contains('-')
+                    && trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c == ' '))
+            {
+                return Some(Cow::Borrowed(""));
+            }
             if trimmed == "---" || trimmed == "***" || trimmed == "___" {
                 return Some(Cow::Borrowed(" "));
             }

@@ -1,5 +1,5 @@
 use super::color;
-use super::paragraph::{Paragraph, ParagraphStyle, ParagraphView};
+use super::paragraph::{Paragraph, ParagraphStyle, ParagraphView, TASK_PADDING_X};
 use super::{EditorWidget, LINE_HEIGHT, ViewScroll};
 use crate::app::global_config::TypographyConfig;
 use crate::editor::{EditorInput, ProjectionMode, ScrollAnchor, VisualPos};
@@ -221,6 +221,7 @@ impl EditorWidget {
                     projection
                 },
                 typography,
+                in_insert_mode: mode == Mode::Insert,
             };
             let up_to_date = self.cache.get(&line).is_some_and(|entry| {
                 entry.revision == buffer.revision()
@@ -335,7 +336,12 @@ impl EditorWidget {
                 self.builds += 1;
             }
             if (long || is_table) && line == cursor_line && follow {
-                let caret = entry.char_rect_at(egui::Pos2::ZERO, cursor);
+                let caret_origin = if entry.is_task() {
+                    egui::pos2(TASK_PADDING_X, 0.0)
+                } else {
+                    egui::Pos2::ZERO
+                };
+                let caret = entry.char_rect_at(caret_origin, cursor);
                 if caret.left() < self.horizontal {
                     self.horizontal = caret.left().max(0.0);
                 }
@@ -343,12 +349,18 @@ impl EditorWidget {
                     self.horizontal = (caret.right() + margin_x - rect.width()).max(0.0);
                 }
             }
-            let block_height =
-                if entry.presentation.task_fence && style.projection != ProjectionMode::Source {
-                    2.0
-                } else {
-                    entry.galley.size().y.max(LINE_HEIGHT)
-                };
+            let is_collapsed_task_fence = entry.presentation.task_fence
+                && style.projection != ProjectionMode::Source
+                && !style.in_insert_mode;
+            let is_hidden_delimiter = entry.presentation.table_delimiter
+                && entry.display.has_hidden_content();
+            let block_height = if is_collapsed_task_fence {
+                2.0
+            } else if is_hidden_delimiter {
+                8.0
+            } else {
+                entry.galley.size().y.max(LINE_HEIGHT)
+            };
             self.heights
                 .update_block_height(line, block_height, Some(&mut anchor));
         }
@@ -471,12 +483,20 @@ impl EditorWidget {
                     self.cursor_rect = Some(caret);
                 }
             }
+            let galley_origin = if entry.is_task() {
+                egui::pos2(origin.x + TASK_PADDING_X, origin.y)
+            } else {
+                origin
+            };
             if intersects_viewport
                 && let Some(pointer_pos) = response.hover_pos()
                 && pointer_pos.y >= origin.y
                 && pointer_pos.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
             {
-                let index = entry.galley.cursor_from_pos(pointer_pos - origin).index;
+                let index = entry
+                    .galley
+                    .cursor_from_pos(pointer_pos - galley_origin)
+                    .index;
                 let visual = entry
                     .display
                     .visual_text()
@@ -508,7 +528,7 @@ impl EditorWidget {
                 && position.y >= origin.y
                 && position.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
             {
-                let index = entry.galley.cursor_from_pos(position - origin).index;
+                let index = entry.galley.cursor_from_pos(position - galley_origin).index;
                 let visual = entry
                     .display
                     .visual_text()

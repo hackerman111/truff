@@ -58,9 +58,11 @@ impl DisplayMap {
             let revealed = if self.mode == ProjectionMode::Reading
                 || is_quote_marker
                 || is_list_indent
-                || is_task_fence
+                || (is_task_fence && !self.in_insert_mode)
             {
                 false
+            } else if is_task_fence && self.in_insert_mode {
+                true
             } else {
                 caret_touches(marker_range)
                     || span_range.as_ref().is_some_and(caret_touches)

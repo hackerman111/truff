@@ -24,17 +24,10 @@ use egui::epaint::text::Glyph;
 fn glyph_vertical_bounds(origin_y: f32, row: &PlacedRow, glyph: &Glyph) -> (f32, f32) {
     let baseline_y = origin_y + row.pos.y + glyph.pos.y;
     let cap_height = (glyph.font_face_ascent * 0.75).max(10.0);
-    let (top, bottom) = if !glyph.uv_rect.is_nothing() {
-        let ink_top = baseline_y + glyph.uv_rect.offset.y;
-        let ink_bottom = ink_top + glyph.uv_rect.size.y;
-        (
-            ink_top.min(baseline_y - cap_height),
-            ink_bottom.max(baseline_y),
-        )
-    } else {
-        (baseline_y - cap_height, baseline_y)
-    };
-    (top - HIGHLIGHT_PAD_Y, bottom + HIGHLIGHT_PAD_Y)
+    (
+        baseline_y - cap_height - HIGHLIGHT_PAD_Y,
+        baseline_y + HIGHLIGHT_PAD_Y,
+    )
 }
 
 fn cluster_vertical_bounds(origin_y: f32, row: &PlacedRow, glyphs: &[Glyph]) -> (f32, f32) {
@@ -213,6 +206,9 @@ impl Paragraph {
         view: &ParagraphView<'_>,
     ) -> Option<Rect> {
         let mut cursor_rect = None;
+        let is_task = self.is_task();
+        let text_pad_x = if is_task { super::TASK_PADDING_X } else { 0.0 };
+        let text_origin = Pos2::new(origin.x + text_pad_x, origin.y);
         let caret_at = |source: usize| {
             let visual = self
                 .display
@@ -226,7 +222,7 @@ impl Paragraph {
                 .count();
             self.galley
                 .pos_from_cursor(egui::text::CCursor::new(chars))
-                .translate(origin.to_vec2())
+                .translate(text_origin.to_vec2())
         };
         if let Some(selection) = view.selection {
             if view.mode == Mode::VisualLine {
@@ -236,7 +232,7 @@ impl Paragraph {
                         && selection.contains(&self.range.start))
                     || self.range.contains(&selection.start);
                 if is_selected {
-                    let width = self.galley.size().x.max(view.content_width);
+                    let width = (self.galley.size().x + text_pad_x).max(view.content_width);
                     let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
                     painter.rect_filled(
                         Rect::from_min_max(
@@ -251,7 +247,13 @@ impl Paragraph {
                 let a = selection.start.max(self.range.start);
                 let b = selection.end.min(self.range.end);
                 if a < b {
-                    self.paint_selection_range(painter, origin, a, b, color(view.theme.selection));
+                    self.paint_selection_range(
+                        painter,
+                        text_origin,
+                        a,
+                        b,
+                        color(view.theme.selection),
+                    );
                 }
             }
         } else if (!self.presentation.task_fence
@@ -260,8 +262,8 @@ impl Paragraph {
                 .cursor
                 .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
         {
-            let caret = self.char_rect_at(origin, cursor);
-            let width = self.galley.size().x.max(view.content_width);
+            let caret = self.char_rect_at(text_origin, cursor);
+            let width = (self.galley.size().x + text_pad_x).max(view.content_width);
             let line_rect = Rect::from_min_max(
                 Pos2::new(origin.x, caret.min.y - HIGHLIGHT_PAD_Y),
                 Pos2::new(origin.x + width, caret.max.y + HIGHLIGHT_PAD_Y),
@@ -293,13 +295,13 @@ impl Paragraph {
                 (color(view.theme.callout_important), 0.12)
             };
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
-            let width = self.galley.size().x.max(view.content_width);
+            let width = (self.galley.size().x + text_pad_x).max(view.content_width);
             let task_rect = Rect::from_min_max(
-                Pos2::new(origin.x - 6.0, min_y - 1.5),
+                Pos2::new(origin.x, min_y - 1.5),
                 Pos2::new(origin.x + width, max_y + 1.5),
             );
             painter.rect_filled(task_rect, 4.0, status_color.gamma_multiply(bg_alpha));
-            let bar_x = origin.x - 6.0;
+            let bar_x = origin.x + 1.5;
             painter.line_segment(
                 [Pos2::new(bar_x, min_y - 0.5), Pos2::new(bar_x, max_y + 0.5)],
                 egui::Stroke::new(3.0, status_color.gamma_multiply(0.85)),
@@ -354,7 +356,12 @@ impl Paragraph {
             painter.hline(origin.x..=(origin.x + width), line_y, border_stroke);
         }
         if self.presentation.table_delimiter {
-            let y = (origin.y + self.galley.size().y * 0.5).round();
+            let is_hidden = self.display.has_hidden_content();
+            let y = if is_hidden {
+                (origin.y + 4.0).round()
+            } else {
+                (origin.y + self.galley.size().y * 0.5).round()
+            };
             let width = self.galley.size().x.max(view.content_width);
             painter.hline(
                 origin.x..=(origin.x + width),
@@ -396,10 +403,12 @@ impl Paragraph {
                     if s_start < s_end {
                         let col_start = s_start - row_char_start;
                         let col_end = s_end - row_char_start;
-                        let x_start =
-                            row.x_offset(egui::text::CharIndex(col_start)) + row.pos.x + origin.x;
-                        let x_end =
-                            row.x_offset(egui::text::CharIndex(col_end)) + row.pos.x + origin.x;
+                        let x_start = row.x_offset(egui::text::CharIndex(col_start))
+                            + row.pos.x
+                            + text_origin.x;
+                        let x_end = row.x_offset(egui::text::CharIndex(col_end))
+                            + row.pos.x
+                            + text_origin.x;
                         let (min_y, max_y) = row_vertical_bounds(origin.y, row);
                         let pad_x = 3.5;
                         let pad_y = 1.0;
@@ -440,10 +449,12 @@ impl Paragraph {
                     if s_start < s_end {
                         let col_start = s_start - row_char_start;
                         let col_end = s_end - row_char_start;
-                        let x_start =
-                            row.x_offset(egui::text::CharIndex(col_start)) + row.pos.x + origin.x;
-                        let x_end =
-                            row.x_offset(egui::text::CharIndex(col_end)) + row.pos.x + origin.x;
+                        let x_start = row.x_offset(egui::text::CharIndex(col_start))
+                            + row.pos.x
+                            + text_origin.x;
+                        let x_end = row.x_offset(egui::text::CharIndex(col_end))
+                            + row.pos.x
+                            + text_origin.x;
                         let line_y = if let Some(g) = row.glyphs.get(col_start) {
                             (origin.y + row.pos.y + g.pos.y + 1.5).round()
                         } else {
@@ -504,19 +515,19 @@ impl Paragraph {
                 } else {
                     (level as f32) * 16.0 + 2.5
                 };
-                let guide_x = origin.x + center_x;
+                let guide_x = text_origin.x + center_x;
                 for (row_idx, row) in self.galley.rows.iter().enumerate() {
                     let has_text_collision = if row_idx == 0 {
                         row.glyphs.iter().any(|g| {
                             if g.chr.is_whitespace() {
                                 return false;
                             }
-                            let g_left = origin.x + row.pos.x + g.pos.x;
+                            let g_left = text_origin.x + row.pos.x + g.pos.x;
                             let g_right = g_left + g.size().x.max(g.advance_width);
                             guide_x >= g_left - 1.0 && guide_x <= g_right + 1.0
                         })
                     } else {
-                        origin.x + row.pos.x <= guide_x + 4.0
+                        text_origin.x + row.pos.x <= guide_x + 4.0
                     };
                     if !has_text_collision {
                         let row_top = origin.y + row.pos.y;
@@ -529,7 +540,7 @@ impl Paragraph {
                 }
             }
         }
-        painter.galley(origin, self.galley.clone(), self.color);
+        painter.galley(text_origin, self.galley.clone(), self.color);
         if self.display.is_rule_hidden() {
             let y = (origin.y + self.galley.size().y * 0.5).round();
             let width = self.galley.size().x.max(view.content_width);
@@ -541,7 +552,7 @@ impl Paragraph {
             .cursor
             .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
         {
-            let mut caret = self.char_rect_at(origin, cursor);
+            let mut caret = self.char_rect_at(text_origin, cursor);
             if view.mode == Mode::Insert {
                 caret.min.x += HIGHLIGHT_PAD_X;
                 caret.max.x = caret.min.x + 1.5;

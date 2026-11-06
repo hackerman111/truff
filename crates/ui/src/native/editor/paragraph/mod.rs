@@ -45,6 +45,7 @@ pub(super) struct ParagraphStyle<'a> {
     pub(super) width: f32,
     pub(super) projection: ProjectionMode,
     pub(super) typography: &'a TypographyConfig,
+    pub(super) in_insert_mode: bool,
 }
 impl Paragraph {
     pub(super) fn new(
@@ -54,11 +55,12 @@ impl Paragraph {
         painter: &Painter,
         style: ParagraphStyle<'_>,
     ) -> Self {
-        let display = DisplayMap::from_owned_with_presentation(
+        let mut display = DisplayMap::from_owned_with_presentation(
             source,
             style.projection,
             Some(presentation.clone()),
         );
+        display.set_insert_mode(style.in_insert_mode);
         let (galley, text_indent) = super::super::paint::shape(
             painter,
             &display,
@@ -89,14 +91,18 @@ impl Paragraph {
         selection: Option<(BytePos, BytePos)>,
     ) -> bool {
         let mode_changed = self.display.mode() != style.projection;
-        let view_changed = !self.display.matches_view(cursor, selection) || mode_changed;
+        let insert_mode_changed = self.display.in_insert_mode() != style.in_insert_mode;
+        let view_changed =
+            !self.display.matches_view(cursor, selection) || mode_changed || insert_mode_changed;
         let old_visual_revision = self.display.visual_revision();
         self.display.set_mode(style.projection);
+        self.display.set_insert_mode(style.in_insert_mode);
         if view_changed {
             self.display.update(None, cursor, selection);
         }
-        let projection_changed =
-            mode_changed || old_visual_revision != self.display.visual_revision();
+        let projection_changed = mode_changed
+            || insert_mode_changed
+            || old_visual_revision != self.display.visual_revision();
         if !projection_changed
             && self.color == style.foreground
             && self.pixels_per_point == style.pixels_per_point
@@ -118,4 +124,20 @@ impl Paragraph {
         self.typography = style.typography.into();
         true
     }
+
+    pub(super) fn is_task(&self) -> bool {
+        if self.display.mode() == ProjectionMode::Source {
+            return false;
+        }
+        if let Some(list) = &self.presentation.list {
+            matches!(
+                list.kind,
+                truff_core::markdown::presentation::ListKind::Task { .. }
+            )
+        } else {
+            self.display.is_task()
+        }
+    }
 }
+
+pub const TASK_PADDING_X: f32 = 10.0;
