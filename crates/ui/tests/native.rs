@@ -1185,3 +1185,64 @@ fn test_nested_list_mixed_tabs_and_deep_items_render_and_align() {
         );
     }
 }
+
+#[test]
+fn test_task_padding_keeps_checkbox_separated_from_status_bar() {
+    let source = "plain\n- [ ] Root task\n";
+    let (mut app, context) = scratch(source);
+    let output = frame(&mut app, &context, vec![]);
+
+    let task_shape = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("☐") => Some(text),
+            _ => None,
+        })
+        .expect("missing task text shape");
+
+    assert_eq!(task_shape.galley.job.text, "☐ Root task");
+
+    let status_bar = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::LineSegment { points, stroke } if stroke.width == 3.0 => Some(*points),
+            _ => None,
+        })
+        .expect("missing status bar line segment");
+
+    let bar_right = status_bar[0].x + 1.5;
+    let text_left = task_shape.pos.x;
+    assert!(
+        text_left >= bar_right + 5.0,
+        "text_left ({text_left}) must have at least 5.0px padding after bar_right ({bar_right})"
+    );
+
+    // Clicking the padded checkbox toggles the task
+    let glyph = &task_shape.galley.rows[0].glyphs[0];
+    let click_pos = task_shape.pos
+        + egui::vec2(
+            glyph.pos.x + glyph.advance_width * 0.2,
+            task_shape.galley.size().y * 0.5,
+        );
+    frame(&mut app, &context, vec![Event::PointerMoved(click_pos)]);
+    for pressed in [true, false] {
+        frame(
+            &mut app,
+            &context,
+            vec![Event::PointerButton {
+                pos: click_pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+    }
+    assert!(
+        app.application
+            .shell
+            .editor_text()
+            .contains("- [x] Root task")
+    );
+}

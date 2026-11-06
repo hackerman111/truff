@@ -9,7 +9,6 @@ pub mod markdown {
     }
 }
 mod preview;
-mod tasks_panel;
 
 pub fn show(state: &mut NavigatorState, context: &egui::Context, theme: &Theme) -> NavigatorAction {
     show_inner(state, context, theme, true)
@@ -84,8 +83,7 @@ fn show_inner(
             let gap = theme.spacing_lg;
             let total_width = ui.available_width();
             if is_hub {
-                let left_width = ((total_width - gap * 2.0) * 0.28).max(120.0);
-                let mid_width = ((total_width - gap * 2.0) * 0.38).max(140.0);
+                let left_width = ((total_width - gap) * 0.40).max(120.0);
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = gap / 2.0;
                     ui.allocate_ui_with_layout(
@@ -94,27 +92,18 @@ fn show_inner(
                         |ui| list::show(ui, state, theme, height, &mut action),
                     );
                     ui.separator();
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(mid_width, height),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.set_max_width(mid_width);
-                            if state.actions_menu_open {
-                                chrome::actions(ui, state, theme, height, &mut action);
-                            } else {
-                                preview::show(ui, state, theme, height);
-                            }
-                        },
-                    );
-                    ui.separator();
                     let right_width =
-                        (ui.available_width() - ui.spacing().item_spacing.x).max(120.0);
+                        (ui.available_width() - ui.spacing().item_spacing.x).max(140.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(right_width, height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
                             ui.set_max_width(right_width);
-                            tasks_panel::show(ui, state, theme, height, &mut action);
+                            if state.actions_menu_open {
+                                chrome::actions(ui, state, theme, height, &mut action);
+                            } else {
+                                preview::show(ui, state, theme, height);
+                            }
                         },
                     );
                 });

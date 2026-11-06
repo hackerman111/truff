@@ -90,6 +90,20 @@ fn parse_line_list_marker(line_str: &str, line_start: usize, depth: usize) -> Op
                 },
             });
         }
+        if bytes.len() >= 5
+            && bytes[2] == b'['
+            && bytes[3] == b']'
+            && matches!(bytes[4], b' ' | b'\t')
+        {
+            return Some(ListMarker {
+                range: (line_start + ws_len)..(line_start + ws_len + 5),
+                depth,
+                kind: ListKind::Task {
+                    checked: false,
+                    checkbox: line_start + ws_len + 3,
+                },
+            });
+        }
         return Some(ListMarker {
             range: (line_start + ws_len)..(line_start + ws_len + 2),
             depth,
@@ -132,7 +146,7 @@ fn is_tasks_fence_header(header_line: &str) -> bool {
     after_fence
         .split_whitespace()
         .next()
-        .is_some_and(|lang| lang.eq_ignore_ascii_case("tasks"))
+        .is_some_and(|lang| lang.eq_ignore_ascii_case("tasks") || lang.eq_ignore_ascii_case("task"))
 }
 
 impl SyntaxSnapshot {

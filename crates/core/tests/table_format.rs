@@ -1,4 +1,6 @@
-use truff_core::markdown::table::{find_table_range_at, format_table_str, format_table_transaction};
+use truff_core::markdown::table::{
+    find_table_range_at, format_table_str, format_table_transaction,
+};
 use truff_core::text::Buffer;
 
 #[test]

@@ -424,9 +424,14 @@ impl NativeApp {
             .project_index_path()
             .map(|path| parse_index_tasks(&self.read_index_markdown(&path)))
             .unwrap_or_default();
+        let saved_cat = self.navigator.hub_tasks.active_category;
+        let saved_selected = self.navigator.hub_tasks.selected;
         self.navigator
             .hub_tasks
             .set_lists(vault_tasks, file_tasks, project_tasks);
+        self.navigator.hub_tasks.active_category = saved_cat;
+        self.navigator.hub_tasks.selected = saved_selected;
+        self.navigator.hub_tasks.clamp_selection();
     }
 
     fn apply_hub_task_op(&mut self, op: crate::navigator::HubTaskOp) {
@@ -566,6 +571,12 @@ impl NativeApp {
                     return;
                 }
             }
+        }
+        self.sync_hub_tasks();
+        if let crate::navigator::HubTaskOp::Add { category, .. } = op {
+            let cat = category.index();
+            self.navigator.hub_tasks.selected[cat] =
+                self.navigator.hub_tasks.lists[cat].len().saturating_sub(1);
         }
         self.refresh_navigator();
     }

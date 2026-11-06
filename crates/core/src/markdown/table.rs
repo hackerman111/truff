@@ -91,15 +91,14 @@ pub fn format_table_str(raw: &str) -> Option<String> {
         return None;
     }
 
-    let parsed_rows: Vec<Vec<String>> = raw_lines.iter().map(|line| split_row_cells(line)).collect();
+    let parsed_rows: Vec<Vec<String>> =
+        raw_lines.iter().map(|line| split_row_cells(line)).collect();
     if parsed_rows.iter().any(|r| r.is_empty()) {
         return None;
     }
 
     // Locate delimiter row
-    let delimiter_idx = raw_lines
-        .iter()
-        .position(|line| is_table_delimiter(line))?;
+    let delimiter_idx = raw_lines.iter().position(|line| is_table_delimiter(line))?;
 
     let num_columns = parsed_rows.iter().map(|r| r.len()).max().unwrap_or(0);
     if num_columns == 0 {
@@ -221,7 +220,10 @@ pub fn find_table_range_at(buffer: &Buffer, pos: usize) -> Option<Range<usize>> 
     let pos = pos.min(buffer.byte_len());
     let current_line = buffer.line_of_byte(pos);
     let line_str = buffer
-        .slice(buffer.byte_of_line(current_line)..buffer.byte_of_line((current_line + 1).min(buffer.line_len())))
+        .slice(
+            buffer.byte_of_line(current_line)
+                ..buffer.byte_of_line((current_line + 1).min(buffer.line_len())),
+        )
         .to_string();
 
     if !is_table_row(&line_str) {
@@ -247,7 +249,10 @@ pub fn find_table_range_at(buffer: &Buffer, pos: usize) -> Option<Range<usize>> 
     while end_line + 1 < buffer.line_len() {
         let next_line = end_line + 1;
         let next_str = buffer
-            .slice(buffer.byte_of_line(next_line)..buffer.byte_of_line((next_line + 1).min(buffer.line_len())))
+            .slice(
+                buffer.byte_of_line(next_line)
+                    ..buffer.byte_of_line((next_line + 1).min(buffer.line_len())),
+            )
             .to_string();
         if is_table_row(&next_str) {
             end_line = next_line;

@@ -352,8 +352,8 @@ impl EditorWidget {
             let is_collapsed_task_fence = entry.presentation.task_fence
                 && style.projection != ProjectionMode::Source
                 && !style.in_insert_mode;
-            let is_hidden_delimiter = entry.presentation.table_delimiter
-                && entry.display.has_hidden_content();
+            let is_hidden_delimiter =
+                entry.presentation.table_delimiter && entry.display.has_hidden_content();
             let block_height = if is_collapsed_task_fence {
                 2.0
             } else if is_hidden_delimiter {

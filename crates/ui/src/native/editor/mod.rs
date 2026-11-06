@@ -193,8 +193,8 @@ pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::the
             ui.painter(),
             style,
         );
-        let is_hidden_delimiter = para.presentation.table_delimiter
-            && para.display.has_hidden_content();
+        let is_hidden_delimiter =
+            para.presentation.table_delimiter && para.display.has_hidden_content();
         let row_h = if is_hidden_delimiter {
             8.0
         } else {

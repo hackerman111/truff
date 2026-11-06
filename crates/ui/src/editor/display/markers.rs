@@ -389,7 +389,9 @@ impl DisplayMap {
             .as_ref()
             .is_some_and(|p| p.table_delimiter);
         if is_del_from_pres
-            || (trimmed_text.starts_with('|') && trimmed_text.ends_with('|') && trimmed_text.len() > 1)
+            || (trimmed_text.starts_with('|')
+                && trimmed_text.ends_with('|')
+                && trimmed_text.len() > 1)
         {
             let is_delimiter = is_del_from_pres
                 || (trimmed_text
@@ -536,7 +538,9 @@ impl DisplayMap {
                 || (trimmed.starts_with('|')
                     && trimmed.ends_with('|')
                     && trimmed.contains('-')
-                    && trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c == ' '))
+                    && trimmed
+                        .chars()
+                        .all(|c| c == '|' || c == '-' || c == ':' || c == ' '))
             {
                 return Some(Cow::Borrowed(""));
             }

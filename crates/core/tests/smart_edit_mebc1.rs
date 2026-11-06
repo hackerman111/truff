@@ -241,3 +241,43 @@ fn test_plan_backspace_removes_tab_or_indent_step() {
     b.apply(tx).unwrap();
     assert_eq!(b.as_str(), "- ");
 }
+
+#[test]
+fn test_task_enter_auto_creation_and_single_backspace_deletion() {
+    // 1. Enter after task auto-creates new task item
+    let mut b = Buffer::from_str("- [ ] task 1");
+    let tx = plan_enter(&b, BytePos::new(b.byte_len())).expect("enter after task");
+    b.apply(tx).unwrap();
+    assert_eq!(b.as_str(), "- [ ] task 1\n- [ ] ");
+
+    // 2. 1 Backspace on the newly created empty task deletes it completely
+    let cursor = BytePos::new(b.byte_len());
+    let tx_bs = plan_backspace(&b, cursor).expect("1 backspace deletes empty task");
+    b.apply(tx_bs).unwrap();
+    assert_eq!(b.as_str(), "- [ ] task 1\n");
+
+    // 3. 1 Backspace on an empty root task deletes it
+    let mut b2 = Buffer::from_str("- [ ] ");
+    let tx_bs2 = plan_backspace(&b2, BytePos::new(6)).expect("1 backspace deletes - [ ] ");
+    b2.apply(tx_bs2).unwrap();
+    assert_eq!(b2.as_str(), "");
+
+    // 4. 1 Backspace at content_start of task with text removes the task marker
+    let mut b3 = Buffer::from_str("- [ ] Buy milk");
+    let tx_bs3 = plan_backspace(&b3, BytePos::new(6)).expect("1 backspace deletes task marker");
+    b3.apply(tx_bs3).unwrap();
+    assert_eq!(b3.as_str(), "Buy milk");
+
+    // 5. Enter inside ```tasks fence auto-creates task and 1 backspace deletes it
+    let tasks_fence = "```tasks\n- [ ] Task in fence\n```\n";
+    let mut b4 = Buffer::from_str(tasks_fence);
+    let enter_pos = BytePos::new("```tasks\n- [ ] Task in fence".len());
+    let tx_enter = plan_enter(&b4, enter_pos).expect("enter inside tasks fence");
+    b4.apply(tx_enter).unwrap();
+    assert_eq!(b4.as_str(), "```tasks\n- [ ] Task in fence\n- [ ] \n```\n");
+
+    let bs_pos = BytePos::new("```tasks\n- [ ] Task in fence\n- [ ] ".len());
+    let tx_bs_fence = plan_backspace(&b4, bs_pos).expect("1 backspace inside tasks fence");
+    b4.apply(tx_bs_fence).unwrap();
+    assert_eq!(b4.as_str(), "```tasks\n- [ ] Task in fence\n\n```\n");
+}

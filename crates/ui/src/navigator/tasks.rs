@@ -37,7 +37,7 @@ impl HubTaskCategory {
     pub const fn subtitle(self) -> &'static str {
         match self {
             Self::Vault => "index.md (убежище)",
-            Self::File => "```tasks (заметка)",
+            Self::File => "```task / ```tasks (заметка)",
             Self::Project => "index.md (папка)",
         }
     }
@@ -497,7 +497,7 @@ pub fn parse_fenced_file_tasks(markdown: &str) -> Vec<HubTask> {
                 .or_else(|| trimmed.strip_prefix("~~~"))
             {
                 let tag = info.split_whitespace().next().unwrap_or("");
-                if tag.eq_ignore_ascii_case("tasks") {
+                if tag.eq_ignore_ascii_case("tasks") || tag.eq_ignore_ascii_case("task") {
                     in_tasks_fence = true;
                 }
             }
@@ -594,7 +594,7 @@ pub fn apply_task_op_to_file_text(markdown: &str, op: &HubTaskOp) -> String {
                         .or_else(|| trimmed.strip_prefix("~~~"))
                     {
                         let tag = info.split_whitespace().next().unwrap_or("");
-                        if tag.eq_ignore_ascii_case("tasks") {
+                        if tag.eq_ignore_ascii_case("tasks") || tag.eq_ignore_ascii_case("task") {
                             in_tasks_fence = true;
                             fence_open_idx = Some(idx);
                         }
@@ -635,10 +635,10 @@ pub fn apply_task_op_to_file_text(markdown: &str, op: &HubTaskOp) -> String {
                         if let Some(info) = trimmed
                             .strip_prefix("```")
                             .or_else(|| trimmed.strip_prefix("~~~"))
-                            && info
-                                .split_whitespace()
-                                .next()
-                                .is_some_and(|tag| tag.eq_ignore_ascii_case("tasks"))
+                            && info.split_whitespace().next().is_some_and(|tag| {
+                                tag.eq_ignore_ascii_case("tasks")
+                                    || tag.eq_ignore_ascii_case("task")
+                            })
                         {
                             open_idx = Some(idx);
                         }

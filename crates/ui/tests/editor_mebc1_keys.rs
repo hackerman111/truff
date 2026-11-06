@@ -267,23 +267,27 @@ fn test_tasks_fence_is_hidden_and_tasks_highlighted_by_status() {
     let open_pres = snapshot.line_presentation_in_str(md, 0..8);
     assert!(open_pres.task_fence);
     assert!(!open_pres.code);
-    let open_map = DisplayMap::from_owned_with_presentation(
+    let mut open_map = DisplayMap::from_owned_with_presentation(
         "```tasks".into(),
         ProjectionMode::LivePreview,
         Some(open_pres),
     );
     assert_eq!(open_map.visual_text(), "");
+    open_map.set_insert_mode(true);
+    assert_eq!(open_map.visual_text(), "```tasks");
 
     // Closing fence: "```" (43..46)
     let close_pres = snapshot.line_presentation_in_str(md, 43..46);
     assert!(close_pres.task_fence);
     assert!(!close_pres.code);
-    let close_map = DisplayMap::from_owned_with_presentation(
+    let mut close_map = DisplayMap::from_owned_with_presentation(
         "```".into(),
         ProjectionMode::LivePreview,
         Some(close_pres),
     );
     assert_eq!(close_map.visual_text(), "");
+    close_map.set_insert_mode(true);
+    assert_eq!(close_map.visual_text(), "```");
 
     // Todo task: "- [ ] Todo" (9..19)
     let mut todo_pres = snapshot.line_presentation_in_str(md, 9..19);
@@ -353,4 +357,40 @@ fn test_tasks_fence_is_hidden_and_tasks_highlighted_by_status() {
             .iter()
             .any(|s| { s.style == InlineStyle::Strikethrough })
     );
+}
+
+#[test]
+fn test_insert_mode_task_enter_and_backspace() {
+    let mut shell = Shell::new();
+    shell.set_editor_text("- [ ] task one");
+
+    // Enter insert mode at the end of the line
+    shell.feed_key(Key::Char('A'));
+    assert_eq!(shell.mode(), Mode::Insert);
+
+    // Press Enter: auto-creates new task line
+    shell.feed_key(Key::Enter);
+    assert_eq!(
+        shell.editor_text(),
+        "- [ ] task one\n- [ ] ",
+        "Enter after task item should auto-create - [ ] on new line"
+    );
+
+    // Press Backspace: deletes the task line in 1 backspace
+    shell.feed_key(Key::Backspace);
+    assert_eq!(
+        shell.editor_text(),
+        "- [ ] task one\n",
+        "Backspace on empty task item should delete - [ ] in 1 backspace"
+    );
+
+    // Press Enter again: auto-creates task line again
+    shell.set_editor_text("- [ ] task one");
+    shell.feed_key(Key::Char('A'));
+    shell.feed_key(Key::Enter);
+    assert_eq!(shell.editor_text(), "- [ ] task one\n- [ ] ");
+
+    // Press Enter on empty task line: clears the task line
+    shell.feed_key(Key::Enter);
+    assert_eq!(shell.editor_text(), "- [ ] task one\n");
 }

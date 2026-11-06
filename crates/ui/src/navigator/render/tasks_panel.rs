@@ -1,5 +1,5 @@
 use crate::{
-    components::{self, color},
+    components::color,
     navigator::{
         HubTaskCategory, HubTaskEdit, HubTaskOp, HubTaskStatus, NavigatorAction, NavigatorState,
     },
@@ -66,7 +66,7 @@ fn show_category_box(
                     egui::Label::new(
                         egui::RichText::new(format!("{} · {}", cat_idx + 1, category.title()))
                             .strong()
-                            .size(theme.geometry.ui_font_size - 0.5)
+                            .size(theme.geometry.ui_font_size + 1.0)
                             .color(if is_active_cat {
                                 color(theme.accent_primary)
                             } else {
@@ -82,7 +82,7 @@ fn show_category_box(
                 }
                 ui.label(
                     egui::RichText::new(category.subtitle())
-                        .size(theme.geometry.ui_font_size - 3.0)
+                        .size((theme.geometry.ui_font_size - 1.0).max(10.0))
                         .color(color(theme.text_muted)),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -102,7 +102,7 @@ fn show_category_box(
                     ui.label(
                         egui::RichText::new(format!("{done}/{total}"))
                             .monospace()
-                            .size(theme.geometry.ui_font_size - 2.0)
+                            .size(theme.geometry.ui_font_size)
                             .color(color(theme.text_muted)),
                     );
                 });
@@ -117,7 +117,9 @@ fn show_category_box(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.set_max_width(inner_width);
-                    let row_height = (theme.geometry.list_row_height - 4.0).max(22.0);
+                    let min_row_height = (theme.geometry.list_row_height - 2.0).max(24.0);
+                    let task_font_size = theme.geometry.ui_font_size + 2.0;
+                    let text_max_w = (ui.available_width() - 56.0).max(30.0);
                     let selected_idx = state.hub_tasks.selected[cat_idx];
                     let tasks_snapshot = state.hub_tasks.lists[cat_idx].clone();
 
@@ -130,7 +132,7 @@ fn show_category_box(
                         let empty_resp = ui.add(
                             egui::Label::new(
                                 egui::RichText::new("Нет задач · нажмите a для добавления")
-                                    .size(theme.geometry.ui_font_size - 2.0)
+                                    .size(theme.geometry.ui_font_size)
                                     .color(color(theme.text_muted)),
                             )
                             .sense(egui::Sense::click()),
@@ -143,7 +145,9 @@ fn show_category_box(
                     }
 
                     for (task_idx, task) in tasks_snapshot.iter().enumerate() {
-                        let is_selected = is_active_cat && task_idx == selected_idx;
+                        let is_selected = is_active_cat
+                            && task_idx == selected_idx
+                            && state.hub_tasks.editing.is_none();
                         if let Some(HubTaskEdit::Edit {
                             category: edit_cat,
                             task_index: edit_idx,
@@ -153,17 +157,51 @@ fn show_category_box(
                             && *edit_cat == category
                             && *edit_idx == task_idx
                         {
-                            components::list_row(ui, row_height, true, theme, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        egui::RichText::new("✎").color(color(theme.accent_primary)),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(format!("{input}█"))
+                            let edit_text = format!("{input}█");
+                            let edit_font =
+                                egui::FontId::new(task_font_size, egui::FontFamily::Monospace);
+                            let galley = ui.painter().layout(
+                                edit_text.clone(),
+                                edit_font,
+                                color(theme.text_primary),
+                                text_max_w,
+                            );
+                            let edit_row_height = (galley.size().y + theme.spacing_xs * 2.0 + 4.0)
+                                .max(min_row_height);
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), edit_row_height),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                rect,
+                                theme.geometry.corner_radius,
+                                color(theme.bg_selected),
+                            );
+                            ui.painter().line_segment(
+                                [
+                                    rect.left_top() + egui::vec2(0.0, 4.0),
+                                    rect.left_bottom() - egui::vec2(0.0, 4.0),
+                                ],
+                                egui::Stroke::new(2.0, color(theme.accent_primary)),
+                            );
+                            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(
+                                rect.shrink2(egui::vec2(theme.spacing_sm, theme.spacing_xs)),
+                            ));
+                            child.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("✎")
+                                        .size(task_font_size)
+                                        .color(color(theme.accent_primary)),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(edit_text)
                                             .monospace()
+                                            .size(task_font_size)
                                             .color(color(theme.text_primary)),
-                                    );
-                                });
+                                    )
+                                    .wrap_mode(egui::TextWrapMode::Wrap),
+                                );
                             });
                             continue;
                         }
@@ -172,11 +210,32 @@ fn show_category_box(
                         let mut delete_clicked = false;
                         let mut select_clicked = false;
 
-                        let (rect, hover_resp) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), row_height),
-                            egui::Sense::hover(),
+                        let badge_color = match task.status {
+                            HubTaskStatus::Todo => color(theme.callout_important),
+                            HubTaskStatus::InProgress => color(theme.callout_warning),
+                            HubTaskStatus::Done => color(theme.callout_tip),
+                        };
+                        let text_color = match task.status {
+                            HubTaskStatus::Todo => color(theme.callout_important),
+                            HubTaskStatus::InProgress => color(theme.callout_warning),
+                            HubTaskStatus::Done => color(theme.text_muted),
+                        };
+                        let task_font =
+                            egui::FontId::new(task_font_size, egui::FontFamily::Proportional);
+                        let galley = ui.painter().layout(
+                            task.text.clone(),
+                            task_font,
+                            text_color,
+                            text_max_w,
                         );
-                        if is_selected || hover_resp.hovered() {
+                        let row_height =
+                            (galley.size().y + theme.spacing_xs * 2.0 + 4.0).max(min_row_height);
+
+                        let (rect, row_resp) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), row_height),
+                            egui::Sense::click(),
+                        );
+                        if is_selected || row_resp.hovered() {
                             ui.painter().rect_filled(
                                 rect,
                                 theme.geometry.corner_radius,
@@ -203,16 +262,12 @@ fn show_category_box(
                         child.spacing_mut().interact_size.y = row_height - theme.spacing_xs * 2.0;
                         child.spacing_mut().item_spacing.y = 0.0;
                         child.horizontal(|ui| {
-                            let badge_color = match task.status {
-                                HubTaskStatus::Todo => color(theme.callout_important),
-                                HubTaskStatus::InProgress => color(theme.callout_warning),
-                                HubTaskStatus::Done => color(theme.callout_tip),
-                            };
                             if ui
                                 .add(
                                     egui::Label::new(
                                         egui::RichText::new(task.status.badge())
                                             .monospace()
+                                            .size(task_font_size)
                                             .color(badge_color),
                                     )
                                     .sense(egui::Sense::click()),
@@ -223,21 +278,15 @@ fn show_category_box(
                                 toggle_clicked = true;
                             }
                             let mut rich = egui::RichText::new(&task.text)
-                                .size(theme.geometry.ui_font_size - 1.0)
-                                .color(match task.status {
-                                    HubTaskStatus::Todo => color(theme.callout_important),
-                                    HubTaskStatus::InProgress => color(theme.callout_warning),
-                                    HubTaskStatus::Done => color(theme.text_muted),
-                                });
+                                .size(task_font_size)
+                                .color(text_color);
                             if task.status == HubTaskStatus::Done {
                                 rich = rich.strikethrough();
                             }
-                            let text_max_w = (ui.available_width() - 22.0).max(20.0);
                             if ui
-                                .add_sized(
-                                    [text_max_w, row_height - theme.spacing_xs * 2.0],
+                                .add(
                                     egui::Label::new(rich)
-                                        .truncate()
+                                        .wrap_mode(egui::TextWrapMode::Wrap)
                                         .sense(egui::Sense::click()),
                                 )
                                 .clicked()
@@ -281,7 +330,9 @@ fn show_category_box(
                             };
                             state.hub_tasks.apply_op_in_memory(&op);
                             *action = NavigatorAction::HubTask(op);
-                        } else if select_clicked {
+                        } else if select_clicked
+                            || (row_resp.clicked() && !toggle_clicked && !delete_clicked)
+                        {
                             state.search_mode = false;
                             state.hub_tasks.focus_tasks = true;
                             state.hub_tasks.set_category(category);
@@ -295,19 +346,52 @@ fn show_category_box(
                     }) = &state.hub_tasks.editing
                         && *edit_cat == category
                     {
-                        components::list_row(ui, row_height, true, theme, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new("+ ☐")
+                        let add_text = format!("{input}█");
+                        let add_font =
+                            egui::FontId::new(task_font_size, egui::FontFamily::Monospace);
+                        let galley = ui.painter().layout(
+                            add_text.clone(),
+                            add_font,
+                            color(theme.text_primary),
+                            text_max_w,
+                        );
+                        let add_row_height =
+                            (galley.size().y + theme.spacing_xs * 2.0 + 4.0).max(min_row_height);
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), add_row_height),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().rect_filled(
+                            rect,
+                            theme.geometry.corner_radius,
+                            color(theme.bg_selected),
+                        );
+                        ui.painter().line_segment(
+                            [
+                                rect.left_top() + egui::vec2(0.0, 4.0),
+                                rect.left_bottom() - egui::vec2(0.0, 4.0),
+                            ],
+                            egui::Stroke::new(2.0, color(theme.accent_primary)),
+                        );
+                        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(
+                            rect.shrink2(egui::vec2(theme.spacing_sm, theme.spacing_xs)),
+                        ));
+                        child.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("+ ☐")
+                                    .size(task_font_size)
+                                    .monospace()
+                                    .color(color(theme.accent_primary)),
+                            );
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(add_text)
                                         .monospace()
-                                        .color(color(theme.accent_primary)),
-                                );
-                                ui.label(
-                                    egui::RichText::new(format!("{input}█"))
-                                        .monospace()
+                                        .size(task_font_size)
                                         .color(color(theme.text_primary)),
-                                );
-                            });
+                                )
+                                .wrap_mode(egui::TextWrapMode::Wrap),
+                            );
                         });
                     }
                 });

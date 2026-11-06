@@ -41,7 +41,7 @@ pub(super) fn header(
                 };
             }
             ui.label(
-                egui::RichText::new("Tab — переключить · h/l — фокус")
+                egui::RichText::new("Tab — переключить")
                     .size(theme.geometry.ui_font_size - 2.0)
                     .color(color(theme.text_muted)),
             );
@@ -139,7 +139,7 @@ pub(super) fn footer(
         }
         if is_hub {
             ui.label(
-                egui::RichText::new("Tab Оглавление/Backlinks · l к задачам · j/k навигация")
+                egui::RichText::new("Tab Оглавление/Backlinks · j/k навигация")
                     .size(theme.geometry.ui_font_size - 2.0)
                     .color(color(theme.text_muted)),
             );
