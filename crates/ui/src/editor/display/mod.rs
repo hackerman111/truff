@@ -35,6 +35,7 @@ pub struct DisplayMap {
     lists: Vec<truff_core::markdown::presentation::ListMarker>,
     presentation: Option<truff_core::markdown::presentation::LinePresentation>,
     table_paddings: Vec<(Range<usize>, String)>,
+    table_pipes: Vec<Range<usize>>,
     in_insert_mode: bool,
 }
 
@@ -72,6 +73,7 @@ impl DisplayMap {
             lists: Vec::new(),
             presentation,
             table_paddings: Vec::new(),
+            table_pipes: Vec::new(),
             in_insert_mode: false,
         };
         map.scan_markers();
@@ -164,6 +166,26 @@ impl DisplayMap {
 
     pub fn list_markers(&self) -> &[truff_core::markdown::presentation::ListMarker] {
         &self.lists
+    }
+
+    pub fn table_pipes(&self) -> &[Range<usize>] {
+        &self.table_pipes
+    }
+
+    pub fn table_pipe_visual_cols(&self) -> Vec<usize> {
+        let visual_text = self.visual_text();
+        let mut cols = Vec::with_capacity(self.table_pipes.len());
+        for pipe_range in &self.table_pipes {
+            if let Some(chunk) = self.chunks.iter().find(|c| {
+                c.source_start == pipe_range.start as u32 && c.source_end == pipe_range.end as u32
+            }) {
+                let char_idx = visual_text[..(chunk.visual_start as usize).min(visual_text.len())]
+                    .chars()
+                    .count();
+                cols.push(char_idx);
+            }
+        }
+        cols
     }
 
     pub(crate) fn task_at_visual(&self, position: VisualPos) -> Option<usize> {

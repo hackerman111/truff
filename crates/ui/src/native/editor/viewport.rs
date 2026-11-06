@@ -360,7 +360,7 @@ impl EditorWidget {
             let block_height = if is_collapsed_task_fence {
                 2.0
             } else if is_hidden_delimiter {
-                8.0
+                1.0
             } else {
                 entry.galley.size().y.max(LINE_HEIGHT)
             };

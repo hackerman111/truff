@@ -338,24 +338,57 @@ impl Paragraph {
                 egui::Stroke::new(3.0, color(view.theme.accent).gamma_multiply(0.85)),
             );
         }
-        if self.presentation.table_header {
+        let table_pipes = self.display.table_pipes();
+        if !table_pipes.is_empty() && self.display.mode() != crate::editor::ProjectionMode::Source {
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
-            let width = self.galley.size().x;
-            let header_rect = Rect::from_min_max(
-                Pos2::new(origin.x, min_y - 1.0),
-                Pos2::new(origin.x + width, max_y + 1.0),
-            );
-            painter.rect_filled(
-                header_rect,
-                2.0,
-                color(view.theme.bg_panel).gamma_multiply(0.4),
-            );
-            let line_y = max_y + 1.0;
-            let border_stroke =
-                egui::Stroke::new(1.0, color(view.theme.border_subtle).gamma_multiply(1.5));
-            painter.hline(origin.x..=(origin.x + width), line_y, border_stroke);
-        }
-        if self.presentation.table_delimiter && !self.display.has_hidden_content() {
+            let border_color = color(view.theme.border_subtle).gamma_multiply(1.3);
+            let border_stroke = egui::Stroke::new(1.0, border_color);
+
+            let mut pipe_xs: Vec<f32> = Vec::with_capacity(table_pipes.len());
+            if let Some(row) = self.galley.rows.first() {
+                for col_idx in self.display.table_pipe_visual_cols() {
+                    let x_start =
+                        row.x_offset(egui::text::CharIndex(col_idx)) + row.pos.x + text_origin.x;
+                    let x_end = row.x_offset(egui::text::CharIndex(col_idx + 1))
+                        + row.pos.x
+                        + text_origin.x;
+                    let px = if x_end > x_start {
+                        ((x_start + x_end) * 0.5).round()
+                    } else {
+                        (x_start + 4.0).round()
+                    };
+                    pipe_xs.push(px);
+                }
+            }
+
+            if let (Some(&first_x), Some(&last_x)) = (pipe_xs.first(), pipe_xs.last()) {
+                if self.presentation.table_header {
+                    let header_rect = Rect::from_min_max(
+                        Pos2::new(first_x, min_y - 1.0),
+                        Pos2::new(last_x, max_y + 1.0),
+                    );
+                    painter.rect_filled(
+                        header_rect,
+                        0.0,
+                        color(view.theme.bg_panel).gamma_multiply(0.5),
+                    );
+                    painter.hline(first_x..=last_x, (min_y - 1.0).round(), border_stroke);
+                    painter.hline(
+                        first_x..=last_x,
+                        (max_y + 1.0).round(),
+                        egui::Stroke::new(1.5, border_color),
+                    );
+                } else {
+                    painter.hline(first_x..=last_x, (max_y + 1.0).round(), border_stroke);
+                }
+
+                let y_top = (min_y - 1.0).round();
+                let y_bottom = (max_y + 1.0).round();
+                for &px in &pipe_xs {
+                    painter.vline(px, y_top..=y_bottom, border_stroke);
+                }
+            }
+        } else if self.presentation.table_delimiter && !self.display.has_hidden_content() {
             let y = (origin.y + self.galley.size().y * 0.5).round();
             let width = self.galley.size().x;
             painter.hline(

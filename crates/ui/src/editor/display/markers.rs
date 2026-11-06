@@ -72,6 +72,7 @@ impl DisplayMap {
         self.lists.clear();
         self.styles.clear();
         self.table_paddings.clear();
+        self.table_pipes.clear();
         if self.presentation.as_ref().is_some_and(|line| line.code) {
             self.colors.clear();
             return;
@@ -410,10 +411,14 @@ impl DisplayMap {
                 let mut cell_start = None;
                 let pipe_indices = truff_core::markdown::table::find_table_pipe_indices(text);
                 for &idx in &pipe_indices {
+                    let pipe_range = idx..idx + 1;
                     self.styles.push(StyledSpan {
-                        content: idx..idx + 1,
+                        content: pipe_range.clone(),
                         style: InlineStyle::TextColor([94, 129, 172, 220]),
                     });
+                    self.markers
+                        .push((pipe_range.clone(), Some(pipe_range.clone())));
+                    self.table_pipes.push(pipe_range);
                     if is_header {
                         if let Some(start) = cell_start
                             && start < idx
@@ -524,13 +529,17 @@ impl DisplayMap {
                 style: InlineStyle::Highlight(span.rgba),
             });
         }
-        self.markers.sort_by_key(|(range, _)| range.start);
+        self.markers
+            .sort_by(|(a, _), (b, _)| a.start.cmp(&b.start).then_with(|| a.end.cmp(&b.end)));
     }
 
     pub(super) fn replacement(&self, range: &Range<usize>) -> Option<std::borrow::Cow<'_, str>> {
         use std::borrow::Cow;
         if let Some((_, pad)) = self.table_paddings.iter().find(|(r, _)| r == range) {
             return Some(Cow::Borrowed(pad.as_str()));
+        }
+        if self.table_pipes.iter().any(|r| r == range) {
+            return Some(Cow::Borrowed(" "));
         }
         if self.presentation.is_some()
             && range.start == 0

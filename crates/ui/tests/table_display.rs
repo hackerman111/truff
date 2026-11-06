@@ -97,19 +97,43 @@ fn test_table_rows_visually_aligned() {
     let v1 = display1.visual_text();
     let v2 = display2.visual_text();
 
-    let char_pipes = |s: &str| -> Vec<usize> {
-        s.chars()
-            .enumerate()
-            .filter_map(|(idx, c)| if c == '|' { Some(idx) } else { None })
-            .collect()
-    };
+    assert!(
+        !v1.contains('|'),
+        "Table pipes should not appear as raw ASCII '|' in visual text: v1={:?}",
+        v1
+    );
+    assert!(
+        !v2.contains('|'),
+        "Table pipes should not appear as raw ASCII '|' in visual text: v2={:?}",
+        v2
+    );
 
-    let pipes1 = char_pipes(v1);
-    let pipes2 = char_pipes(v2);
+    let source_pipes1 = truff_core::markdown::table::find_table_pipe_indices(row1);
+    let source_pipes2 = truff_core::markdown::table::find_table_pipe_indices(row2);
+
+    let pipe_cols1: Vec<usize> = source_pipes1
+        .iter()
+        .map(|&p| {
+            let vis_byte = display1
+                .source_to_visual(BytePos::new(p), truff_ui::editor::display::Affinity::Right)
+                .get();
+            v1[..vis_byte.min(v1.len())].chars().count()
+        })
+        .collect();
+
+    let pipe_cols2: Vec<usize> = source_pipes2
+        .iter()
+        .map(|&p| {
+            let vis_byte = display2
+                .source_to_visual(BytePos::new(p), truff_ui::editor::display::Affinity::Right)
+                .get();
+            v2[..vis_byte.min(v2.len())].chars().count()
+        })
+        .collect();
 
     assert_eq!(
-        pipes1, pipes2,
-        "All column pipes must align at identical visual character columns across rows: v1={:?}, v2={:?}",
+        pipe_cols1, pipe_cols2,
+        "All column dividers must align at identical visual character columns across rows: v1={:?}, v2={:?}",
         v1, v2
     );
 
@@ -119,7 +143,7 @@ fn test_table_rows_visually_aligned() {
 
     // Source to visual roundtrip for the first pipe
     let vis_pipe0 =
-        display1.source_to_visual(BytePos::new(0), truff_ui::editor::display::Affinity::Right);
+        display1.source_to_visual(BytePos::new(0), truff_ui::editor::display::Affinity::Left);
     assert_eq!(vis_pipe0.get(), 0);
 }
 
@@ -176,6 +200,15 @@ fn test_table_with_math_and_bold_alignment() {
             idx,
             pipes.len(),
             visual
+        );
+
+        let cols = display.table_pipe_visual_cols();
+        assert_eq!(cols.len(), 4);
+        assert_eq!(
+            cols,
+            vec![0, 19, 57, 99],
+            "Pipe visual columns must match expected fixed columns for row {}",
+            idx
         );
 
         if let Some(ref exp) = expected_pipes {

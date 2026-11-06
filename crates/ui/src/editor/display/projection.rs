@@ -56,10 +56,12 @@ impl DisplayMap {
                 .as_ref()
                 .is_some_and(|line| line.task_fence);
             let is_table_pad = self.table_paddings.iter().any(|(r, _)| r == marker_range);
+            let is_table_pipe = self.table_pipes.iter().any(|r| r == marker_range);
             let revealed = if self.mode == ProjectionMode::Reading
                 || is_quote_marker
                 || is_list_indent
                 || is_table_pad
+                || is_table_pipe
                 || (is_task_fence && !self.in_insert_mode)
             {
                 false

@@ -212,7 +212,7 @@ pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::the
         let is_hidden_delimiter =
             para.presentation.table_delimiter && para.display.has_hidden_content();
         let row_h = if is_hidden_delimiter {
-            8.0
+            1.0
         } else {
             para.galley.size().y.max(LINE_HEIGHT * 0.85)
         };
