@@ -340,7 +340,7 @@ impl Paragraph {
         }
         if self.presentation.table_header {
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
-            let width = self.galley.size().x.max(view.content_width);
+            let width = self.galley.size().x;
             let header_rect = Rect::from_min_max(
                 Pos2::new(origin.x, min_y - 1.0),
                 Pos2::new(origin.x + width, max_y + 1.0),
@@ -355,14 +355,9 @@ impl Paragraph {
                 egui::Stroke::new(1.0, color(view.theme.border_subtle).gamma_multiply(1.5));
             painter.hline(origin.x..=(origin.x + width), line_y, border_stroke);
         }
-        if self.presentation.table_delimiter {
-            let is_hidden = self.display.has_hidden_content();
-            let y = if is_hidden {
-                (origin.y + 4.0).round()
-            } else {
-                (origin.y + self.galley.size().y * 0.5).round()
-            };
-            let width = self.galley.size().x.max(view.content_width);
+        if self.presentation.table_delimiter && !self.display.has_hidden_content() {
+            let y = (origin.y + self.galley.size().y * 0.5).round();
+            let width = self.galley.size().x;
             painter.hline(
                 origin.x..=(origin.x + width),
                 y,

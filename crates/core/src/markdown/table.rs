@@ -84,6 +84,50 @@ fn cell_visible_width(cell: &str) -> usize {
     cell.graphemes(true).count()
 }
 
+/// Computes the column inner widths (`dash_widths`) for a slice or iterator of table rows.
+pub fn compute_table_col_widths<'a, I>(lines: I) -> Option<Vec<usize>>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut parsed_rows = Vec::new();
+    let mut delimiter_idx = None;
+
+    for (idx, line) in lines.into_iter().enumerate() {
+        if !is_table_row(line) {
+            continue;
+        }
+        if is_table_delimiter(line) {
+            delimiter_idx = Some(idx);
+        }
+        parsed_rows.push(split_row_cells(line));
+    }
+
+    if parsed_rows.is_empty() {
+        return None;
+    }
+
+    let num_columns = parsed_rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if num_columns == 0 {
+        return None;
+    }
+
+    let mut content_widths = vec![1usize; num_columns];
+    for (row_idx, row) in parsed_rows.iter().enumerate() {
+        if Some(row_idx) == delimiter_idx {
+            continue;
+        }
+        for (col, cell) in row.iter().enumerate() {
+            content_widths[col] = content_widths[col].max(cell_visible_width(cell));
+        }
+    }
+
+    let mut dash_widths = Vec::with_capacity(num_columns);
+    for &cw in &content_widths {
+        dash_widths.push((cw + 2).max(3));
+    }
+    Some(dash_widths)
+}
+
 /// Formats a raw Markdown table text into an aligned table with uniform column widths.
 pub fn format_table_str(raw: &str) -> Option<String> {
     let raw_lines: Vec<&str> = raw.lines().collect();

@@ -71,6 +71,7 @@ impl DisplayMap {
         self.markers.clear();
         self.lists.clear();
         self.styles.clear();
+        self.table_paddings.clear();
         if self.presentation.as_ref().is_some_and(|line| line.code) {
             self.colors.clear();
             return;
@@ -407,8 +408,10 @@ impl DisplayMap {
             } else {
                 let is_header = self.presentation.as_ref().is_some_and(|p| p.table_header);
                 let mut cell_start = None;
+                let mut pipe_indices = Vec::new();
                 for (idx, b) in text.bytes().enumerate() {
                     if b == b'|' && (idx == 0 || text.as_bytes().get(idx - 1) != Some(&b'\\')) {
+                        pipe_indices.push(idx);
                         self.styles.push(StyledSpan {
                             content: idx..idx + 1,
                             style: InlineStyle::TextColor([94, 129, 172, 220]),
@@ -423,6 +426,30 @@ impl DisplayMap {
                                 });
                             }
                             cell_start = Some(idx + 1);
+                        }
+                    }
+                }
+                if let Some(col_widths) = self
+                    .presentation
+                    .as_ref()
+                    .and_then(|p| p.table_col_widths.as_deref())
+                {
+                    use unicode_segmentation::UnicodeSegmentation;
+                    if pipe_indices.len() >= 2 {
+                        for col in 0..pipe_indices.len() - 1 {
+                            let open_pipe = pipe_indices[col];
+                            let close_pipe = pipe_indices[col + 1];
+                            let cell_slice = &text[open_pipe + 1..close_pipe];
+                            let cell_graphemes = cell_slice.graphemes(true).count();
+                            if let Some(&target_w) = col_widths.get(col)
+                                && target_w > cell_graphemes
+                            {
+                                let padding = target_w - cell_graphemes;
+                                let pad_range = close_pipe..close_pipe;
+                                self.markers
+                                    .push((pad_range.clone(), Some(pad_range.clone())));
+                                self.table_paddings.push((pad_range, " ".repeat(padding)));
+                            }
                         }
                     }
                 }
@@ -507,6 +534,9 @@ impl DisplayMap {
 
     pub(super) fn replacement(&self, range: &Range<usize>) -> Option<std::borrow::Cow<'_, str>> {
         use std::borrow::Cow;
+        if let Some((_, pad)) = self.table_paddings.iter().find(|(r, _)| r == range) {
+            return Some(Cow::Borrowed(pad.as_str()));
+        }
         if self.presentation.is_some()
             && range.start == 0
             && let Some(list) = self.lists.first()

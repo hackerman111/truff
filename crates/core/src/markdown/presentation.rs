@@ -25,6 +25,7 @@ pub struct LinePresentation {
     pub in_tasks_block: bool,
     pub table_header: bool,
     pub table_delimiter: bool,
+    pub table_col_widths: Option<std::sync::Arc<Vec<usize>>>,
 }
 
 /// Builds a one-character task edit; stale or invalid targets are ignored.

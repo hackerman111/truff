@@ -34,6 +34,7 @@ pub struct DisplayMap {
     markers: Vec<(Range<usize>, Option<Range<usize>>)>,
     lists: Vec<truff_core::markdown::presentation::ListMarker>,
     presentation: Option<truff_core::markdown::presentation::LinePresentation>,
+    table_paddings: Vec<(Range<usize>, String)>,
     in_insert_mode: bool,
 }
 
@@ -70,6 +71,7 @@ impl DisplayMap {
             markers: Vec::new(),
             lists: Vec::new(),
             presentation,
+            table_paddings: Vec::new(),
             in_insert_mode: false,
         };
         map.scan_markers();

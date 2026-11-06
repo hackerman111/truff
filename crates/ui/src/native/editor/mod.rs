@@ -44,6 +44,7 @@ pub struct EditorWidget {
     last_viewport: Option<egui::Rect>,
     follow_pending: bool,
     pending_scroll_pos: Option<truff_core::vim::ScrollPosition>,
+    active_table: Option<(Range<usize>, std::sync::Arc<Vec<usize>>)>,
     pub(in crate::native) input_blocked: bool,
 }
 
@@ -175,6 +176,21 @@ pub fn render_markdown_preview(ui: &mut egui::Ui, text: &str, theme: &crate::the
                 .is_some_and(|next| is_table_delimiter(&text[next.clone()]))
             {
                 presentation.table_header = true;
+            }
+            let mut start_idx = idx;
+            while start_idx > 0 && is_table_row(&text[line_ranges[start_idx - 1].clone()]) {
+                start_idx -= 1;
+            }
+            let mut end_idx = idx + 1;
+            while end_idx < line_ranges.len() && is_table_row(&text[line_ranges[end_idx].clone()]) {
+                end_idx += 1;
+            }
+            let row_slices: Vec<&str> = (start_idx..end_idx)
+                .map(|i| text[line_ranges[i].clone()].trim_end_matches(['\r', '\n']))
+                .collect();
+            if let Some(widths) = truff_core::markdown::table::compute_table_col_widths(row_slices)
+            {
+                presentation.table_col_widths = Some(std::sync::Arc::new(widths));
             }
         }
 

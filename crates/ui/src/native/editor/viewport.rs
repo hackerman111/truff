@@ -49,6 +49,7 @@ impl EditorWidget {
             self.heights.init_uniform(lines);
             self.buffer_id = Some(buffer.id());
             self.cache.clear();
+            self.active_table = None;
         }
         self.revision = Some(buffer.revision());
         let identity = (view.id(), cursor);
@@ -273,6 +274,8 @@ impl EditorWidget {
                                 presentation.table_header = true;
                             }
                         }
+                        presentation.table_col_widths =
+                            self.get_or_compute_table_col_widths(buffer, line);
                     }
                     presentation
                 };
@@ -665,6 +668,60 @@ fn slice_is_table_delimiter(slice: &truff_core::RopeSlice<'_>) -> bool {
             .chunks()
             .flat_map(str::bytes)
             .all(|b| b.is_ascii_whitespace() || matches!(b, b'|' | b'-' | b':'))
+}
+
+impl EditorWidget {
+    fn get_or_compute_table_col_widths(
+        &mut self,
+        buffer: &Buffer,
+        line: usize,
+    ) -> Option<std::sync::Arc<Vec<usize>>> {
+        if let Some((range, widths)) = &self.active_table
+            && range.contains(&line)
+        {
+            return Some(widths.clone());
+        }
+
+        let mut start_line = line;
+        while start_line > 0 {
+            let prev = start_line - 1;
+            let s = line_start(buffer, prev);
+            let e = line_start(buffer, start_line);
+            if slice_is_table_row(&buffer.slice(s..e)) {
+                start_line = prev;
+            } else {
+                break;
+            }
+        }
+
+        let mut end_line = line + 1;
+        while end_line < buffer.line_len() {
+            let s = line_start(buffer, end_line);
+            let e = line_start(buffer, end_line + 1);
+            if slice_is_table_row(&buffer.slice(s..e)) {
+                end_line += 1;
+            } else {
+                break;
+            }
+        }
+
+        let mut rows = Vec::with_capacity(end_line - start_line);
+        for l in start_line..end_line {
+            let s = line_start(buffer, l);
+            let e = line_start(buffer, l + 1);
+            let mut line_str = buffer.slice(s..e).to_string();
+            while line_str.ends_with('\n') || line_str.ends_with('\r') {
+                line_str.pop();
+            }
+            rows.push(line_str);
+        }
+
+        let row_refs: Vec<&str> = rows.iter().map(|s| s.as_str()).collect();
+        let widths = truff_core::markdown::table::compute_table_col_widths(row_refs)?;
+        let arc_widths = std::sync::Arc::new(widths);
+        self.active_table = Some((start_line..end_line, arc_widths.clone()));
+        Some(arc_widths)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
