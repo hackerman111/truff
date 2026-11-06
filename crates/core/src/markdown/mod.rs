@@ -18,7 +18,7 @@ pub use links::LinkOccurrence;
 pub use presentation::{LinePresentation, ListKind, ListMarker, cycle_task_status, toggle_task};
 pub use smart_edit::{
     find_task_checkbox_on_line, plan_backspace, plan_cycle_task, plan_enter, plan_shift_tab,
-    plan_tab, plan_toggle_task,
+    plan_tab, plan_table_tab, plan_toggle_task,
 };
 pub use snapshot::{
     CalloutFact, CodeBlockFact, FrontmatterFact, MarkdownSnapshot, SectionFact, SemanticKind,

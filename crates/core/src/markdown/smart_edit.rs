@@ -1,4 +1,5 @@
 use std::ops::Range;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::text::{Buffer, BytePos, LineEnding, SingleEdit, Transaction, UndoGroup};
 use crate::vim::motion::line_content_end;
@@ -84,10 +85,15 @@ fn parse_line_prefix(buffer: &Buffer, line_idx: usize) -> Option<ParsedLinePrefi
             && after_bullet.as_bytes()[0] == b'['
             && matches!(after_bullet.as_bytes()[1], b' ' | b'x' | b'X' | b'/' | b'-')
             && after_bullet.as_bytes()[2] == b']'
-            && after_bullet.as_bytes()[3] == b' '
+            && (after_bullet.as_bytes().get(3) == Some(&b' ') || after_bullet.len() == 3)
         {
             let checked = matches!(after_bullet.as_bytes()[1], b'x' | b'X');
-            let content_start = line_start + idx + 6;
+            let marker_len = if after_bullet.as_bytes().get(3) == Some(&b' ') {
+                6
+            } else {
+                5
+            };
+            let content_start = line_start + idx + marker_len;
             return Some(ParsedLinePrefix {
                 line_start,
                 line_end,
@@ -101,6 +107,26 @@ fn parse_line_prefix(buffer: &Buffer, line_idx: usize) -> Option<ParsedLinePrefi
                 },
             });
         }
+        if after_bullet.starts_with("[] ") || after_bullet == "[]" {
+            let marker_len = if after_bullet.starts_with("[] ") {
+                5
+            } else {
+                4
+            };
+            let content_start = line_start + idx + marker_len;
+            return Some(ParsedLinePrefix {
+                line_start,
+                line_end,
+                quote_prefix,
+                indent,
+                marker_range: (line_start + idx)..content_start,
+                content_start,
+                kind: MarkerKind::Task {
+                    bullet: first,
+                    checked: false,
+                },
+            });
+        }
         let content_start = line_start + idx + 2;
         return Some(ParsedLinePrefix {
             line_start,
@@ -110,6 +136,51 @@ fn parse_line_prefix(buffer: &Buffer, line_idx: usize) -> Option<ParsedLinePrefi
             marker_range: (line_start + idx)..content_start,
             content_start,
             kind: MarkerKind::Bullet(first),
+        });
+    }
+
+    // 3b. Standalone task checkbox without leading bullet: `[ ] `, `[x] `, `[] `, etc.
+    if rest.starts_with("[ ] ")
+        || rest.starts_with("[x] ")
+        || rest.starts_with("[X] ")
+        || rest.starts_with("[/] ")
+        || rest.starts_with("[-] ")
+        || rest == "[ ]"
+    {
+        let checked = rest.starts_with("[x] ") || rest.starts_with("[X] ");
+        let marker_len = if rest.starts_with('[') && rest.len() >= 4 && rest.as_bytes()[3] == b' ' {
+            4
+        } else {
+            3
+        };
+        let content_start = line_start + idx + marker_len;
+        return Some(ParsedLinePrefix {
+            line_start,
+            line_end,
+            quote_prefix,
+            indent,
+            marker_range: (line_start + idx)..content_start,
+            content_start,
+            kind: MarkerKind::Task {
+                bullet: '-',
+                checked,
+            },
+        });
+    }
+    if rest.starts_with("[] ") || rest == "[]" {
+        let marker_len = if rest.starts_with("[] ") { 3 } else { 2 };
+        let content_start = line_start + idx + marker_len;
+        return Some(ParsedLinePrefix {
+            line_start,
+            line_end,
+            quote_prefix,
+            indent,
+            marker_range: (line_start + idx)..content_start,
+            content_start,
+            kind: MarkerKind::Task {
+                bullet: '-',
+                checked: false,
+            },
         });
     }
 
@@ -162,6 +233,18 @@ fn is_in_code_block_or_frontmatter_or_table(buffer: &Buffer, pos: usize) -> bool
     }
     for cb in &snapshot.code_blocks {
         if cb.range.contains(&pos) || (pos == cb.range.end && !cb.range.is_empty()) {
+            if cb
+                .language
+                .as_deref()
+                .is_some_and(|l| l.eq_ignore_ascii_case("tasks") || l.eq_ignore_ascii_case("task"))
+            {
+                if cb.content_range.contains(&pos)
+                    || (pos == cb.content_range.end && !cb.content_range.is_empty())
+                {
+                    continue;
+                }
+                return true;
+            }
             let slice = buffer.slice(cb.range.clone()).to_string();
             let is_fenced = slice.starts_with("```") || slice.starts_with("~~~");
             if is_fenced {
@@ -181,12 +264,29 @@ fn is_in_code_block_or_frontmatter_or_table(buffer: &Buffer, pos: usize) -> bool
 /// Returns `None` on plain paragraphs, fenced code, YAML frontmatter, and tables.
 pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     let pos = cursor.get().min(buffer.byte_len());
+    let line_idx = buffer.line_of_byte(pos);
+    let line_start = buffer.byte_of_line(line_idx);
+    let line_end = line_content_end(buffer, line_idx);
+    let line_str = buffer.slice(line_start..line_end).to_string();
+
+    if super::table::is_table_row(&line_str) {
+        if super::table::is_table_delimiter(&line_str) {
+            return None;
+        }
+        if line_idx + 1 < buffer.line_len() {
+            let next_start = buffer.byte_of_line(line_idx + 1);
+            let next_end = line_content_end(buffer, line_idx + 1);
+            let next_str = buffer.slice(next_start..next_end).to_string();
+            if super::table::is_table_delimiter(&next_str) {
+                return None;
+            }
+        }
+        return plan_table_enter(buffer, pos, line_idx, line_start, line_end, &line_str);
+    }
     if is_in_code_block_or_frontmatter_or_table(buffer, pos) {
         return None;
     }
-    let line_idx = buffer.line_of_byte(pos);
     let parsed = parse_line_prefix(buffer, line_idx)?;
-    let line_str = buffer.slice(parsed.line_start..parsed.line_end).to_string();
     let nl = if buffer.line_ending() == LineEnding::CrLf {
         "\r\n"
     } else {
@@ -266,9 +366,16 @@ pub fn plan_enter(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
         MarkerKind::Task { bullet, .. } => {
             let has_full_task = rem.starts_with(&format!("{bullet} [ ] "))
                 || rem.starts_with(&format!("{bullet} [x] "))
-                || rem.starts_with(&format!("{bullet} [X] "));
-            let has_checkbox_only =
-                rem.starts_with("[ ] ") || rem.starts_with("[x] ") || rem.starts_with("[X] ");
+                || rem.starts_with(&format!("{bullet} [X] "))
+                || rem.starts_with(&format!("{bullet} [/] "))
+                || rem.starts_with(&format!("{bullet} [-] "))
+                || rem.starts_with(&format!("{bullet} [] "));
+            let has_checkbox_only = rem.starts_with("[ ] ")
+                || rem.starts_with("[x] ")
+                || rem.starts_with("[X] ")
+                || rem.starts_with("[/] ")
+                || rem.starts_with("[-] ")
+                || rem.starts_with("[] ");
 
             if has_full_task {
                 format!("{}{}", parsed.quote_prefix, needed_indent)
@@ -437,7 +544,9 @@ pub fn find_task_checkbox_on_line(buffer: &Buffer, cursor: BytePos) -> Option<us
     let line_idx = buffer.line_of_byte(cursor.get().min(buffer.byte_len()));
     let prefix = parse_line_prefix(buffer, line_idx)?;
     if let MarkerKind::Task { .. } = prefix.kind {
-        Some(prefix.marker_range.start + 3)
+        let marker_str = buffer.slice(prefix.marker_range.clone()).to_string();
+        let bracket = marker_str.find('[')?;
+        Some(prefix.marker_range.start + bracket + 1)
     } else {
         None
     }
@@ -455,18 +564,71 @@ pub fn plan_cycle_task(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> 
     super::presentation::cycle_task_status(buffer, checkbox)
 }
 
-/// Plans smart Backspace: deletes an entire indentation step (tab / spaces) or outdents empty list item.
+/// Plans smart Backspace: deletes an entire indentation step (tab / spaces), deletes task marker in 1 backspace, or outdents empty list item.
 pub fn plan_backspace(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
     let pos = cursor.get().min(buffer.byte_len());
     if pos == 0 {
         return None;
     }
+    if is_in_code_block_or_frontmatter_or_table(buffer, pos) {
+        return None;
+    }
     let line_idx = buffer.line_of_byte(pos);
     let line_start = buffer.byte_of_line(line_idx);
+    let line_end = line_content_end(buffer, line_idx);
     if pos == line_start {
         return None;
     }
+    let line_str = buffer.slice(line_start..line_end).to_string();
     let before_cursor = buffer.slice(line_start..pos).to_string();
+
+    if let Some(parsed) = parse_line_prefix(buffer, line_idx) {
+        let is_empty = parsed.is_empty_item(&line_str);
+        if matches!(parsed.kind, MarkerKind::Task { .. }) {
+            let in_empty_task = is_empty
+                && pos >= (parsed.line_start + parsed.quote_prefix.len())
+                && pos <= line_end;
+            let at_content_start = pos == parsed.content_start;
+            if in_empty_task || at_content_start {
+                if !parsed.indent.is_empty()
+                    && !is_empty
+                    && let Some(tx) = plan_shift_tab(buffer, cursor)
+                {
+                    return Some(tx);
+                }
+                let delete_range = if is_empty {
+                    (parsed.line_start + parsed.quote_prefix.len())..line_end
+                } else {
+                    parsed.marker_range.clone()
+                };
+                let new_pos = BytePos::new(delete_range.start);
+                let tx = Transaction::new()
+                    .with_edit(SingleEdit::delete(delete_range))
+                    .with_cursor(new_pos, new_pos)
+                    .with_undo_group(UndoGroup::next());
+                return Some(tx);
+            }
+        } else if matches!(parsed.kind, MarkerKind::Bullet(_)) {
+            let in_empty_bullet = is_empty
+                && pos >= (parsed.line_start + parsed.quote_prefix.len())
+                && pos <= line_end;
+            let at_content_start = pos == parsed.content_start;
+            if (in_empty_bullet || at_content_start) && parsed.indent.is_empty() {
+                let delete_range = if is_empty {
+                    (parsed.line_start + parsed.quote_prefix.len())..line_end
+                } else {
+                    parsed.marker_range.clone()
+                };
+                let new_pos = BytePos::new(delete_range.start);
+                let tx = Transaction::new()
+                    .with_edit(SingleEdit::delete(delete_range))
+                    .with_cursor(new_pos, new_pos)
+                    .with_undo_group(UndoGroup::next());
+                return Some(tx);
+            }
+        }
+    }
+
     let trailing_spaces = before_cursor
         .chars()
         .rev()
@@ -496,4 +658,233 @@ pub fn plan_backspace(buffer: &Buffer, cursor: BytePos) -> Option<Transaction> {
         return plan_shift_tab(buffer, cursor);
     }
     None
+}
+
+fn plan_table_enter(
+    buffer: &Buffer,
+    pos: usize,
+    _line_idx: usize,
+    line_start: usize,
+    line_end: usize,
+    line_str: &str,
+) -> Option<Transaction> {
+    let nl = if buffer.line_ending() == LineEnding::CrLf {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let cells = super::table::split_row_cells(line_str);
+    let is_empty = cells.iter().all(|c| c.trim().is_empty());
+
+    if is_empty {
+        // Exit table: delete empty table row leaving a blank line after the table
+        let delete_range = line_start..line_end;
+        let new_pos = BytePos::new(line_start);
+        return Some(
+            Transaction::new()
+                .with_edit(SingleEdit::delete(delete_range))
+                .with_cursor(new_pos, new_pos)
+                .with_undo_group(UndoGroup::next()),
+        );
+    }
+
+    let table_range = super::table::find_table_range_at(buffer, pos)?;
+    let raw_table = buffer.slice(table_range.clone()).to_string();
+    let num_cols = cells.len();
+
+    let mut col_widths = vec![1usize; num_cols];
+    for line in raw_table.lines() {
+        if super::table::is_table_delimiter(line) {
+            let row_cells = super::table::split_row_cells(line);
+            for (i, c) in row_cells.iter().enumerate() {
+                if i < num_cols {
+                    col_widths[i] = col_widths[i].max(c.trim().len().saturating_sub(2));
+                }
+            }
+        } else {
+            let row_cells = super::table::split_row_cells(line);
+            for (i, c) in row_cells.iter().enumerate() {
+                if i < num_cols {
+                    col_widths[i] = col_widths[i].max(c.trim().graphemes(true).count());
+                }
+            }
+        }
+    }
+
+    let mut new_row = String::from("|");
+    for &w in &col_widths {
+        let space_count = w + 2;
+        new_row.push_str(&" ".repeat(space_count));
+        new_row.push('|');
+    }
+    let insertion = format!("{nl}{new_row}");
+    let insert_pos = line_end;
+    let target_cursor_pos = insert_pos + nl.len() + 2;
+    let new_pos = BytePos::new(target_cursor_pos);
+
+    Some(
+        Transaction::new()
+            .with_edit(SingleEdit::insert(insert_pos, insertion))
+            .with_cursor(new_pos, new_pos)
+            .with_undo_group(UndoGroup::next()),
+    )
+}
+
+fn find_pipe_offsets(line_str: &str) -> Vec<usize> {
+    let mut pipe_offsets = Vec::new();
+    let mut is_escaped = false;
+    for (i, b) in line_str.bytes().enumerate() {
+        if is_escaped {
+            is_escaped = false;
+        } else if b == b'\\' {
+            is_escaped = true;
+        } else if b == b'|' {
+            pipe_offsets.push(i);
+        }
+    }
+    pipe_offsets
+}
+
+fn find_cell_text_start(buffer: &Buffer, cell_start: usize, cell_end: usize) -> usize {
+    let s = buffer.slice(cell_start..cell_end).to_string();
+    let ws = s.bytes().take_while(|b| *b == b' ').count();
+    let target = cell_start + ws;
+    if ws == s.len() && ws > 1 {
+        cell_start + 1
+    } else {
+        target.min(cell_end)
+    }
+}
+
+/// Plans Tab / Shift+Tab cell navigation inside a Markdown table.
+pub fn plan_table_tab(buffer: &Buffer, cursor: BytePos, backward: bool) -> Option<Transaction> {
+    let pos = cursor.get().min(buffer.byte_len());
+    let line_idx = buffer.line_of_byte(pos);
+    let line_start = buffer.byte_of_line(line_idx);
+    let line_end = line_content_end(buffer, line_idx);
+    let line_str = buffer.slice(line_start..line_end).to_string();
+
+    if !super::table::is_table_row(&line_str) {
+        return None;
+    }
+
+    let table_range = super::table::find_table_range_at(buffer, pos)?;
+    let table_start_line = buffer.line_of_byte(table_range.start);
+    let table_end_line = buffer.line_of_byte(table_range.end.saturating_sub(1));
+
+    let pipe_offsets = find_pipe_offsets(&line_str);
+    if pipe_offsets.len() < 2 {
+        return None;
+    }
+
+    let rel_pos = pos.saturating_sub(line_start);
+    let mut current_cell_idx = 0;
+    for (i, window) in pipe_offsets.windows(2).enumerate() {
+        if rel_pos >= window[0] && rel_pos <= window[1] {
+            current_cell_idx = i;
+            break;
+        }
+    }
+    let num_cells = pipe_offsets.len() - 1;
+
+    if !backward {
+        if current_cell_idx + 1 < num_cells {
+            let next_pipe = pipe_offsets[current_cell_idx + 1];
+            let cell_start = line_start + next_pipe + 1;
+            let target = find_cell_text_start(
+                buffer,
+                cell_start,
+                line_start + pipe_offsets[current_cell_idx + 2],
+            );
+            let new_pos = BytePos::new(target);
+            Some(Transaction::new().with_cursor(new_pos, new_pos))
+        } else if line_idx < table_end_line {
+            let next_line_idx = line_idx + 1;
+            let next_line_start = buffer.byte_of_line(next_line_idx);
+            let next_line_end = line_content_end(buffer, next_line_idx);
+            let next_line_str = buffer.slice(next_line_start..next_line_end).to_string();
+            let next_pipes = find_pipe_offsets(&next_line_str);
+            if next_pipes.len() >= 2 {
+                let cell_start = next_line_start + next_pipes[0] + 1;
+                let target =
+                    find_cell_text_start(buffer, cell_start, next_line_start + next_pipes[1]);
+                let new_pos = BytePos::new(target);
+                Some(Transaction::new().with_cursor(new_pos, new_pos))
+            } else {
+                None
+            }
+        } else {
+            let nl = if buffer.line_ending() == LineEnding::CrLf {
+                "\r\n"
+            } else {
+                "\n"
+            };
+            let raw_table = buffer.slice(table_range.clone()).to_string();
+            let mut col_widths = vec![1usize; num_cells];
+            for line in raw_table.lines() {
+                if super::table::is_table_delimiter(line) {
+                    let row_cells = super::table::split_row_cells(line);
+                    for (i, c) in row_cells.iter().enumerate() {
+                        if i < num_cells {
+                            col_widths[i] = col_widths[i].max(c.trim().len().saturating_sub(2));
+                        }
+                    }
+                } else {
+                    let row_cells = super::table::split_row_cells(line);
+                    for (i, c) in row_cells.iter().enumerate() {
+                        if i < num_cells {
+                            col_widths[i] = col_widths[i].max(c.trim().graphemes(true).count());
+                        }
+                    }
+                }
+            }
+            let mut new_row = String::from("|");
+            for &w in &col_widths {
+                let space_count = w + 2;
+                new_row.push_str(&" ".repeat(space_count));
+                new_row.push('|');
+            }
+            let insertion = format!("{nl}{new_row}");
+            let insert_pos = line_end;
+            let target_cursor_pos = insert_pos + nl.len() + 2;
+            let new_pos = BytePos::new(target_cursor_pos);
+            Some(
+                Transaction::new()
+                    .with_edit(SingleEdit::insert(insert_pos, insertion))
+                    .with_cursor(new_pos, new_pos)
+                    .with_undo_group(UndoGroup::next()),
+            )
+        }
+    } else if current_cell_idx > 0 {
+        let prev_pipe = pipe_offsets[current_cell_idx - 1];
+        let cell_start = line_start + prev_pipe + 1;
+        let target = find_cell_text_start(
+            buffer,
+            cell_start,
+            line_start + pipe_offsets[current_cell_idx],
+        );
+        let new_pos = BytePos::new(target);
+        Some(Transaction::new().with_cursor(new_pos, new_pos))
+    } else if line_idx > table_start_line {
+        let prev_line_idx = line_idx - 1;
+        let prev_line_start = buffer.byte_of_line(prev_line_idx);
+        let prev_line_end = line_content_end(buffer, prev_line_idx);
+        let prev_line_str = buffer.slice(prev_line_start..prev_line_end).to_string();
+        let prev_pipes = find_pipe_offsets(&prev_line_str);
+        if prev_pipes.len() >= 2 {
+            let last_pipe_idx = prev_pipes.len() - 2;
+            let cell_start = prev_line_start + prev_pipes[last_pipe_idx] + 1;
+            let target = find_cell_text_start(
+                buffer,
+                cell_start,
+                prev_line_start + prev_pipes[last_pipe_idx + 1],
+            );
+            let new_pos = BytePos::new(target);
+            Some(Transaction::new().with_cursor(new_pos, new_pos))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }
