@@ -8,11 +8,12 @@ use truff_core::{
     },
 };
 
+#[derive(Clone, Debug)]
 pub(crate) struct SelectionTarget {
-    view: ViewId,
-    buffer: BufferId,
-    revision: u64,
-    range: Range<usize>,
+    pub(crate) view: ViewId,
+    pub(crate) buffer: BufferId,
+    pub(crate) revision: u64,
+    pub(crate) range: Range<usize>,
 }
 
 impl Application {
@@ -29,6 +30,31 @@ impl Application {
             revision: buffer.revision(),
             range,
         })
+    }
+
+    pub(crate) fn capture_word_or_selection(&self) -> AppResult<SelectionTarget> {
+        if let Ok(target) = self.capture_selection() {
+            return Ok(target);
+        }
+        let view = self.shell.editor_view().ok_or("Open a note first")?;
+        let buffer = self
+            .shell
+            .editor_buffer()
+            .ok_or("Selection buffer unavailable")?;
+        let cursor = view.head().get();
+        let range = crate::overlays::word_boundary_at(buffer, cursor)
+            .ok_or("Поместите курсор на слово или выделите текст через v/V")?;
+        Ok(SelectionTarget {
+            view: view.id(),
+            buffer: buffer.id(),
+            revision: buffer.revision(),
+            range,
+        })
+    }
+
+    pub(crate) fn target_text(&self, target: &SelectionTarget) -> AppResult<String> {
+        let buffer = self.selection_buffer(target)?;
+        Ok(buffer.slice(target.range.clone()).to_string())
     }
 
     fn selection_buffer(&self, target: &SelectionTarget) -> AppResult<&truff_core::Buffer> {
@@ -93,20 +119,44 @@ impl Application {
     }
 
     pub(crate) fn link_target(&mut self, target: &SelectionTarget, note: &str) -> AppResult<()> {
+        self.apply_note_link_target(target, note, None)
+    }
+
+    pub(crate) fn apply_note_link_target(
+        &mut self,
+        target: &SelectionTarget,
+        note: &str,
+        custom_title: Option<&str>,
+    ) -> AppResult<()> {
         if note.is_empty() || note.contains(['[', ']', '\n', '\r']) {
             return Err("Usage: :link <note or note#heading>".into());
         }
         let buffer = self.selection_buffer(target)?;
-        let label = buffer.slice(target.range.clone()).to_string();
+        let label = match custom_title {
+            Some(t) => t.to_string(),
+            None => buffer.slice(target.range.clone()).to_string(),
+        };
         let label_opt = (label != note).then_some(label.as_str());
         let transaction = LinkSelection::wikilink(target.range.clone(), note, label_opt);
-        self.shell
-            .workspace_mut()
-            .set_active_view(Some(target.view));
-        self.shell.set_focus(crate::shell::Focus::Editor);
-        self.shell.apply_transaction(transaction)?;
-        self.handle_shell_action(crate::shell::ShellAction::EditorEdit);
-        Ok(())
+        self.apply_selection_edit(target.clone(), transaction)
+    }
+
+    pub(crate) fn apply_url_link_target(
+        &mut self,
+        target: &SelectionTarget,
+        url: &str,
+        custom_title: Option<&str>,
+    ) -> AppResult<()> {
+        if url.is_empty() {
+            return Err("URL cannot be empty".into());
+        }
+        let buffer = self.selection_buffer(target)?;
+        let label = match custom_title {
+            Some(t) => t.to_string(),
+            None => buffer.slice(target.range.clone()).to_string(),
+        };
+        let transaction = LinkSelection::markdown_link(target.range.clone(), url, &label);
+        self.apply_selection_edit(target.clone(), transaction)
     }
 
     fn apply_selection_edit(
@@ -119,6 +169,7 @@ impl Application {
             .set_active_view(Some(target.view));
         self.shell.set_focus(crate::shell::Focus::Editor);
         self.shell.apply_transaction(transaction)?;
+        self.shell.set_mode(truff_core::vim::Mode::Normal);
         self.handle_shell_action(crate::shell::ShellAction::EditorEdit);
         Ok(())
     }

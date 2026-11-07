@@ -12,7 +12,12 @@ pub(super) enum FieldOwner {
 }
 
 impl NativeApp {
-    fn key(&mut self, key: Key) {
+    pub fn key(&mut self, key: Key) {
+        if self.application.shell.text_action().is_open() {
+            let resp = self.application.shell.text_action_mut().handle_key(key);
+            self.handle_text_action_response(resp);
+            return;
+        }
         if self.dialogs.is_any_open() {
             return;
         }
@@ -219,6 +224,9 @@ impl NativeApp {
                 }
             }
             ShellAction::SidebarDeleteFile(path) => self.dialogs.operation.trash(path),
+            ShellAction::OpenTextActionMenu => {
+                self.open_text_action_menu();
+            }
             ShellAction::OpenNavigator(mode) => {
                 self.open_navigator(mode);
             }
@@ -238,6 +246,84 @@ impl NativeApp {
                 }
             }
             action => self.application.handle_shell_action(action),
+        }
+    }
+
+    pub fn open_text_action_menu(&mut self) {
+        let target_res = self.application.capture_word_or_selection();
+        let target = match target_res {
+            Ok(t) => t,
+            Err(err) => {
+                self.application.status = err.to_string();
+                return;
+            }
+        };
+
+        let initial_text = self.application.target_text(&target).ok();
+        let cursor_pos = self.editor.cursor_rect().map(|r| [r.left(), r.bottom()]);
+
+        self.text_action_target = Some(target);
+        self.application
+            .shell
+            .text_action_mut()
+            .open(initial_text, cursor_pos);
+    }
+
+    pub fn handle_text_action_response(
+        &mut self,
+        response: crate::overlays::text_action::TextActionResponse,
+    ) {
+        use crate::overlays::text_action::TextActionResponse;
+        match response {
+            TextActionResponse::None => {}
+            TextActionResponse::Close => {
+                self.text_action_target = None;
+            }
+            TextActionResponse::ApplyColor { hex } => {
+                if let Some(target) = self.text_action_target.take()
+                    && let Err(e) = self.application.color_target(target, hex)
+                {
+                    self.application.status = e.to_string();
+                }
+            }
+            TextActionResponse::ApplyHighlight { hex } => {
+                if let Some(target) = self.text_action_target.take()
+                    && let Err(e) = self.application.highlight_target(target, hex)
+                {
+                    self.application.status = e.to_string();
+                }
+            }
+            TextActionResponse::ApplyLink {
+                is_url,
+                target,
+                title,
+            } => {
+                if let Some(selection_target) = self.text_action_target.take() {
+                    let res = if is_url {
+                        self.application.apply_url_link_target(
+                            &selection_target,
+                            &target,
+                            title.as_deref(),
+                        )
+                    } else {
+                        self.application.apply_note_link_target(
+                            &selection_target,
+                            &target,
+                            title.as_deref(),
+                        )
+                    };
+                    if let Err(e) = res {
+                        self.application.status = e.to_string();
+                    }
+                }
+            }
+            TextActionResponse::RemoveStyle => {
+                if let Some(target) = self.text_action_target.take()
+                    && let Err(e) = self.application.remove_style_target(target)
+                {
+                    self.application.status = e.to_string();
+                }
+            }
         }
     }
 
@@ -277,8 +363,10 @@ impl NativeApp {
         let mut help_owned = self.application.shell.which_key().is_visible()
             && self.application.shell.which_key().mode() == crate::overlays::WhichKeyMode::Help;
         let mut navigator_owned = self.navigator.is_open();
+        let text_action_owned = self.application.shell.text_action().is_open();
         if !help_owned
             && !navigator_owned
+            && !text_action_owned
             && self.application.shell.command().is_none()
             && context.egui_wants_keyboard_input()
         {

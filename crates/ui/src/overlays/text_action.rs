@@ -385,9 +385,7 @@ mod tests {
         assert_eq!(menu.selected_color_index(), 1);
 
         let action = menu.handle_key(Key::Enter);
-        assert!(
-            matches!(action, TextActionResponse::ApplyColor { hex } if hex == PALETTE[1].hex)
-        );
+        assert!(matches!(action, TextActionResponse::ApplyColor { hex } if hex == PALETTE[1].hex));
         assert!(!menu.is_open());
     }
 
@@ -402,9 +400,7 @@ mod tests {
         ));
 
         let action = menu.handle_key(Key::Char('g'));
-        assert!(
-            matches!(action, TextActionResponse::ApplyHighlight { hex } if hex == "#A3BE8C")
-        );
+        assert!(matches!(action, TextActionResponse::ApplyHighlight { hex } if hex == "#A3BE8C"));
         assert!(!menu.is_open());
     }
 
@@ -436,8 +432,8 @@ mod tests {
 
     #[test]
     fn test_word_boundary_at_cursor() {
-        let buffer = Buffer::from_text(BufferId::new(1), "Hello world, rust programming!")
-            .expect("buffer");
+        let buffer =
+            Buffer::from_text(BufferId::new(1), "Hello world, rust programming!").expect("buffer");
         let range = word_boundary_at(&buffer, 7);
         assert_eq!(range, Some(6..11));
 

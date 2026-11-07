@@ -395,6 +395,14 @@ impl CommandRegistry {
             ),
             // Styles & Callouts
             cmd(
+                "style.text_action_menu",
+                "Действия с текстом",
+                "Открыть контекстное Which-Key меню оформления текста и ссылок",
+                "Оформление",
+                Some("Space c"),
+                vec![CommandContext::Editor],
+            ),
+            cmd(
                 "style.text_color",
                 "Цвет текста",
                 "Изменить цвет текста выделенного диапазона",

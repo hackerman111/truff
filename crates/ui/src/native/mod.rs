@@ -21,6 +21,7 @@ mod sidebar;
 mod status;
 pub mod stream;
 mod tabs;
+mod text_action;
 pub mod toc;
 pub mod widgets;
 pub mod wiki;
@@ -112,6 +113,7 @@ pub struct NativeApp {
     field_event_tail: Vec<egui::Event>,
     field_keys: Vec<(events::FieldOwner, truff_core::vim::Key, bool)>,
     navigator_selection: Option<crate::app::SelectionTarget>,
+    pub(crate) text_action_target: Option<crate::app::SelectionTarget>,
 }
 
 impl NativeApp {
@@ -134,6 +136,7 @@ impl NativeApp {
             recent_vaults: recent::RecentVaults::default(),
             search: None,
             navigator_selection: None,
+            text_action_target: None,
             navigator_origin: crate::focus::Focus::Editor,
             navigator_revision: 0,
             field_keys: Vec::new(),
@@ -298,6 +301,7 @@ impl NativeApp {
         self.handle_stream_action(stream_act);
         self.dialogs.show(&mut self.application, &context, &theme);
         hints::show(&mut self.application.shell, &context);
+        text_action::show(self, &context);
         self.flush_field_keys(&context);
         if let Some(id) = self.application.shell.workspace().active_view()
             && let Some(view) = self.application.shell.workspace_mut().get_view_mut(id)

@@ -35,6 +35,7 @@ pub enum ShellAction {
     VisualRow { down: bool, count: usize },
     RegisteredCommand { id: CommandId, argument: String },
     OpenNavigator(crate::navigator::NavigatorMode),
+    OpenTextActionMenu,
     ScrollCursor(truff_core::vim::ScrollPosition),
 }
 
@@ -77,6 +78,7 @@ pub struct Shell {
     key_prefix: Vec<Key>,
     editor_vim: VimState,
     which_key: WhichKeyOverlay,
+    text_action: crate::overlays::TextActionOverlay,
     theme: Theme,
     typography: crate::app::global_config::TypographyConfig,
     pending_prefix: Option<Key>,
@@ -121,6 +123,7 @@ impl Shell {
             key_prefix: Vec::new(),
             editor_vim: VimState::new(),
             which_key: WhichKeyOverlay::new(),
+            text_action: crate::overlays::TextActionOverlay::new(),
             theme: Theme::default(),
             typography: crate::app::global_config::TypographyConfig::default(),
             pending_prefix: None,
@@ -156,6 +159,16 @@ impl Shell {
         &mut self.which_key
     }
 
+    /// Access the TextAction overlay controller.
+    pub fn text_action(&self) -> &crate::overlays::TextActionOverlay {
+        &self.text_action
+    }
+
+    /// Mutable access to the TextAction overlay controller.
+    pub fn text_action_mut(&mut self) -> &mut crate::overlays::TextActionOverlay {
+        &mut self.text_action
+    }
+
     pub fn workspace(&self) -> &Workspace {
         &self.workspace
     }
@@ -185,6 +198,14 @@ impl Shell {
             self.row_vim.mode
         } else {
             self.editor_vim.mode
+        }
+    }
+
+    pub fn set_mode(&mut self, mode: Mode) {
+        if matches!(self.focus, Focus::Sidebar | Focus::RightPanel) {
+            self.row_vim.mode = mode;
+        } else {
+            self.editor_vim.mode = mode;
         }
     }
 

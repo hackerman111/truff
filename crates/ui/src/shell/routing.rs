@@ -69,20 +69,20 @@ pub(super) fn default_keymap() -> KeymapConfig {
         (
             Mode::Normal,
             vec![Key::Char(' '), Key::Char('c')],
-            "style.text_color",
-            "Цвет текста",
+            "style.text_action_menu",
+            "Действия с текстом",
         ),
         (
             Mode::VisualChar,
             vec![Key::Char(' '), Key::Char('c')],
-            "style.text_color",
-            "Цвет выделения",
+            "style.text_action_menu",
+            "Действия с текстом",
         ),
         (
             Mode::VisualLine,
             vec![Key::Char(' '), Key::Char('c')],
-            "style.text_color",
-            "Цвет выделения",
+            "style.text_action_menu",
+            "Действия с текстом",
         ),
         (
             Mode::VisualChar,
@@ -175,6 +175,9 @@ impl Shell {
                 return ShellAction::FocusChanged(next);
             }
             _ => {}
+        }
+        if id.as_str() == "style.text_action_menu" {
+            return ShellAction::OpenTextActionMenu;
         }
         let panel = match id.as_str() {
             "panel.files" => Some(crate::navigator::NavigatorMode::Files),
