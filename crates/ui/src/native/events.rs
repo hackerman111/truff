@@ -14,6 +14,15 @@ pub(super) enum FieldOwner {
 impl NativeApp {
     pub fn key(&mut self, key: Key) {
         if self.application.shell.text_action().is_open() {
+            if let crate::overlays::text_action::TextActionMode::Root {
+                has_selection: false,
+            } = self.application.shell.text_action().mode()
+                && matches!(key, Key::Char('c' | 'C' | 'h' | 'H' | 'x' | 'X' | '0'))
+            {
+                self.application.status =
+                    "Выделите текст или поместите курсор на слово для применения стиля".into();
+                return;
+            }
             let resp = self.application.shell.text_action_mut().handle_key(key);
             self.handle_text_action_response(resp);
             return;
@@ -250,16 +259,19 @@ impl NativeApp {
     }
 
     pub fn open_text_action_menu(&mut self) {
-        let target_res = self.application.capture_word_or_selection();
-        let target = match target_res {
-            Ok(t) => t,
+        let (target, has_selection) = match self.application.capture_selection_or_cursor() {
+            Ok(res) => res,
             Err(err) => {
                 self.application.status = err.to_string();
                 return;
             }
         };
 
-        let initial_text = self.application.target_text(&target).ok();
+        let initial_text = if has_selection {
+            self.application.target_text(&target).ok()
+        } else {
+            None
+        };
         let cursor_pos = self.editor.cursor_rect().map(|r| [r.left(), r.bottom()]);
 
         self.text_action_target = Some(target);

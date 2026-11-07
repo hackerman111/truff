@@ -39,7 +39,9 @@ fn test_space_c_opens_text_action_overlay_in_visual_mode() {
     );
     assert_eq!(
         app.application.shell.text_action().mode(),
-        &TextActionMode::Root
+        &TextActionMode::Root {
+            has_selection: true
+        }
     );
     assert_eq!(
         app.application.shell.text_action().initial_text(),
@@ -114,83 +116,49 @@ fn test_text_highlight_via_arrow_keys() {
 }
 
 #[test]
-fn test_note_link_keep_title() {
+fn test_visual_selection_n_instant_wikilink() {
     let (mut app, _) = setup_app("hello world test\n");
     app.key(Key::Char('w'));
     app.key(Key::Char('v'));
-    app.key(Key::Char('e'));
+    app.key(Key::Char('e')); // selects 'world'
 
     app.key(Key::Char(' '));
     app.key(Key::Char('c'));
 
-    // Note link: n
+    // Note link: n in 1 keystroke wraps into [[world]]
     app.key(Key::Char('n'));
-    assert!(matches!(
-        app.application.shell.text_action().mode(),
-        TextActionMode::LinkTitleMode { is_url: false }
-    ));
-
-    // Keep title: k
-    app.key(Key::Char('k'));
-    assert!(matches!(
-        app.application.shell.text_action().mode(),
-        TextActionMode::LinkInput {
-            is_url: false,
-            change_title: false,
-            ..
-        }
-    ));
-
-    // Set target input and submit
-    if let TextActionMode::LinkInput { target_input, .. } =
-        app.application.shell.text_action_mut().mode_mut()
-    {
-        *target_input = "Architecture".into();
-    }
-    app.key(Key::Enter);
 
     assert!(!app.application.shell.text_action().is_open());
+    assert_eq!(app.application.shell.mode(), Mode::Normal);
     let text = app.application.shell.editor_text();
     assert!(
-        text.contains("[[Architecture|world]]"),
-        "Text must contain wikilink with preserved alias: {text}"
+        text.contains("[[world]]"),
+        "Text must contain direct wikilink: {text}"
     );
 }
 
 #[test]
-fn test_note_link_change_title() {
+fn test_normal_mode_word_n_instant_wikilink() {
     let (mut app, _) = setup_app("hello world test\n");
-    app.key(Key::Char('w'));
-    app.key(Key::Char('v'));
-    app.key(Key::Char('e'));
+    app.key(Key::Char('w')); // on 'world' in Normal mode
 
     app.key(Key::Char(' '));
     app.key(Key::Char('c'));
-    app.key(Key::Char('n'));
-    // Change title: c
-    app.key(Key::Char('c'));
 
-    if let TextActionMode::LinkInput {
-        target_input,
-        title_input,
-        ..
-    } = app.application.shell.text_action_mut().mode_mut()
-    {
-        *target_input = "Architecture".into();
-        *title_input = "Earth".into();
-    }
-    app.key(Key::Enter);
+    // Note link: n wraps captured word into [[world]]
+    app.key(Key::Char('n'));
 
     assert!(!app.application.shell.text_action().is_open());
+    assert_eq!(app.application.shell.mode(), Mode::Normal);
     let text = app.application.shell.editor_text();
     assert!(
-        text.contains("[[Architecture|Earth]]"),
-        "Text must contain wikilink with modified title: {text}"
+        text.contains("[[world]]"),
+        "Word under cursor must be wrapped in wikilink: {text}"
     );
 }
 
 #[test]
-fn test_url_link_keep_title() {
+fn test_url_link_with_selection_prompts_url_only() {
     let (mut app, _) = setup_app("visit rust docs now\n");
     app.key(Key::Char('w'));
     app.key(Key::Char('v'));
@@ -199,7 +167,17 @@ fn test_url_link_keep_title() {
     app.key(Key::Char(' '));
     app.key(Key::Char('c'));
     app.key(Key::Char('u')); // URL link
-    app.key(Key::Char('k')); // Keep title
+
+    assert!(matches!(
+        app.application.shell.text_action().mode(),
+        TextActionMode::LinkInput {
+            is_url: true,
+            has_selection: true,
+            title_input,
+            active_field: 0,
+            ..
+        } if title_input == "rust"
+    ));
 
     if let TextActionMode::LinkInput { target_input, .. } =
         app.application.shell.text_action_mut().mode_mut()
@@ -217,16 +195,90 @@ fn test_url_link_keep_title() {
 }
 
 #[test]
-fn test_url_link_change_title() {
-    let (mut app, _) = setup_app("visit rust docs now\n");
-    app.key(Key::Char('w'));
-    app.key(Key::Char('v'));
-    app.key(Key::Char('e'));
+fn test_empty_cursor_note_link_dual_fields() {
+    let (mut app, _) = setup_app("\n");
+    // Cursor at empty position
+    app.key(Key::Char(' '));
+    app.key(Key::Char('c'));
 
+    assert!(app.application.shell.text_action().is_open());
+    assert_eq!(
+        app.application.shell.text_action().mode(),
+        &TextActionMode::Root {
+            has_selection: false
+        }
+    );
+
+    // Press n to open dual field input
+    app.key(Key::Char('n'));
+    assert!(matches!(
+        app.application.shell.text_action().mode(),
+        TextActionMode::LinkInput {
+            is_url: false,
+            has_selection: false,
+            active_field: 0,
+            ..
+        }
+    ));
+
+    // Fill target, tab, fill title, Enter
+    if let TextActionMode::LinkInput {
+        target_input,
+        title_input,
+        ..
+    } = app.application.shell.text_action_mut().mode_mut()
+    {
+        *target_input = "Architecture".into();
+        *title_input = "Earth".into();
+    }
+    app.key(Key::Enter);
+
+    assert!(!app.application.shell.text_action().is_open());
+    let text = app.application.shell.editor_text();
+    assert!(
+        text.contains("[[Architecture|Earth]]"),
+        "Text must contain aliased wikilink: {text}"
+    );
+}
+
+#[test]
+fn test_empty_cursor_note_link_without_title() {
+    let (mut app, _) = setup_app("\n");
+    app.key(Key::Char(' '));
+    app.key(Key::Char('c'));
+    app.key(Key::Char('n'));
+
+    if let TextActionMode::LinkInput { target_input, .. } =
+        app.application.shell.text_action_mut().mode_mut()
+    {
+        *target_input = "Architecture".into();
+    }
+    app.key(Key::Enter);
+
+    assert!(!app.application.shell.text_action().is_open());
+    let text = app.application.shell.editor_text();
+    assert!(
+        text.contains("[[Architecture]]"),
+        "Text must contain standard wikilink without alias: {text}"
+    );
+}
+
+#[test]
+fn test_empty_cursor_url_link_dual_fields() {
+    let (mut app, _) = setup_app("\n");
     app.key(Key::Char(' '));
     app.key(Key::Char('c'));
     app.key(Key::Char('u'));
-    app.key(Key::Char('c')); // Change title
+
+    assert!(matches!(
+        app.application.shell.text_action().mode(),
+        TextActionMode::LinkInput {
+            is_url: true,
+            has_selection: false,
+            active_field: 0,
+            ..
+        }
+    ));
 
     if let TextActionMode::LinkInput {
         target_input,
@@ -234,48 +286,37 @@ fn test_url_link_change_title() {
         ..
     } = app.application.shell.text_action_mut().mode_mut()
     {
-        *target_input = "https://rust-lang.org".into();
-        *title_input = "Rust Homepage".into();
+        *target_input = "https://example.com".into();
+        *title_input = "Example".into();
     }
     app.key(Key::Enter);
 
     assert!(!app.application.shell.text_action().is_open());
     let text = app.application.shell.editor_text();
     assert!(
-        text.contains("[Rust Homepage](https://rust-lang.org)"),
-        "Text must contain markdown link with custom title: {text}"
+        text.contains("[Example](https://example.com)"),
+        "Text must contain markdown link: {text}"
     );
 }
 
 #[test]
-fn test_normal_mode_auto_word_capture() {
-    let (mut app, _) = setup_app("hello world test\n");
-    // In Normal mode, move to 'world'
-    app.key(Key::Char('w'));
-    assert_eq!(app.application.shell.mode(), Mode::Normal);
-
-    // Space c in Normal mode without selection
+fn test_empty_cursor_style_rejected_with_status() {
+    let (mut app, _) = setup_app("\n");
     app.key(Key::Char(' '));
     app.key(Key::Char('c'));
 
-    assert!(
-        app.application.shell.text_action().is_open(),
-        "Space c in Normal mode should auto-capture word under cursor"
-    );
-    assert_eq!(
-        app.application.shell.text_action().initial_text(),
-        Some("world")
-    );
-
-    // Apply green color directly
+    // Try color on empty cursor
     app.key(Key::Char('c'));
-    app.key(Key::Char('g'));
-
-    assert!(!app.application.shell.text_action().is_open());
-    let text = app.application.shell.editor_text();
-    assert!(
-        text.contains("<span style=\"color:#A3BE8C\">world</span>"),
-        "Normal mode word must be styled: {text}"
+    assert_eq!(
+        app.application.status,
+        "Выделите текст или поместите курсор на слово для применения стиля"
+    );
+    // Menu remains in Root { has_selection: false }
+    assert_eq!(
+        app.application.shell.text_action().mode(),
+        &TextActionMode::Root {
+            has_selection: false
+        }
     );
 }
 

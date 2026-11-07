@@ -54,7 +54,8 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                 let mode = app.application.shell.text_action_mut().mode_mut();
 
                 match mode {
-                    TextActionMode::Root => {
+                    TextActionMode::Root { has_selection } => {
+                        let has_sel = *has_selection;
                         ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new("Действия с текстом")
@@ -65,38 +66,72 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                         ui.separator();
 
                         let items = [
-                            ("c", "Цвет текста", "Окрашивание шрифта"),
-                            ("h", "Подсветка (маркер)", "Фоновый маркер текста"),
-                            ("n", "Ссылка на заметку", "Вставка [[Заметка]]"),
-                            ("u", "URL ссылка", "Вставка [Текст](url)"),
-                            ("x", "Очистить стиль", "Снять все теги стилей"),
+                            ("c", "Цвет текста", "Окрашивание шрифта", has_sel),
+                            ("h", "Подсветка (маркер)", "Фоновый маркер текста", has_sel),
+                            (
+                                "n",
+                                "Ссылка на заметку",
+                                if has_sel {
+                                    "Обернуть в [[...]]"
+                                } else {
+                                    "Вставка [[Заметка|Текст]]"
+                                },
+                                true,
+                            ),
+                            ("u", "URL ссылка", "Вставка [Текст](url)", true),
+                            ("x", "Очистить стиль", "Снять все теги стилей", has_sel),
                         ];
 
-                        for (key, title, desc) in items {
+                        for (key, title, desc, enabled) in items {
                             let resp = ui.allocate_ui(vec2(ui.available_width(), 26.0), |ui| {
                                 ui.horizontal(|ui| {
-                                    render_key_pill(ui, key, &theme);
-                                    ui.label(
-                                        RichText::new(title)
-                                            .strong()
-                                            .color(color(theme.text_primary)),
-                                    );
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new(desc)
-                                                    .small()
-                                                    .color(color(theme.text_muted)),
-                                            );
-                                        },
-                                    );
+                                    if enabled {
+                                        render_key_pill(ui, key, &theme);
+                                        ui.label(
+                                            RichText::new(title)
+                                                .strong()
+                                                .color(color(theme.text_primary)),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    RichText::new(desc)
+                                                        .small()
+                                                        .color(color(theme.text_muted)),
+                                                );
+                                            },
+                                        );
+                                    } else {
+                                        render_dimmed_key_pill(ui, key, &theme);
+                                        ui.label(
+                                            RichText::new(title)
+                                                .small()
+                                                .color(color(theme.text_muted)),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    RichText::new("(требуется выделение)")
+                                                        .small()
+                                                        .color(color(theme.text_muted)),
+                                                );
+                                            },
+                                        );
+                                    }
                                 });
                             });
 
                             if resp.response.interact(Sense::click()).clicked() {
-                                key_to_handle =
-                                    Some(truff_core::vim::Key::Char(key.chars().next().unwrap()));
+                                if enabled {
+                                    key_to_handle = Some(truff_core::vim::Key::Char(
+                                        key.chars().next().unwrap(),
+                                    ));
+                                } else {
+                                    app.application.status =
+                                        "Выделите текст или поместите курсор на слово для применения стиля".into();
+                                }
                             }
                         }
 
@@ -194,74 +229,15 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                             );
                         });
                     }
-                    TextActionMode::LinkTitleMode { is_url } => {
-                        let is_url = *is_url;
-                        let title = if is_url {
-                            "URL ссылка: режим названия"
-                        } else {
-                            "Ссылка на заметку: режим названия"
-                        };
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(title).strong().color(color(theme.accent)));
-                        });
-                        ui.separator();
-
-                        let options = [
-                            ("k", "Сохранить название", "Оставить выделенный текст"),
-                            (
-                                "c",
-                                "Изменить название",
-                                "Ввести новое отображаемое название",
-                            ),
-                        ];
-
-                        for (key, label, desc) in options {
-                            let resp = ui.allocate_ui(vec2(ui.available_width(), 26.0), |ui| {
-                                ui.horizontal(|ui| {
-                                    render_key_pill(ui, key, &theme);
-                                    ui.label(
-                                        RichText::new(label)
-                                            .strong()
-                                            .color(color(theme.text_primary)),
-                                    );
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.label(
-                                                RichText::new(desc)
-                                                    .small()
-                                                    .color(color(theme.text_muted)),
-                                            );
-                                        },
-                                    );
-                                });
-                            });
-
-                            if resp.response.interact(Sense::click()).clicked() {
-                                key_to_handle =
-                                    Some(truff_core::vim::Key::Char(key.chars().next().unwrap()));
-                            }
-                        }
-
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            render_key_pill(ui, "Esc", &theme);
-                            ui.label(
-                                RichText::new("Назад")
-                                    .small()
-                                    .color(color(theme.text_muted)),
-                            );
-                        });
-                    }
                     TextActionMode::LinkInput {
                         is_url,
-                        change_title,
+                        has_selection,
                         target_input,
                         title_input,
                         active_field,
                     } => {
                         let is_url = *is_url;
-                        let change_title = *change_title;
+                        let has_sel = *has_selection;
                         let active_field = *active_field;
 
                         let header = if is_url {
@@ -274,17 +250,6 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                         });
                         ui.separator();
 
-                        let target_label = if is_url {
-                            "URL адрес:"
-                        } else {
-                            "Имя заметки:"
-                        };
-                        ui.label(
-                            RichText::new(target_label)
-                                .small()
-                                .color(color(theme.text_secondary)),
-                        );
-
                         let target_edit_id = Id::new("text_action_target_input");
                         let title_edit_id = Id::new("text_action_title_input");
 
@@ -294,24 +259,56 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                             ui.memory_mut(|m| m.request_focus(title_edit_id));
                         }
 
+                        let mut title_resp = None;
+
+                        if has_sel && is_url {
+                            ui.label(
+                                RichText::new(format!("Текст: \"{title_input}\""))
+                                    .small()
+                                    .color(color(theme.text_muted)),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                RichText::new("URL адрес:")
+                                    .small()
+                                    .color(color(theme.text_secondary)),
+                            );
+                        } else {
+                            let target_label = if is_url {
+                                "URL адрес:"
+                            } else {
+                                "Цель (имя заметки):"
+                            };
+                            ui.label(
+                                RichText::new(target_label)
+                                    .small()
+                                    .color(color(theme.text_secondary)),
+                            );
+                        }
+
                         let target_resp = ui.add(
                             egui::TextEdit::singleline(target_input)
                                 .id(target_edit_id)
                                 .desired_width(ui.available_width()),
                         );
 
-                        if change_title {
+                        if !has_sel {
                             ui.add_space(4.0);
+                            let title_label = if is_url {
+                                "Отображаемый заголовок:"
+                            } else {
+                                "Отображаемый заголовок (опционально):"
+                            };
                             ui.label(
-                                RichText::new("Отображаемое название (анкор):")
+                                RichText::new(title_label)
                                     .small()
                                     .color(color(theme.text_secondary)),
                             );
-                            ui.add(
+                            title_resp = Some(ui.add(
                                 egui::TextEdit::singleline(title_input)
                                     .id(title_edit_id)
                                     .desired_width(ui.available_width()),
-                            );
+                            ));
                         }
 
                         ui.add_space(8.0);
@@ -320,12 +317,20 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                             if ui.button("Применить · Enter").clicked() {
                                 submit = true;
                             }
+                            if !has_sel {
+                                ui.label(
+                                    RichText::new("[Tab] Сменить поле")
+                                        .small()
+                                        .color(color(theme.text_muted)),
+                                );
+                            }
                             if ui.button("Отмена · Esc").clicked() {
                                 close_requested = true;
                             }
                         });
 
-                        submit |= target_resp.lost_focus()
+                        submit |= (target_resp.lost_focus()
+                            || title_resp.is_some_and(|r| r.lost_focus()))
                             && ctx.input(|i| i.key_pressed(egui::Key::Enter));
                         if submit {
                             key_to_handle = Some(truff_core::vim::Key::Enter);
@@ -347,6 +352,27 @@ fn render_key_pill(ui: &mut egui::Ui, key_str: &str, theme: &crate::theme::Theme
     let bg = color(theme.bg_canvas);
     let border = color(theme.accent);
     let txt = color(theme.accent);
+
+    egui::Frame::new()
+        .fill(bg)
+        .stroke(Stroke::new(1.0, border))
+        .corner_radius(3.0)
+        .inner_margin(egui::Margin::symmetric(4, 1))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(key_str)
+                    .monospace()
+                    .strong()
+                    .small()
+                    .color(txt),
+            );
+        });
+}
+
+fn render_dimmed_key_pill(ui: &mut egui::Ui, key_str: &str, theme: &crate::theme::Theme) {
+    let bg = color(theme.bg_canvas);
+    let border = color(theme.text_muted);
+    let txt = color(theme.text_muted);
 
     egui::Frame::new()
         .fill(bg)

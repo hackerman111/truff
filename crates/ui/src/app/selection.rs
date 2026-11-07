@@ -32,9 +32,9 @@ impl Application {
         })
     }
 
-    pub(crate) fn capture_word_or_selection(&self) -> AppResult<SelectionTarget> {
+    pub(crate) fn capture_selection_or_cursor(&self) -> AppResult<(SelectionTarget, bool)> {
         if let Ok(target) = self.capture_selection() {
-            return Ok(target);
+            return Ok((target, true));
         }
         let view = self.shell.editor_view().ok_or("Open a note first")?;
         let buffer = self
@@ -42,14 +42,26 @@ impl Application {
             .editor_buffer()
             .ok_or("Selection buffer unavailable")?;
         let cursor = view.head().get();
-        let range = crate::overlays::word_boundary_at(buffer, cursor)
-            .ok_or("Поместите курсор на слово или выделите текст через v/V")?;
-        Ok(SelectionTarget {
-            view: view.id(),
-            buffer: buffer.id(),
-            revision: buffer.revision(),
-            range,
-        })
+        if let Some(range) = crate::overlays::word_boundary_at(buffer, cursor) {
+            return Ok((
+                SelectionTarget {
+                    view: view.id(),
+                    buffer: buffer.id(),
+                    revision: buffer.revision(),
+                    range,
+                },
+                true,
+            ));
+        }
+        Ok((
+            SelectionTarget {
+                view: view.id(),
+                buffer: buffer.id(),
+                revision: buffer.revision(),
+                range: cursor..cursor,
+            },
+            false,
+        ))
     }
 
     pub(crate) fn target_text(&self, target: &SelectionTarget) -> AppResult<String> {
@@ -134,9 +146,15 @@ impl Application {
         let buffer = self.selection_buffer(target)?;
         let label = match custom_title {
             Some(t) => t.to_string(),
-            None => buffer.slice(target.range.clone()).to_string(),
+            None => {
+                if target.range.is_empty() {
+                    String::new()
+                } else {
+                    buffer.slice(target.range.clone()).to_string()
+                }
+            }
         };
-        let label_opt = (label != note).then_some(label.as_str());
+        let label_opt = (!label.is_empty() && label != note).then_some(label.as_str());
         let transaction = LinkSelection::wikilink(target.range.clone(), note, label_opt);
         self.apply_selection_edit(target.clone(), transaction)
     }
@@ -153,7 +171,13 @@ impl Application {
         let buffer = self.selection_buffer(target)?;
         let label = match custom_title {
             Some(t) => t.to_string(),
-            None => buffer.slice(target.range.clone()).to_string(),
+            None => {
+                if target.range.is_empty() {
+                    url.to_string()
+                } else {
+                    buffer.slice(target.range.clone()).to_string()
+                }
+            }
         };
         let transaction = LinkSelection::markdown_link(target.range.clone(), url, &label);
         self.apply_selection_edit(target.clone(), transaction)

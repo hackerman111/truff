@@ -48,23 +48,29 @@ pub const PALETTE: &[ColorOption] = &[
 ];
 
 /// Mode / step of the TextAction overlay.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextActionMode {
-    #[default]
-    Root,
+    Root {
+        has_selection: bool,
+    },
     ColorSelect {
         is_highlight: bool,
     },
-    LinkTitleMode {
-        is_url: bool,
-    },
     LinkInput {
         is_url: bool,
-        change_title: bool,
+        has_selection: bool,
         target_input: String,
         title_input: String,
         active_field: usize,
     },
+}
+
+impl Default for TextActionMode {
+    fn default() -> Self {
+        Self::Root {
+            has_selection: false,
+        }
+    }
 }
 
 /// Action produced by the TextAction overlay for the editor to execute.
@@ -123,7 +129,8 @@ impl TextActionOverlay {
 
     pub fn open(&mut self, initial_text: Option<String>, cursor_pos: Option<[f32; 2]>) {
         self.is_open = true;
-        self.mode = TextActionMode::Root;
+        let has_selection = initial_text.as_ref().is_some_and(|s| !s.trim().is_empty());
+        self.mode = TextActionMode::Root { has_selection };
         self.cursor_pos = cursor_pos;
         self.color_index = 0;
         self.initial_text = initial_text;
@@ -131,7 +138,9 @@ impl TextActionOverlay {
 
     pub fn close(&mut self) {
         self.is_open = false;
-        self.mode = TextActionMode::Root;
+        self.mode = TextActionMode::Root {
+            has_selection: false,
+        };
         self.cursor_pos = None;
         self.initial_text = None;
     }
@@ -146,37 +155,74 @@ impl TextActionOverlay {
         }
 
         match &mut self.mode {
-            TextActionMode::Root => match key {
-                Key::Char('c') | Key::Char('C') => {
-                    self.mode = TextActionMode::ColorSelect {
-                        is_highlight: false,
-                    };
-                    self.color_index = 0;
-                    TextActionResponse::None
+            TextActionMode::Root { has_selection } => {
+                let has_sel = *has_selection;
+                match key {
+                    Key::Char('c') | Key::Char('C') if has_sel => {
+                        self.mode = TextActionMode::ColorSelect {
+                            is_highlight: false,
+                        };
+                        self.color_index = 0;
+                        TextActionResponse::None
+                    }
+                    Key::Char('h') | Key::Char('H') if has_sel => {
+                        self.mode = TextActionMode::ColorSelect { is_highlight: true };
+                        self.color_index = 0;
+                        TextActionResponse::None
+                    }
+                    Key::Char('n') | Key::Char('N') => {
+                        if has_sel {
+                            let text = self.initial_text.clone().unwrap_or_default();
+                            self.close();
+                            TextActionResponse::ApplyLink {
+                                is_url: false,
+                                target: text,
+                                title: None,
+                            }
+                        } else {
+                            self.mode = TextActionMode::LinkInput {
+                                is_url: false,
+                                has_selection: false,
+                                target_input: String::new(),
+                                title_input: String::new(),
+                                active_field: 0,
+                            };
+                            TextActionResponse::None
+                        }
+                    }
+                    Key::Char('u') | Key::Char('U') => {
+                        if has_sel {
+                            let text = self.initial_text.clone().unwrap_or_default();
+                            self.mode = TextActionMode::LinkInput {
+                                is_url: true,
+                                has_selection: true,
+                                target_input: String::new(),
+                                title_input: text,
+                                active_field: 0,
+                            };
+                            TextActionResponse::None
+                        } else {
+                            self.mode = TextActionMode::LinkInput {
+                                is_url: true,
+                                has_selection: false,
+                                target_input: String::new(),
+                                title_input: String::new(),
+                                active_field: 0,
+                            };
+                            TextActionResponse::None
+                        }
+                    }
+                    Key::Char('x') | Key::Char('X') | Key::Char('0') if has_sel => {
+                        self.close();
+                        TextActionResponse::RemoveStyle
+                    }
+                    Key::Esc => {
+                        self.close();
+                        TextActionResponse::Close
+                    }
+                    _ => TextActionResponse::None,
                 }
-                Key::Char('h') | Key::Char('H') => {
-                    self.mode = TextActionMode::ColorSelect { is_highlight: true };
-                    self.color_index = 0;
-                    TextActionResponse::None
-                }
-                Key::Char('n') | Key::Char('N') => {
-                    self.mode = TextActionMode::LinkTitleMode { is_url: false };
-                    TextActionResponse::None
-                }
-                Key::Char('u') | Key::Char('U') => {
-                    self.mode = TextActionMode::LinkTitleMode { is_url: true };
-                    TextActionResponse::None
-                }
-                Key::Char('x') | Key::Char('X') | Key::Char('0') => {
-                    self.close();
-                    TextActionResponse::RemoveStyle
-                }
-                Key::Esc => {
-                    self.close();
-                    TextActionResponse::Close
-                }
-                _ => TextActionResponse::None,
-            },
+            }
             TextActionMode::ColorSelect { is_highlight } => {
                 let is_highlight = *is_highlight;
                 match key {
@@ -216,38 +262,9 @@ impl TextActionOverlay {
                         }
                     }
                     Key::Esc | Key::Backspace => {
-                        self.mode = TextActionMode::Root;
-                        TextActionResponse::None
-                    }
-                    _ => TextActionResponse::None,
-                }
-            }
-            TextActionMode::LinkTitleMode { is_url } => {
-                let is_url = *is_url;
-                match key {
-                    Key::Char('k') | Key::Char('K') | Key::Char('1') => {
-                        self.mode = TextActionMode::LinkInput {
-                            is_url,
-                            change_title: false,
-                            target_input: String::new(),
-                            title_input: String::new(),
-                            active_field: 0,
+                        self.mode = TextActionMode::Root {
+                            has_selection: true,
                         };
-                        TextActionResponse::None
-                    }
-                    Key::Char('c') | Key::Char('C') | Key::Char('2') => {
-                        let title = self.initial_text.clone().unwrap_or_default();
-                        self.mode = TextActionMode::LinkInput {
-                            is_url,
-                            change_title: true,
-                            target_input: String::new(),
-                            title_input: title,
-                            active_field: 0,
-                        };
-                        TextActionResponse::None
-                    }
-                    Key::Esc | Key::Backspace => {
-                        self.mode = TextActionMode::Root;
                         TextActionResponse::None
                     }
                     _ => TextActionResponse::None,
@@ -255,20 +272,20 @@ impl TextActionOverlay {
             }
             TextActionMode::LinkInput {
                 is_url,
-                change_title,
+                has_selection,
                 target_input,
                 title_input,
                 active_field,
             } => {
                 let is_url = *is_url;
-                let change_title = *change_title;
+                let has_sel = *has_selection;
                 match key {
                     Key::Esc => {
                         self.close();
                         TextActionResponse::Close
                     }
-                    Key::Tab if change_title => {
-                        *active_field = if *active_field == 0 { 1 } else { 0 };
+                    Key::Tab if !has_sel => {
+                        *active_field = (*active_field + 1) % 2;
                         TextActionResponse::None
                     }
                     Key::Enter => {
@@ -276,15 +293,24 @@ impl TextActionOverlay {
                         if target.is_empty() {
                             return TextActionResponse::None;
                         }
-                        let title = if change_title {
+                        let title = if has_sel {
+                            if is_url {
+                                let t = title_input.trim();
+                                if t.is_empty() {
+                                    None
+                                } else {
+                                    Some(t.to_string())
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
                             let t = title_input.trim();
                             if t.is_empty() {
                                 None
                             } else {
                                 Some(t.to_string())
                             }
-                        } else {
-                            None
                         };
                         self.close();
                         TextActionResponse::ApplyLink {
@@ -367,9 +393,14 @@ mod tests {
         let mut menu = TextActionOverlay::new();
         assert!(!menu.is_open());
 
-        menu.open(None, Some([100.0, 150.0]));
+        menu.open(Some("Sample text".into()), Some([100.0, 150.0]));
         assert!(menu.is_open());
-        assert_eq!(menu.mode(), &TextActionMode::Root);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::Root {
+                has_selection: true
+            }
+        );
 
         let action = menu.handle_key(Key::Char('c'));
         assert_eq!(action, TextActionResponse::None);
@@ -390,9 +421,155 @@ mod tests {
     }
 
     #[test]
+    fn test_menu_without_selection_rejects_styles() {
+        let mut menu = TextActionOverlay::new();
+        menu.open(None, None);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::Root {
+                has_selection: false
+            }
+        );
+
+        // c, h, x should not change mode when there is no selection
+        assert_eq!(menu.handle_key(Key::Char('c')), TextActionResponse::None);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::Root {
+                has_selection: false
+            }
+        );
+
+        assert_eq!(menu.handle_key(Key::Char('h')), TextActionResponse::None);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::Root {
+                has_selection: false
+            }
+        );
+
+        assert_eq!(menu.handle_key(Key::Char('x')), TextActionResponse::None);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::Root {
+                has_selection: false
+            }
+        );
+    }
+
+    #[test]
+    fn test_menu_with_selection_n_instant_apply() {
+        let mut menu = TextActionOverlay::new();
+        menu.open(Some("My Note".into()), None);
+
+        let action = menu.handle_key(Key::Char('n'));
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyLink {
+                is_url: false,
+                target: "My Note".into(),
+                title: None,
+            }
+        );
+        assert!(!menu.is_open());
+    }
+
+    #[test]
+    fn test_menu_with_selection_u_opens_single_url_input() {
+        let mut menu = TextActionOverlay::new();
+        menu.open(Some("My Site".into()), None);
+
+        let action = menu.handle_key(Key::Char('u'));
+        assert_eq!(action, TextActionResponse::None);
+        assert!(matches!(
+            menu.mode(),
+            TextActionMode::LinkInput {
+                is_url: true,
+                has_selection: true,
+                title_input,
+                active_field: 0,
+                ..
+            } if title_input == "My Site"
+        ));
+
+        // In LinkInput, simulate entering url
+        if let TextActionMode::LinkInput { target_input, .. } = menu.mode_mut() {
+            *target_input = "https://example.com".into();
+        }
+
+        let action = menu.handle_key(Key::Enter);
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyLink {
+                is_url: true,
+                target: "https://example.com".into(),
+                title: Some("My Site".into()),
+            }
+        );
+        assert!(!menu.is_open());
+    }
+
+    #[test]
+    fn test_menu_without_selection_n_and_u_open_dual_inputs() {
+        let mut menu = TextActionOverlay::new();
+        menu.open(None, None);
+
+        menu.handle_key(Key::Char('n'));
+        assert!(matches!(
+            menu.mode(),
+            TextActionMode::LinkInput {
+                is_url: false,
+                has_selection: false,
+                active_field: 0,
+                ..
+            }
+        ));
+
+        // Tab toggles field
+        menu.handle_key(Key::Tab);
+        assert!(matches!(
+            menu.mode(),
+            TextActionMode::LinkInput {
+                active_field: 1,
+                ..
+            }
+        ));
+        menu.handle_key(Key::Tab);
+        assert!(matches!(
+            menu.mode(),
+            TextActionMode::LinkInput {
+                active_field: 0,
+                ..
+            }
+        ));
+
+        // Set inputs
+        if let TextActionMode::LinkInput {
+            target_input,
+            title_input,
+            ..
+        } = menu.mode_mut()
+        {
+            *target_input = "TargetNote".into();
+            *title_input = "CustomTitle".into();
+        }
+
+        let action = menu.handle_key(Key::Enter);
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyLink {
+                is_url: false,
+                target: "TargetNote".into(),
+                title: Some("CustomTitle".into()),
+            }
+        );
+        assert!(!menu.is_open());
+    }
+
+    #[test]
     fn test_menu_color_direct_mnemonic_key() {
         let mut menu = TextActionOverlay::new();
-        menu.open(None, Some([50.0, 50.0]));
+        menu.open(Some("Sample text".into()), Some([50.0, 50.0]));
         menu.handle_key(Key::Char('h'));
         assert!(matches!(
             menu.mode(),
@@ -402,32 +579,6 @@ mod tests {
         let action = menu.handle_key(Key::Char('g'));
         assert!(matches!(action, TextActionResponse::ApplyHighlight { hex } if hex == "#A3BE8C"));
         assert!(!menu.is_open());
-    }
-
-    #[test]
-    fn test_link_modes_keep_and_change_title() {
-        let mut menu = TextActionOverlay::new();
-        menu.open(Some("Initial Text".into()), None);
-        menu.handle_key(Key::Char('n'));
-        assert!(matches!(
-            menu.mode(),
-            TextActionMode::LinkTitleMode { is_url: false }
-        ));
-
-        menu.handle_key(Key::Char('c'));
-        match menu.mode() {
-            TextActionMode::LinkInput {
-                is_url,
-                change_title,
-                title_input,
-                ..
-            } => {
-                assert!(!is_url);
-                assert!(change_title);
-                assert_eq!(title_input, "Initial Text");
-            }
-            other => panic!("Unexpected mode: {:?}", other),
-        }
     }
 
     #[test]
