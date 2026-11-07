@@ -373,6 +373,7 @@ impl VimState {
             }
             Command::ColonCommand(cmd) => self.colon_command(&cmd, ctx),
             Command::ScrollCursor(pos) => InputResult::ScrollCursor(pos),
+            Command::Fold(fold_cmd) => InputResult::Fold(fold_cmd),
             Command::FollowLink => InputResult::FollowLink,
             Command::SetMark(c) => {
                 if let InputContext::Editor { view, .. } = ctx {

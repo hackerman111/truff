@@ -2,6 +2,7 @@
 
 pub mod facts;
 pub mod flash;
+pub mod folding;
 pub mod link_selection;
 pub mod links;
 pub mod presentation;
@@ -13,9 +14,15 @@ pub mod table;
 
 pub use facts::{BlockFact, DocFacts, HeadingFact, MarkdownError, MarkdownFacts};
 pub use flash::{FlashMode, FlashTarget, FlashTargetKind, collect_flash_targets};
+pub use folding::{
+    HeadingItem, compute_hidden_line_ranges, find_heading_for_line, heading_fold_range,
+    is_line_in_hidden_ranges,
+};
 pub use link_selection::{ExtractNotePlan, LinkSelection, LinkTarget};
 pub use links::LinkOccurrence;
-pub use presentation::{LinePresentation, ListKind, ListMarker, cycle_task_status, toggle_task};
+pub use presentation::{
+    LinePresentation, ListKind, ListMarker, cycle_task_status, parse_line_list_marker, toggle_task,
+};
 pub use smart_edit::{
     find_task_checkbox_on_line, plan_backspace, plan_cycle_task, plan_enter, plan_shift_tab,
     plan_tab, plan_table_tab, plan_toggle_task,

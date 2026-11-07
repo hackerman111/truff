@@ -45,6 +45,13 @@ pub struct EditorWidget {
     follow_pending: bool,
     pending_scroll_pos: Option<truff_core::vim::ScrollPosition>,
     active_table: Option<(Range<usize>, std::sync::Arc<Vec<usize>>)>,
+    buffer_folds: BTreeMap<truff_core::text::BufferId, std::collections::BTreeSet<usize>>,
+    cached_headings: Option<(
+        truff_core::text::BufferId,
+        u64,
+        Vec<truff_core::markdown::HeadingItem>,
+    )>,
+    pub(in crate::native) active_hidden_ranges: Vec<Range<usize>>,
     pub(in crate::native) input_blocked: bool,
 }
 
@@ -105,6 +112,99 @@ impl EditorWidget {
         self.cache
             .get(&line)
             .map(|entry| entry.char_rect_at(egui::Pos2::ZERO, source_byte))
+    }
+
+    pub fn headings_for_buffer(
+        &mut self,
+        buffer: &truff_core::Buffer,
+    ) -> Vec<truff_core::markdown::HeadingItem> {
+        if let Some((id, rev, ref items)) = self.cached_headings
+            && id == buffer.id()
+            && rev == buffer.revision()
+        {
+            return items.clone();
+        }
+        let facts =
+            truff_core::markdown::facts::MarkdownFacts::extract_headings_only(&buffer.as_str())
+                .unwrap_or_default();
+        let items: Vec<truff_core::markdown::HeadingItem> = facts
+            .iter()
+            .map(|h| {
+                truff_core::markdown::HeadingItem::new(buffer.line_of_byte(h.range.start), h.level)
+            })
+            .collect();
+        self.cached_headings = Some((buffer.id(), buffer.revision(), items.clone()));
+        items
+    }
+
+    pub fn toggle_fold(&mut self, heading_line: usize, buffer: &truff_core::Buffer) {
+        let folds = self.buffer_folds.entry(buffer.id()).or_default();
+        if !folds.remove(&heading_line) {
+            folds.insert(heading_line);
+        }
+        self.update_hidden_ranges(buffer);
+    }
+
+    pub fn fold_close(&mut self, heading_line: usize, buffer: &truff_core::Buffer) {
+        let folds = self.buffer_folds.entry(buffer.id()).or_default();
+        folds.insert(heading_line);
+        self.update_hidden_ranges(buffer);
+    }
+
+    pub fn fold_open(&mut self, heading_line: usize, buffer: &truff_core::Buffer) {
+        let folds = self.buffer_folds.entry(buffer.id()).or_default();
+        folds.remove(&heading_line);
+        self.update_hidden_ranges(buffer);
+    }
+
+    pub fn fold_close_all(&mut self, buffer: &truff_core::Buffer) {
+        let headings = self.headings_for_buffer(buffer);
+        let folds = self.buffer_folds.entry(buffer.id()).or_default();
+        for h in headings {
+            folds.insert(h.line);
+        }
+        self.update_hidden_ranges(buffer);
+    }
+
+    pub fn fold_open_all(&mut self, buffer: &truff_core::Buffer) {
+        self.buffer_folds.remove(&buffer.id());
+        self.update_hidden_ranges(buffer);
+    }
+
+    pub fn is_line_folded(&self, line: usize) -> bool {
+        truff_core::markdown::is_line_in_hidden_ranges(line, &self.active_hidden_ranges)
+    }
+
+    pub fn is_heading_folded(&self, buffer_id: truff_core::text::BufferId, line: usize) -> bool {
+        self.buffer_folds
+            .get(&buffer_id)
+            .is_some_and(|set| set.contains(&line))
+    }
+
+    pub fn update_hidden_ranges(&mut self, buffer: &truff_core::Buffer) {
+        let headings = self.headings_for_buffer(buffer);
+        let empty_set = std::collections::BTreeSet::new();
+        let folds = self.buffer_folds.get(&buffer.id()).unwrap_or(&empty_set);
+        let lines = buffer.line_len();
+        let hidden = truff_core::markdown::compute_hidden_line_ranges(&headings, folds, lines);
+
+        // Update heights in HeightIndex for newly folded or unfolded lines
+        for r in &hidden {
+            for l in r.clone() {
+                self.heights.update_block_height(l, 0.0, None);
+            }
+        }
+        for r in &self.active_hidden_ranges {
+            for l in r.clone() {
+                if !truff_core::markdown::is_line_in_hidden_ranges(l, &hidden) {
+                    self.heights
+                        .update_block_height(l, self.heights.default_line_height(), None);
+                }
+            }
+        }
+
+        self.active_hidden_ranges = hidden;
+        self.cache.clear();
     }
 }
 

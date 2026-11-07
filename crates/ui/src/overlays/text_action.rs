@@ -47,6 +47,83 @@ pub const PALETTE: &[ColorOption] = &[
     },
 ];
 
+/// Task completion status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatus {
+    Todo,
+    InProgress,
+    Done,
+    Remove,
+}
+
+impl TaskStatus {
+    pub const fn checkbox_str(self) -> Option<&'static str> {
+        match self {
+            Self::Todo => Some("[ ]"),
+            Self::InProgress => Some("[/]"),
+            Self::Done => Some("[x]"),
+            Self::Remove => None,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Todo => "К выполнению (Todo)",
+            Self::InProgress => "В процессе (In Progress)",
+            Self::Done => "Выполнено (Done)",
+            Self::Remove => "Убрать задачу (Remove task)",
+        }
+    }
+
+    pub const fn icon(self) -> &'static str {
+        match self {
+            Self::Todo => "☐",
+            Self::InProgress => "◐",
+            Self::Done => "☑",
+            Self::Remove => "—",
+        }
+    }
+}
+
+pub struct TaskStatusOption {
+    pub status: TaskStatus,
+    pub title: &'static str,
+    pub desc: &'static str,
+    pub marker: &'static str,
+    pub key: char,
+}
+
+pub const TASK_STATUS_OPTIONS: &[TaskStatusOption] = &[
+    TaskStatusOption {
+        status: TaskStatus::Todo,
+        title: "К выполнению",
+        desc: "Маркер [ ]",
+        marker: "☐",
+        key: '1',
+    },
+    TaskStatusOption {
+        status: TaskStatus::InProgress,
+        title: "В процессе",
+        desc: "Маркер [/]",
+        marker: "◐",
+        key: '2',
+    },
+    TaskStatusOption {
+        status: TaskStatus::Done,
+        title: "Выполнено",
+        desc: "Маркер [x]",
+        marker: "☑",
+        key: '3',
+    },
+    TaskStatusOption {
+        status: TaskStatus::Remove,
+        title: "Убрать задачу",
+        desc: "Обычный текст",
+        marker: "—",
+        key: '4',
+    },
+];
+
 /// Mode / step of the TextAction overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextActionMode {
@@ -56,12 +133,17 @@ pub enum TextActionMode {
     ColorSelect {
         is_highlight: bool,
     },
+    TaskStatusSelect {
+        selected_index: usize,
+    },
     LinkInput {
         is_url: bool,
         has_selection: bool,
         target_input: String,
         title_input: String,
         active_field: usize,
+        suggestions: Vec<String>,
+        selected_suggestion: Option<usize>,
     },
 }
 
@@ -88,6 +170,9 @@ pub enum TextActionResponse {
         is_url: bool,
         target: String,
         title: Option<String>,
+    },
+    ApplyTask {
+        status: TaskStatus,
     },
     RemoveStyle,
 }
@@ -171,46 +256,42 @@ impl TextActionOverlay {
                         TextActionResponse::None
                     }
                     Key::Char('n') | Key::Char('N') => {
-                        if has_sel {
-                            let text = self.initial_text.clone().unwrap_or_default();
-                            self.close();
-                            TextActionResponse::ApplyLink {
-                                is_url: false,
-                                target: text,
-                                title: None,
-                            }
+                        let text = if has_sel {
+                            self.initial_text.clone().unwrap_or_default()
                         } else {
-                            self.mode = TextActionMode::LinkInput {
-                                is_url: false,
-                                has_selection: false,
-                                target_input: String::new(),
-                                title_input: String::new(),
-                                active_field: 0,
-                            };
-                            TextActionResponse::None
-                        }
+                            String::new()
+                        };
+                        self.mode = TextActionMode::LinkInput {
+                            is_url: false,
+                            has_selection: has_sel,
+                            target_input: String::new(),
+                            title_input: text,
+                            active_field: if has_sel { 1 } else { 0 },
+                            suggestions: Vec::new(),
+                            selected_suggestion: None,
+                        };
+                        TextActionResponse::None
                     }
                     Key::Char('u') | Key::Char('U') => {
-                        if has_sel {
-                            let text = self.initial_text.clone().unwrap_or_default();
-                            self.mode = TextActionMode::LinkInput {
-                                is_url: true,
-                                has_selection: true,
-                                target_input: String::new(),
-                                title_input: text,
-                                active_field: 0,
-                            };
-                            TextActionResponse::None
+                        let text = if has_sel {
+                            self.initial_text.clone().unwrap_or_default()
                         } else {
-                            self.mode = TextActionMode::LinkInput {
-                                is_url: true,
-                                has_selection: false,
-                                target_input: String::new(),
-                                title_input: String::new(),
-                                active_field: 0,
-                            };
-                            TextActionResponse::None
-                        }
+                            String::new()
+                        };
+                        self.mode = TextActionMode::LinkInput {
+                            is_url: true,
+                            has_selection: has_sel,
+                            target_input: String::new(),
+                            title_input: text,
+                            active_field: if has_sel { 1 } else { 0 },
+                            suggestions: Vec::new(),
+                            selected_suggestion: None,
+                        };
+                        TextActionResponse::None
+                    }
+                    Key::Char('t') | Key::Char('T') => {
+                        self.mode = TextActionMode::TaskStatusSelect { selected_index: 0 };
+                        TextActionResponse::None
                     }
                     Key::Char('x') | Key::Char('X') | Key::Char('0') if has_sel => {
                         self.close();
@@ -270,41 +351,123 @@ impl TextActionOverlay {
                     _ => TextActionResponse::None,
                 }
             }
+            TextActionMode::TaskStatusSelect { selected_index } => match key {
+                Key::Up | Key::Char('k') => {
+                    if *selected_index == 0 {
+                        *selected_index = TASK_STATUS_OPTIONS.len().saturating_sub(1);
+                    } else {
+                        *selected_index -= 1;
+                    }
+                    TextActionResponse::None
+                }
+                Key::Down | Key::Char('j') => {
+                    *selected_index = (*selected_index + 1) % TASK_STATUS_OPTIONS.len();
+                    TextActionResponse::None
+                }
+                Key::Enter => {
+                    let status = TASK_STATUS_OPTIONS[*selected_index].status;
+                    self.close();
+                    TextActionResponse::ApplyTask { status }
+                }
+                Key::Char('1') | Key::Char('t') | Key::Char('T') | Key::Char('s') => {
+                    self.close();
+                    TextActionResponse::ApplyTask {
+                        status: TaskStatus::Todo,
+                    }
+                }
+                Key::Char('2') | Key::Char('p') | Key::Char('P') | Key::Char('/') => {
+                    self.close();
+                    TextActionResponse::ApplyTask {
+                        status: TaskStatus::InProgress,
+                    }
+                }
+                Key::Char('3')
+                | Key::Char('d')
+                | Key::Char('D')
+                | Key::Char('x')
+                | Key::Char('X') => {
+                    self.close();
+                    TextActionResponse::ApplyTask {
+                        status: TaskStatus::Done,
+                    }
+                }
+                Key::Char('4') | Key::Char('r') | Key::Char('R') | Key::Char('0') => {
+                    self.close();
+                    TextActionResponse::ApplyTask {
+                        status: TaskStatus::Remove,
+                    }
+                }
+                Key::Backspace => {
+                    let has_selection = self
+                        .initial_text
+                        .as_ref()
+                        .is_some_and(|s| !s.trim().is_empty());
+                    self.mode = TextActionMode::Root { has_selection };
+                    TextActionResponse::None
+                }
+                Key::Esc => {
+                    self.close();
+                    TextActionResponse::Close
+                }
+                _ => TextActionResponse::None,
+            },
             TextActionMode::LinkInput {
                 is_url,
-                has_selection,
+                has_selection: _,
                 target_input,
                 title_input,
                 active_field,
+                suggestions,
+                selected_suggestion,
             } => {
                 let is_url = *is_url;
-                let has_sel = *has_selection;
                 match key {
                     Key::Esc => {
                         self.close();
                         TextActionResponse::Close
                     }
-                    Key::Tab if !has_sel => {
-                        *active_field = (*active_field + 1) % 2;
+                    Key::Down => {
+                        if *active_field == 1 && !suggestions.is_empty() {
+                            *selected_suggestion = Some(match *selected_suggestion {
+                                None => 0,
+                                Some(i) => (i + 1) % suggestions.len(),
+                            });
+                        }
+                        TextActionResponse::None
+                    }
+                    Key::Up => {
+                        if *active_field == 1 && !suggestions.is_empty() {
+                            *selected_suggestion = Some(match *selected_suggestion {
+                                None | Some(0) => suggestions.len().saturating_sub(1),
+                                Some(i) => i.saturating_sub(1),
+                            });
+                        }
+                        TextActionResponse::None
+                    }
+                    Key::Tab => {
+                        if *active_field == 1
+                            && let Some(i) = *selected_suggestion
+                            && let Some(sugg) = suggestions.get(i)
+                        {
+                            *target_input = sugg.clone();
+                            *selected_suggestion = None;
+                        } else {
+                            *active_field = (*active_field + 1) % 2;
+                        }
                         TextActionResponse::None
                     }
                     Key::Enter => {
+                        if *active_field == 1
+                            && let Some(i) = *selected_suggestion
+                            && let Some(sugg) = suggestions.get(i)
+                        {
+                            *target_input = sugg.clone();
+                        }
                         let target = target_input.trim().to_string();
                         if target.is_empty() {
                             return TextActionResponse::None;
                         }
-                        let title = if has_sel {
-                            if is_url {
-                                let t = title_input.trim();
-                                if t.is_empty() {
-                                    None
-                                } else {
-                                    Some(t.to_string())
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
+                        let title = {
                             let t = title_input.trim();
                             if t.is_empty() {
                                 None
@@ -318,6 +481,24 @@ impl TextActionOverlay {
                             target,
                             title,
                         }
+                    }
+                    Key::Char(ch) => {
+                        *selected_suggestion = None;
+                        if *active_field == 0 {
+                            title_input.push(ch);
+                        } else {
+                            target_input.push(ch);
+                        }
+                        TextActionResponse::None
+                    }
+                    Key::Backspace => {
+                        *selected_suggestion = None;
+                        if *active_field == 0 {
+                            title_input.pop();
+                        } else {
+                            target_input.pop();
+                        }
+                        TextActionResponse::None
                     }
                     _ => TextActionResponse::None,
                 }
@@ -458,17 +639,93 @@ mod tests {
     }
 
     #[test]
-    fn test_menu_with_selection_n_instant_apply() {
+    fn test_menu_with_selection_n_opens_link_input_with_title() {
         let mut menu = TextActionOverlay::new();
         menu.open(Some("My Note".into()), None);
 
         let action = menu.handle_key(Key::Char('n'));
+        assert_eq!(action, TextActionResponse::None);
+        assert!(matches!(
+            menu.mode(),
+            TextActionMode::LinkInput {
+                is_url: false,
+                has_selection: true,
+                title_input,
+                active_field: 1,
+                ..
+            } if title_input == "My Note"
+        ));
+
+        // Type target note name
+        menu.handle_key(Key::Char('T'));
+        menu.handle_key(Key::Char('a'));
+        menu.handle_key(Key::Char('r'));
+        menu.handle_key(Key::Char('g'));
+        menu.handle_key(Key::Char('e'));
+        menu.handle_key(Key::Char('t'));
+
+        let action = menu.handle_key(Key::Enter);
         assert_eq!(
             action,
             TextActionResponse::ApplyLink {
                 is_url: false,
-                target: "My Note".into(),
-                title: None,
+                target: "Target".into(),
+                title: Some("My Note".into()),
+            }
+        );
+        assert!(!menu.is_open());
+    }
+
+    #[test]
+    fn test_menu_link_input_autocompletion_navigation() {
+        let mut menu = TextActionOverlay::new();
+        menu.open(Some("Text".into()), None);
+        menu.handle_key(Key::Char('n'));
+
+        if let TextActionMode::LinkInput { suggestions, .. } = menu.mode_mut() {
+            *suggestions = vec!["Alpha".into(), "Beta".into(), "Gamma".into()];
+        }
+
+        // Down arrow selects first suggestion "Alpha"
+        menu.handle_key(Key::Down);
+        if let TextActionMode::LinkInput {
+            selected_suggestion,
+            ..
+        } = menu.mode()
+        {
+            assert_eq!(*selected_suggestion, Some(0));
+        }
+
+        // Down arrow selects second suggestion "Beta"
+        menu.handle_key(Key::Down);
+        if let TextActionMode::LinkInput {
+            selected_suggestion,
+            ..
+        } = menu.mode()
+        {
+            assert_eq!(*selected_suggestion, Some(1));
+        }
+
+        // Tab completes "Beta" into target_input
+        menu.handle_key(Key::Tab);
+        if let TextActionMode::LinkInput {
+            target_input,
+            selected_suggestion,
+            ..
+        } = menu.mode()
+        {
+            assert_eq!(target_input, "Beta");
+            assert_eq!(*selected_suggestion, None);
+        }
+
+        // Enter submits link with target "Beta" and title "Text"
+        let action = menu.handle_key(Key::Enter);
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyLink {
+                is_url: false,
+                target: "Beta".into(),
+                title: Some("Text".into()),
             }
         );
         assert!(!menu.is_open());
@@ -487,7 +744,7 @@ mod tests {
                 is_url: true,
                 has_selection: true,
                 title_input,
-                active_field: 0,
+                active_field: 1,
                 ..
             } if title_input == "My Site"
         ));
@@ -590,5 +847,85 @@ mod tests {
 
         let space_range = word_boundary_at(&buffer, 5);
         assert_eq!(space_range, None);
+    }
+
+    #[test]
+    fn test_menu_task_status_navigation_and_selection() {
+        let mut menu = TextActionOverlay::new();
+        menu.open(Some("Task line".into()), None);
+
+        // Press 't' to open task status selection
+        let action = menu.handle_key(Key::Char('t'));
+        assert_eq!(action, TextActionResponse::None);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::TaskStatusSelect { selected_index: 0 }
+        );
+
+        // Down arrow navigates to InProgress (index 1)
+        menu.handle_key(Key::Down);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::TaskStatusSelect { selected_index: 1 }
+        );
+
+        // Down arrow navigates to Done (index 2)
+        menu.handle_key(Key::Down);
+        assert_eq!(
+            menu.mode(),
+            &TextActionMode::TaskStatusSelect { selected_index: 2 }
+        );
+
+        // Enter applies Done
+        let action = menu.handle_key(Key::Enter);
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyTask {
+                status: TaskStatus::Done
+            }
+        );
+        assert!(!menu.is_open());
+    }
+
+    #[test]
+    fn test_menu_task_status_hotkeys() {
+        // Press '1' applies Todo immediately
+        let mut menu = TextActionOverlay::new();
+        menu.open(None, None);
+        menu.handle_key(Key::Char('t'));
+        let action = menu.handle_key(Key::Char('1'));
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyTask {
+                status: TaskStatus::Todo
+            }
+        );
+        assert!(!menu.is_open());
+
+        // Press '2' applies InProgress immediately
+        let mut menu = TextActionOverlay::new();
+        menu.open(None, None);
+        menu.handle_key(Key::Char('t'));
+        let action = menu.handle_key(Key::Char('2'));
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyTask {
+                status: TaskStatus::InProgress
+            }
+        );
+        assert!(!menu.is_open());
+
+        // Press '4' applies Remove immediately
+        let mut menu = TextActionOverlay::new();
+        menu.open(None, None);
+        menu.handle_key(Key::Char('t'));
+        let action = menu.handle_key(Key::Char('4'));
+        assert_eq!(
+            action,
+            TextActionResponse::ApplyTask {
+                status: TaskStatus::Remove
+            }
+        );
+        assert!(!menu.is_open());
     }
 }

@@ -47,6 +47,8 @@ pub enum EditorInput {
     ToggleTask { checkbox: usize },
     /// Follow an internal link to a document heading or note.
     FollowLink(String),
+    /// Toggle folding for a markdown heading line.
+    ToggleFold { heading_line: usize },
 }
 
 /// Unified input adapter maintaining transient IME composition state and executing edits.
@@ -111,6 +113,7 @@ impl InputAdapter {
                 };
                 buffer.apply(transaction).map(Some)
             }
+            EditorInput::ToggleFold { .. } => Ok(None),
             EditorInput::ImePreedit { text, cursor: cur } => {
                 if text.is_empty() {
                     self.ime_preedit = None;

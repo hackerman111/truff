@@ -44,8 +44,15 @@ pub(super) fn show(
                 note_title,
             );
             if let Some(input) = input {
-                application.shell.set_focus(Focus::Editor);
-                super::events::input(application, input);
+                if let crate::editor::EditorInput::ToggleFold { heading_line } = input {
+                    if let Some(buffer) = shell.editor_buffer() {
+                        editor.toggle_fold(heading_line, buffer);
+                        ui.ctx().request_repaint();
+                    }
+                } else {
+                    application.shell.set_focus(Focus::Editor);
+                    super::events::input(application, input);
+                }
             }
             if application.link_completion.active
                 && !application.link_completion.candidates.is_empty()

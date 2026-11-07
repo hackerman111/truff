@@ -8,7 +8,7 @@ pub mod parser;
 
 pub use execute::{InputContext, InputResult, KeyDisposition, VimState};
 pub use motion::{Motion, TextObject, TextObjectKind, TextObjectTarget};
-pub use parser::{Command, Operator, ScrollPosition};
+pub use parser::{Command, FoldCommand, Operator, ScrollPosition};
 
 /// Mode in which the editor or panel is currently operating.
 #[derive(

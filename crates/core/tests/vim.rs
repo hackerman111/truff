@@ -477,3 +477,41 @@ fn test_vim_yank_sets_last_yanked() {
     assert_eq!(vim.take_last_yank(), Some("hello world\n".to_string()));
     assert_eq!(vim.take_last_yank(), None);
 }
+
+#[test]
+fn test_vim_fold_motions_parse_and_execute() {
+    use truff_core::vim::{FoldCommand, InputContext, InputResult, Key, VimState};
+
+    let (mut buffer, mut view) = setup_editor("# Heading\nBody\n");
+    let mut vim = VimState::new();
+
+    let feed = |vim: &mut VimState, buffer: &mut Buffer, view: &mut View, k1: char, k2: char| {
+        let ctx = InputContext::Editor {
+            view_id: view.id(),
+            buffer,
+            view,
+        };
+        let _ = vim.feed_key(Key::Char(k1), ctx);
+        let ctx = InputContext::Editor {
+            view_id: view.id(),
+            buffer,
+            view,
+        };
+        vim.feed_key(Key::Char(k2), ctx)
+    };
+
+    let res = feed(&mut vim, &mut buffer, &mut view, 'z', 'a');
+    assert_eq!(res, InputResult::Fold(FoldCommand::Toggle));
+
+    let res = feed(&mut vim, &mut buffer, &mut view, 'z', 'c');
+    assert_eq!(res, InputResult::Fold(FoldCommand::Close));
+
+    let res = feed(&mut vim, &mut buffer, &mut view, 'z', 'o');
+    assert_eq!(res, InputResult::Fold(FoldCommand::Open));
+
+    let res = feed(&mut vim, &mut buffer, &mut view, 'z', 'M');
+    assert_eq!(res, InputResult::Fold(FoldCommand::CloseAll));
+
+    let res = feed(&mut vim, &mut buffer, &mut view, 'z', 'R');
+    assert_eq!(res, InputResult::Fold(FoldCommand::OpenAll));
+}

@@ -97,3 +97,30 @@ fn over_indented_tab_nested_lists_and_tasks_fence_are_recognized_as_lists() {
         ListKind::Task { checked: true, .. }
     ));
 }
+
+#[test]
+fn test_presentation_recognizes_colored_and_highlighted_lists() {
+    let text = "<span style=\"color:#3388ff\">- blue</span>\n<mark style=\"background-color:#ffff00\">- [ ] highlighted task</mark>\n- <span style=\"color:#ff0000\">red item</span>\n";
+    let snapshot = IncrementalSyntaxTree::parse_fresh(text).snapshot();
+    let mut start = 0;
+    let lines: Vec<_> = text
+        .split_inclusive('\n')
+        .map(|line| {
+            let range = start..start + line.trim_end_matches('\n').len();
+            start += line.len();
+            snapshot.line_presentation_in_str(text, range)
+        })
+        .collect();
+
+    assert!(lines[0].list.is_some());
+    assert_eq!(lines[0].list.as_ref().unwrap().kind, ListKind::Bullet);
+
+    assert!(lines[1].list.is_some());
+    assert!(matches!(
+        lines[1].list.as_ref().unwrap().kind,
+        ListKind::Task { checked: false, .. }
+    ));
+
+    assert!(lines[2].list.is_some());
+    assert_eq!(lines[2].list.as_ref().unwrap().kind, ListKind::Bullet);
+}

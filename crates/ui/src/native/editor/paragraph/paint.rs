@@ -211,7 +211,13 @@ impl Paragraph {
     ) -> Option<Rect> {
         let mut cursor_rect = None;
         if let Some(table) = &self.table_row {
-            table.paint(painter, origin, self.presentation.table_header, view);
+            table.paint(
+                painter,
+                origin,
+                &self.range,
+                self.presentation.table_header,
+                view,
+            );
             if let Some(cursor) = view
                 .cursor
                 .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)

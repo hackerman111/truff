@@ -50,8 +50,10 @@ impl EditorWidget {
             self.buffer_id = Some(buffer.id());
             self.cache.clear();
             self.active_table = None;
+            self.update_hidden_ranges(buffer);
         }
         self.revision = Some(buffer.revision());
+        let heading_items = self.headings_for_buffer(buffer);
         let identity = (view.id(), cursor);
         let cursor_changed = self.last_cursor != Some(identity);
         let resized = self.last_viewport.map(|viewport| viewport.size()) != Some(rect.size());
@@ -184,6 +186,9 @@ impl EditorWidget {
         // Measure a distant target directly, even when it is outside the virtual window.
         let target = (follow && !(first..last).contains(&cursor_line)).then_some(cursor_line);
         for line in (first..last).chain(target) {
+            if self.is_line_folded(line) {
+                continue;
+            }
             let start = line_start(buffer, line);
             let end = line_start(buffer, line + 1);
             let mut range = start..end;
@@ -432,6 +437,9 @@ impl EditorWidget {
             }
         }
         for line in paint_first..paint_last {
+            if self.is_line_folded(line) {
+                continue;
+            }
             let Some(entry) = self.cache.get(&line) else {
                 continue;
             };
@@ -482,6 +490,75 @@ impl EditorWidget {
                     self.cursor_rect = Some(caret);
                 }
             }
+            if intersects_viewport {
+                let is_heading = heading_items.iter().any(|h| h.line == line);
+                let is_folded = is_heading && self.is_heading_folded(buffer.id(), line);
+                if is_heading {
+                    let chevron_text = if is_folded { "▶" } else { "▼" };
+                    let chevron_pos = egui::pos2(origin.x - 18.0, origin.y + 4.0);
+                    let chevron_rect = egui::Rect::from_min_size(
+                        egui::pos2(origin.x - 24.0, origin.y),
+                        egui::vec2(22.0, entry.galley.size().y.max(LINE_HEIGHT)),
+                    );
+                    let is_hovered = response
+                        .hover_pos()
+                        .is_some_and(|p| chevron_rect.contains(p));
+                    if is_hovered {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    let chevron_color = if is_folded || is_hovered {
+                        color(theme.text_secondary)
+                    } else {
+                        color(theme.text_muted).gamma_multiply(0.6)
+                    };
+                    painter.text(
+                        chevron_pos,
+                        egui::Align2::LEFT_TOP,
+                        chevron_text,
+                        egui::FontId::proportional(11.0),
+                        chevron_color,
+                    );
+                    if response.clicked()
+                        && response
+                            .interact_pointer_pos()
+                            .is_some_and(|p| chevron_rect.contains(p))
+                    {
+                        clicked = Some(EditorInput::ToggleFold { heading_line: line });
+                    }
+
+                    if is_folded {
+                        let text_width = entry.galley.size().x;
+                        let badge_pos = egui::pos2(origin.x + text_width + 8.0, origin.y + 4.0);
+                        let badge_rect =
+                            egui::Rect::from_min_size(badge_pos, egui::vec2(24.0, 16.0));
+                        let badge_hovered =
+                            response.hover_pos().is_some_and(|p| badge_rect.contains(p));
+                        if badge_hovered {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        let badge_bg = if badge_hovered {
+                            color(theme.bg_secondary)
+                        } else {
+                            color(theme.bg_secondary).gamma_multiply(0.7)
+                        };
+                        painter.rect_filled(badge_rect, 4.0, badge_bg);
+                        painter.text(
+                            badge_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "...",
+                            egui::FontId::proportional(11.0),
+                            color(theme.text_muted),
+                        );
+                        if response.clicked()
+                            && response
+                                .interact_pointer_pos()
+                                .is_some_and(|p| badge_rect.contains(p))
+                        {
+                            clicked = Some(EditorInput::ToggleFold { heading_line: line });
+                        }
+                    }
+                }
+            }
             let galley_origin = if entry.is_task() {
                 egui::pos2(origin.x + TASK_PADDING_X, origin.y)
             } else {
@@ -514,6 +591,7 @@ impl EditorWidget {
                 }
             }
             if intersects_viewport
+                && clicked.is_none()
                 && (!self.input_blocked && (response.clicked() || response.dragged()))
                 && let Some(position) = response.interact_pointer_pos()
                 && let position = if response.dragged() {
@@ -732,15 +810,24 @@ pub(crate) fn extract_link_destination(
     source_text: &str,
     span_content: &std::ops::Range<usize>,
 ) -> Option<LinkDestination> {
-    let is_wikilink = source_text
-        .get(..span_content.start)
-        .is_some_and(|prefix| prefix.ends_with("[["))
-        && source_text
-            .get(span_content.end..)
-            .is_some_and(|suffix| suffix.starts_with("]]"));
-    if is_wikilink {
+    let suffix = source_text.get(span_content.end..)?;
+    let prefix = source_text.get(..span_content.start)?;
+
+    let target = if suffix.starts_with("]]") && prefix.ends_with("[[") {
         let inner = source_text.get(span_content.clone())?;
-        let target = inner.split('|').next().unwrap_or(inner).trim();
+        inner.split('|').next().unwrap_or(inner).trim()
+    } else if suffix.starts_with("]]") && prefix.ends_with('|') {
+        let open_pos = prefix.rfind("[[")?;
+        let inside = &prefix[open_pos + 2..];
+        if inside.contains("]]") {
+            return None;
+        }
+        inside.trim_end_matches('|').trim_end_matches('\\').trim()
+    } else {
+        ""
+    };
+
+    if !target.is_empty() {
         if let Some(heading) = target.strip_prefix('#') {
             let h_trim = heading.trim();
             if !h_trim.is_empty() {
@@ -755,7 +842,7 @@ pub(crate) fn extract_link_destination(
                     heading: (!h_trim.is_empty()).then(|| h_trim.to_string()),
                 });
             }
-        } else if !target.is_empty() {
+        } else {
             return Some(LinkDestination::Note {
                 path: target.to_string(),
                 heading: None,
@@ -863,6 +950,15 @@ mod tests {
         let span = start..start + "My Note#Important Points|Important".len();
         assert_eq!(
             extract_link_destination(text, &span),
+            Some(LinkDestination::Note {
+                path: "My Note".into(),
+                heading: Some("Important Points".into()),
+            })
+        );
+        let alias_start = text.find("Important]]").unwrap();
+        let alias_span = alias_start..alias_start + "Important".len();
+        assert_eq!(
+            extract_link_destination(text, &alias_span),
             Some(LinkDestination::Note {
                 path: "My Note".into(),
                 heading: Some("Important Points".into()),

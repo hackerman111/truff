@@ -48,9 +48,15 @@ impl DisplayMap {
                 self.source_text.trim_start().starts_with('>') && marker_range.start == 0;
             let is_list_indent = self.presentation.is_some()
                 && marker_range.start == 0
-                && self.lists.first().is_some_and(|list| {
-                    list.range.start == marker_range.end && marker_range.end > 0
-                });
+                && marker_range.end > 0
+                && self
+                    .source_text
+                    .get(marker_range.clone())
+                    .is_some_and(|s| s.bytes().all(|b| b == b' ' || b == b'\t'))
+                && self
+                    .lists
+                    .first()
+                    .is_some_and(|list| list.range.start >= marker_range.end);
             let is_task_fence = self
                 .presentation
                 .as_ref()

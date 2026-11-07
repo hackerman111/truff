@@ -63,8 +63,14 @@ impl Paragraph {
             Some(presentation.clone()),
         );
         display.set_insert_mode(style.in_insert_mode);
-        let table_row =
-            table::TableRowLayout::build(display.source_text(), &presentation, painter, style);
+        let table_row = table::TableRowLayout::build(
+            display.source_text(),
+            &presentation,
+            painter,
+            style,
+            BytePos::new(usize::MAX),
+            None,
+        );
         let (mut galley, text_indent) = super::super::paint::shape(
             painter,
             &display,
@@ -114,6 +120,7 @@ impl Paragraph {
         }
         let projection_changed = mode_changed
             || insert_mode_changed
+            || (self.table_row.is_some() && view_changed)
             || old_visual_revision != self.display.visual_revision();
         if !projection_changed
             && self.color == style.foreground
@@ -128,6 +135,8 @@ impl Paragraph {
             &self.presentation,
             painter,
             style,
+            cursor,
+            selection,
         );
         let (mut galley, text_indent) = super::super::paint::shape(
             painter,

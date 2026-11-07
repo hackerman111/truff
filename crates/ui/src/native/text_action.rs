@@ -1,6 +1,8 @@
 use crate::components::{color, overlay_frame};
 use crate::native::NativeApp;
-use crate::overlays::text_action::{PALETTE, TextActionMode, TextActionResponse};
+use crate::overlays::text_action::{
+    PALETTE, TASK_STATUS_OPTIONS, TaskStatus, TextActionMode, TextActionResponse,
+};
 use egui::{Color32, Id, Order, RichText, Sense, Stroke, pos2, vec2};
 
 pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
@@ -23,7 +25,7 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
         .unwrap_or_else(|| screen.center());
 
     // Approximate menu dimensions for boundary clamping
-    let est_size = vec2(300.0, 220.0);
+    let est_size = vec2(320.0, 300.0);
     let mut anchor = target_pos + vec2(0.0, 4.0);
 
     // Keep popup within viewport
@@ -39,6 +41,20 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
             anchor.y = (screen.max.y - est_size.y - 12.0).max(screen.min.y + 12.0);
         }
     }
+
+    let is_note_link_input = matches!(
+        app.application.shell.text_action().mode(),
+        TextActionMode::LinkInput { is_url: false, .. }
+    );
+    let sidebar_files: Vec<String> = if is_note_link_input {
+        app.application
+            .shell
+            .sidebar_file_paths()
+            .map(str::to_string)
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut key_to_handle: Option<truff_core::vim::Key> = None;
     let mut close_requested = false;
@@ -72,13 +88,23 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                                 "n",
                                 "Ссылка на заметку",
                                 if has_sel {
-                                    "Обернуть в [[...]]"
-                                } else {
                                     "Вставка [[Заметка|Текст]]"
+                                } else {
+                                    "Вставка [[Заметка]]"
                                 },
                                 true,
                             ),
-                            ("u", "URL ссылка", "Вставка [Текст](url)", true),
+                            (
+                                "u",
+                                "URL ссылка",
+                                if has_sel {
+                                    "Вставка [Текст](url)"
+                                } else {
+                                    "Вставка [Заголовок](url)"
+                                },
+                                true,
+                            ),
+                            ("t", "Задача", "Создать задачу / статус", true),
                             ("x", "Очистить стиль", "Снять все теги стилей", has_sel),
                         ];
 
@@ -229,16 +255,107 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                             );
                         });
                     }
+                    TextActionMode::TaskStatusSelect { selected_index } => {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Статус задачи")
+                                    .strong()
+                                    .color(color(theme.accent)),
+                            );
+                        });
+                        ui.separator();
+
+                        for (idx, opt) in TASK_STATUS_OPTIONS.iter().enumerate() {
+                            let is_selected = idx == *selected_index;
+                            let bg_color = if is_selected {
+                                color(theme.selection).gamma_multiply(0.4)
+                            } else {
+                                Color32::TRANSPARENT
+                            };
+
+                            let row_resp = egui::Frame::new()
+                                .fill(bg_color)
+                                .corner_radius(4.0)
+                                .inner_margin(egui::Margin::symmetric(6, 3))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        render_key_pill(ui, &opt.key.to_string(), &theme);
+                                        let marker_color = match opt.status {
+                                            TaskStatus::Todo => color(theme.text_muted),
+                                            TaskStatus::InProgress => color(theme.accent),
+                                            TaskStatus::Done => Color32::from_rgb(163, 190, 140),
+                                            TaskStatus::Remove => color(theme.text_muted),
+                                        };
+                                        ui.label(
+                                            RichText::new(opt.marker)
+                                                .strong()
+                                                .color(marker_color),
+                                        );
+                                        ui.label(
+                                            RichText::new(opt.title)
+                                                .strong()
+                                                .color(color(theme.text_primary)),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    RichText::new(opt.desc)
+                                                        .small()
+                                                        .color(color(theme.text_muted)),
+                                                );
+                                            },
+                                        );
+                                    });
+                                });
+
+                            if row_resp.response.interact(Sense::click()).clicked() {
+                                key_to_handle = Some(truff_core::vim::Key::Char(opt.key));
+                            }
+                        }
+
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("[↑/↓] Выбор · [Enter] Применить · [1-4] Быстро · [Esc] Назад")
+                                    .small()
+                                    .color(color(theme.text_muted)),
+                            );
+                        });
+                    }
                     TextActionMode::LinkInput {
                         is_url,
                         has_selection,
                         target_input,
                         title_input,
                         active_field,
+                        suggestions,
+                        selected_suggestion,
                     } => {
                         let is_url = *is_url;
                         let has_sel = *has_selection;
-                        let active_field = *active_field;
+
+                        if !is_url {
+                            let query = target_input.trim().to_lowercase();
+                            *suggestions = sidebar_files
+                                .iter()
+                                .filter_map(|p| {
+                                    let note = p.strip_suffix(".md").unwrap_or(p);
+                                    if query.is_empty() || note.to_lowercase().contains(&query) {
+                                        Some(note.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .take(6)
+                                .collect();
+                            if let Some(sel) = *selected_suggestion
+                                && sel >= suggestions.len()
+                            {
+                                *selected_suggestion = None;
+                            }
+                        }
 
                         let header = if is_url {
                             "Вставка URL ссылки"
@@ -253,62 +370,88 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                         let target_edit_id = Id::new("text_action_target_input");
                         let title_edit_id = Id::new("text_action_title_input");
 
-                        if active_field == 0 {
-                            ui.memory_mut(|m| m.request_focus(target_edit_id));
+                        let active_id = if *active_field == 0 {
+                            title_edit_id
                         } else {
-                            ui.memory_mut(|m| m.request_focus(title_edit_id));
+                            target_edit_id
+                        };
+                        let focused = ui.memory(|m| m.focused());
+                        if focused != Some(target_edit_id) && focused != Some(title_edit_id) {
+                            ui.memory_mut(|m| m.request_focus(active_id));
+                        } else if (*active_field == 0 && focused == Some(target_edit_id))
+                            || (*active_field == 1 && focused == Some(title_edit_id))
+                        {
+                            ui.memory_mut(|m| m.request_focus(active_id));
                         }
 
-                        let mut title_resp = None;
-
-                        if has_sel && is_url {
-                            ui.label(
-                                RichText::new(format!("Текст: \"{title_input}\""))
-                                    .small()
-                                    .color(color(theme.text_muted)),
-                            );
-                            ui.add_space(2.0);
-                            ui.label(
-                                RichText::new("URL адрес:")
-                                    .small()
-                                    .color(color(theme.text_secondary)),
-                            );
+                        // 1. Optional text / title first
+                        let title_label = if has_sel {
+                            "Текст ссылки:"
                         } else {
-                            let target_label = if is_url {
-                                "URL адрес:"
-                            } else {
-                                "Цель (имя заметки):"
-                            };
-                            ui.label(
-                                RichText::new(target_label)
-                                    .small()
-                                    .color(color(theme.text_secondary)),
-                            );
+                            "Отображаемый заголовок (опционально):"
+                        };
+                        ui.label(
+                            RichText::new(title_label)
+                                .small()
+                                .color(color(theme.text_secondary)),
+                        );
+                        let title_resp = ui.add(
+                            egui::TextEdit::singleline(title_input)
+                                .id(title_edit_id)
+                                .desired_width(ui.available_width()),
+                        );
+                        if title_resp.gained_focus() || title_resp.clicked() {
+                            *active_field = 0;
                         }
 
+                        ui.add_space(4.0);
+
+                        // 2. Note selection / target second
+                        let target_label = if is_url {
+                            "URL адрес:"
+                        } else {
+                            "Ссылка на заметку (цель):"
+                        };
+                        ui.label(
+                            RichText::new(target_label)
+                                .small()
+                                .color(color(theme.text_secondary)),
+                        );
                         let target_resp = ui.add(
                             egui::TextEdit::singleline(target_input)
                                 .id(target_edit_id)
                                 .desired_width(ui.available_width()),
                         );
+                        if target_resp.gained_focus() || target_resp.clicked() {
+                            *active_field = 1;
+                        }
 
-                        if !has_sel {
-                            ui.add_space(4.0);
-                            let title_label = if is_url {
-                                "Отображаемый заголовок:"
-                            } else {
-                                "Отображаемый заголовок (опционально):"
-                            };
+                        if !is_url && *active_field == 1 && !suggestions.is_empty() {
+                            ui.add_space(3.0);
                             ui.label(
-                                RichText::new(title_label)
+                                RichText::new("Документы (↑/↓ для выбора, Tab/Enter):")
                                     .small()
-                                    .color(color(theme.text_secondary)),
+                                    .color(color(theme.text_muted)),
                             );
-                            title_resp = Some(ui.add(
-                                egui::TextEdit::singleline(title_input)
-                                    .id(title_edit_id)
-                                    .desired_width(ui.available_width()),
-                            ));
+                            let mut chosen_suggestion = None;
+                            for (idx, suggestion) in suggestions.iter().enumerate() {
+                                let is_selected = *selected_suggestion == Some(idx);
+                                let item_text = RichText::new(format!("📄 {suggestion}"))
+                                    .small()
+                                    .color(if is_selected {
+                                        color(theme.accent)
+                                    } else {
+                                        color(theme.text_primary)
+                                    });
+                                if ui.selectable_label(is_selected, item_text).clicked() {
+                                    chosen_suggestion = Some(suggestion.clone());
+                                }
+                            }
+                            if let Some(s) = chosen_suggestion {
+                                *target_input = s;
+                                *selected_suggestion = None;
+                                key_to_handle = Some(truff_core::vim::Key::Enter);
+                            }
                         }
 
                         ui.add_space(8.0);
@@ -317,20 +460,17 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                             if ui.button("Применить · Enter").clicked() {
                                 submit = true;
                             }
-                            if !has_sel {
-                                ui.label(
-                                    RichText::new("[Tab] Сменить поле")
-                                        .small()
-                                        .color(color(theme.text_muted)),
-                                );
-                            }
+                            ui.label(
+                                RichText::new("[Tab] Сменить поле")
+                                    .small()
+                                    .color(color(theme.text_muted)),
+                            );
                             if ui.button("Отмена · Esc").clicked() {
                                 close_requested = true;
                             }
                         });
 
-                        submit |= (target_resp.lost_focus()
-                            || title_resp.is_some_and(|r| r.lost_focus()))
+                        submit |= (target_resp.lost_focus() || title_resp.lost_focus())
                             && ctx.input(|i| i.key_pressed(egui::Key::Enter));
                         if submit {
                             key_to_handle = Some(truff_core::vim::Key::Enter);

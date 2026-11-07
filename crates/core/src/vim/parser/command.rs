@@ -90,10 +90,21 @@ pub enum Command {
         forward: bool,
     },
     FollowLink,
+    Fold(FoldCommand),
     SetMark(char),
     JumpToMark(char),
     JumpBack,
     JumpForward,
+}
+
+/// Vim fold motion target for `za`, `zc`, `zo`, `zM`, `zR`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FoldCommand {
+    Toggle,
+    Close,
+    Open,
+    CloseAll,
+    OpenAll,
 }
 
 /// Viewport alignment target for `zz`, `zt`, `zb`.

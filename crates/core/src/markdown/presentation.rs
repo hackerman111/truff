@@ -65,12 +65,31 @@ pub fn cycle_task_status(buffer: &Buffer, checkbox: usize) -> Option<Transaction
     Some(Transaction::replace(checkbox..checkbox + 1, replacement))
 }
 
-fn parse_line_list_marker(line_str: &str, line_start: usize, depth: usize) -> Option<ListMarker> {
+pub fn parse_line_list_marker(
+    line_str: &str,
+    line_start: usize,
+    depth: usize,
+) -> Option<ListMarker> {
     let ws_len = line_str
         .bytes()
         .take_while(|b| matches!(*b, b' ' | b'\t'))
         .count();
-    let rest = &line_str[ws_len..];
+    let mut rest = &line_str[ws_len..];
+    let mut offset = ws_len;
+
+    if (rest.starts_with("<span style=\"color:#")
+        || rest.starts_with("<mark style=\"background-color:#"))
+        && let Some(tag_end) = rest.find('>')
+    {
+        let after_tag = tag_end + 1;
+        let ws_inner = rest[after_tag..]
+            .bytes()
+            .take_while(|b| matches!(*b, b' ' | b'\t'))
+            .count();
+        offset += after_tag + ws_inner;
+        rest = &rest[after_tag + ws_inner..];
+    }
+
     let bytes = rest.as_bytes();
     if bytes.len() >= 2
         && matches!(bytes[0], b'-' | b'*' | b'+')
@@ -83,11 +102,11 @@ fn parse_line_list_marker(line_str: &str, line_start: usize, depth: usize) -> Op
             && matches!(bytes[5], b' ' | b'\t')
         {
             return Some(ListMarker {
-                range: (line_start + ws_len)..(line_start + ws_len + 6),
+                range: (line_start + offset)..(line_start + offset + 6),
                 depth,
                 kind: ListKind::Task {
                     checked: matches!(bytes[3], b'x' | b'X'),
-                    checkbox: line_start + ws_len + 3,
+                    checkbox: line_start + offset + 3,
                 },
             });
         }
@@ -97,16 +116,16 @@ fn parse_line_list_marker(line_str: &str, line_start: usize, depth: usize) -> Op
             && matches!(bytes[4], b' ' | b'\t')
         {
             return Some(ListMarker {
-                range: (line_start + ws_len)..(line_start + ws_len + 5),
+                range: (line_start + offset)..(line_start + offset + 5),
                 depth,
                 kind: ListKind::Task {
                     checked: false,
-                    checkbox: line_start + ws_len + 3,
+                    checkbox: line_start + offset + 3,
                 },
             });
         }
         return Some(ListMarker {
-            range: (line_start + ws_len)..(line_start + ws_len + 2),
+            range: (line_start + offset)..(line_start + offset + 2),
             depth,
             kind: ListKind::Bullet,
         });
@@ -119,7 +138,7 @@ fn parse_line_list_marker(line_str: &str, line_start: usize, depth: usize) -> Op
             .is_some_and(|b| matches!(*b, b' ' | b'\t'))
     {
         return Some(ListMarker {
-            range: (line_start + ws_len)..(line_start + ws_len + digits + 2),
+            range: (line_start + offset)..(line_start + offset + digits + 2),
             depth,
             kind: ListKind::Ordered,
         });
@@ -301,6 +320,28 @@ impl SyntaxSnapshot {
                 if let Some(marker) = parse_line_list_marker(line, range.start, list_item_ancestors)
                 {
                     result.code = false;
+                    result.list = Some(marker);
+                }
+            } else if result.list.is_none()
+                && !result.code
+                && (line.contains("<span style=\"color:#")
+                    || line.contains("<mark style=\"background-color:#"))
+            {
+                let ws_before = line.len() - line.trim_start_matches([' ', '\t']).len();
+                let rest = &line[ws_before..];
+                let ws_inner = if (rest.starts_with("<span style=\"color:#")
+                    || rest.starts_with("<mark style=\"background-color:#"))
+                    && let Some(tag_end) = rest.find('>')
+                {
+                    rest[tag_end + 1..]
+                        .bytes()
+                        .take_while(|b| matches!(*b, b' ' | b'\t'))
+                        .count()
+                } else {
+                    0
+                };
+                let depth = (ws_before + ws_inner) / 2;
+                if let Some(marker) = parse_line_list_marker(line, range.start, depth) {
                     result.list = Some(marker);
                 }
             } else if let Some(ref mut list) = result.list

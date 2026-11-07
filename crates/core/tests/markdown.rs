@@ -147,3 +147,69 @@ fn incremental_equals_fresh() {
         "Incremental parse tree must match fresh parse tree exactly"
     );
 }
+
+#[test]
+fn test_heading_folding_ranges_and_nested_subsections() {
+    use std::collections::BTreeSet;
+    use truff_core::markdown::{
+        HeadingItem, compute_hidden_line_ranges, find_heading_for_line, heading_fold_range,
+        is_line_in_hidden_ranges,
+    };
+
+    // Document structure:
+    // Line 0: # H1 (level 1)
+    // Line 1: text 1
+    // Line 2: ## H2-A (level 2)
+    // Line 3: text 2
+    // Line 4: ### H3 (level 3)
+    // Line 5: text 3
+    // Line 6: ## H2-B (level 2)
+    // Line 7: text 4
+    // Line 8: # H1-Next (level 1)
+    // Line 9: text 5
+    let total_lines = 10;
+    let headings = vec![
+        HeadingItem::new(0, 1),
+        HeadingItem::new(2, 2),
+        HeadingItem::new(4, 3),
+        HeadingItem::new(6, 2),
+        HeadingItem::new(8, 1),
+    ];
+
+    // 1. Fold range of H1 at line 0 (level 1) spans to line 8 (next level 1)
+    assert_eq!(heading_fold_range(&headings, 0, total_lines), 1..8);
+
+    // 2. Fold range of H2-A at line 2 (level 2) spans to line 6 (next level 2)
+    assert_eq!(heading_fold_range(&headings, 1, total_lines), 3..6);
+
+    // 3. Fold range of H3 at line 4 (level 3) spans to line 6 (level 2 <= 3)
+    assert_eq!(heading_fold_range(&headings, 2, total_lines), 5..6);
+
+    // 4. Fold range of H2-B at line 6 (level 2) spans to line 8 (level 1 <= 2)
+    assert_eq!(heading_fold_range(&headings, 3, total_lines), 7..8);
+
+    // 5. Fold range of H1-Next at line 8 (level 1) spans to EOF line 10
+    assert_eq!(heading_fold_range(&headings, 4, total_lines), 9..10);
+
+    // 6. Test hidden ranges with multiple folds
+    let mut folded = BTreeSet::new();
+    folded.insert(2); // fold H2-A
+    let hidden = compute_hidden_line_ranges(&headings, &folded, total_lines);
+    assert_eq!(hidden, vec![3..6]);
+    assert!(is_line_in_hidden_ranges(3, &hidden));
+    assert!(is_line_in_hidden_ranges(4, &hidden));
+    assert!(is_line_in_hidden_ranges(5, &hidden));
+    assert!(!is_line_in_hidden_ranges(2, &hidden)); // heading itself is visible
+    assert!(!is_line_in_hidden_ranges(6, &hidden));
+
+    // When parent H1 is also folded, range merges to 1..8
+    folded.insert(0);
+    let hidden = compute_hidden_line_ranges(&headings, &folded, total_lines);
+    assert_eq!(hidden, vec![1..8]);
+
+    // 7. Find heading for line
+    assert_eq!(find_heading_for_line(&headings, 2, total_lines), Some(1)); // line 2 is H2-A
+    assert_eq!(find_heading_for_line(&headings, 3, total_lines), Some(1)); // line 3 inside H2-A
+    assert_eq!(find_heading_for_line(&headings, 5, total_lines), Some(2)); // line 5 inside H3
+    assert_eq!(find_heading_for_line(&headings, 7, total_lines), Some(3)); // line 7 inside H2-B
+}

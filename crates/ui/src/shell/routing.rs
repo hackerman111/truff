@@ -598,6 +598,7 @@ impl Shell {
                     }
                     InputResult::Action(action) => ShellAction::Core(action),
                     InputResult::ScrollCursor(pos) => ShellAction::ScrollCursor(pos),
+                    InputResult::Fold(fold_cmd) => ShellAction::Fold(fold_cmd),
                     InputResult::FollowLink => ShellAction::RegisteredCommand {
                         id: truff_core::commands::CommandId::new("note.follow_link"),
                         argument: String::new(),

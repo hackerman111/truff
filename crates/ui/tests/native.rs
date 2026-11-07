@@ -1031,6 +1031,101 @@ fn test_table_rendering_does_not_wrap_and_renders_cleanly() {
 }
 
 #[test]
+fn test_table_markdown_rendering_in_cells() {
+    let table = "| Представление | Как получают | Когда применяют |\n|---|---|---|\n| **Waveform** | Сырые отсчёты $x[n]$ | Waveform-frontends, wav2vec 2.0 |\n| **STFT** | Оконная DFT по участкам сигнала | Базовый временно-частотный анализ |\n| **Spectrogram** | $|X(t,f)|$ либо $|X(t,f)|^2$ | Визуализация и дальнейшая фильтрация |\n";
+    let (mut app, context) = scratch(table);
+    let output = frame(&mut app, &context, vec![]);
+
+    // 1. Check cell text in row 2 (| **Waveform** ...):
+    // "Waveform" should be rendered without "**"
+    let waveform_cell = output.shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Text(text) if text.galley.job.text == "Waveform" => Some(text),
+        _ => None,
+    });
+    assert!(
+        waveform_cell.is_some(),
+        "Table cell should render 'Waveform' without raw '**' markers"
+    );
+
+    // Ensure raw "**Waveform**" is NOT present in any cell galley
+    let raw_waveform = output.shapes.iter().any(|shape| match &shape.shape {
+        egui::Shape::Text(text) => text.galley.job.text.contains("**Waveform**"),
+        _ => false,
+    });
+    assert!(!raw_waveform, "Table should not contain raw '**Waveform**'");
+
+    // 2. Check math in row 2: "$x[n]$" should be rendered without raw '$'
+    let math_cell = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("Сырые отсчёты") => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .expect("missing cell with math");
+    assert!(
+        !math_cell.galley.job.text.contains('$'),
+        "Math cell should not contain raw '$' markers: {:?}",
+        math_cell.galley.job.text
+    );
+
+    // 3. Check "STFT" without "**"
+    let stft_cell = output.shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Text(text) if text.galley.job.text == "STFT" => Some(text),
+        _ => None,
+    });
+    assert!(
+        stft_cell.is_some(),
+        "Table cell should render 'STFT' without raw '**' markers"
+    );
+
+    // 4. Move cursor down to Row 2 (| **Waveform** ...) and into the first cell
+    // Two 'j' to row 2, then 'w' into "**Waveform**"
+    frame(
+        &mut app,
+        &context,
+        vec![
+            Event::Text("j".into()),
+            Event::Text("j".into()),
+            Event::Text("w".into()),
+        ],
+    );
+    let output_focused = frame(&mut app, &context, vec![]);
+    let revealed = output_focused
+        .shapes
+        .iter()
+        .any(|shape| match &shape.shape {
+            egui::Shape::Text(text) => text.galley.job.text.contains("**Waveform**"),
+            _ => false,
+        });
+    assert!(
+        revealed,
+        "Focused cell should reveal raw '**Waveform**' markers for live editing"
+    );
+
+    // 5. Move cursor back to top -> markers collapse back into formatted text
+    frame(
+        &mut app,
+        &context,
+        vec![Event::Text("g".into()), Event::Text("g".into())],
+    );
+    let output_unfocused = frame(&mut app, &context, vec![]);
+    let collapsed = output_unfocused
+        .shapes
+        .iter()
+        .any(|shape| match &shape.shape {
+            egui::Shape::Text(text) => text.galley.job.text == "Waveform",
+            _ => false,
+        });
+    assert!(
+        collapsed,
+        "Unfocused cell should collapse back into rendered 'Waveform'"
+    );
+}
+
+#[test]
 fn test_link_tight_underline_and_url_extraction() {
     let text = "Check [LibriSpeech — OpenSLR](http://www.openslr.org/12/) today.";
     let (mut app, context) = scratch(text);
@@ -1244,4 +1339,206 @@ fn test_task_padding_keeps_checkbox_separated_from_status_bar() {
             .editor_text()
             .contains("- [x] Root task")
     );
+}
+
+#[test]
+fn test_table_visual_mode_rendering() {
+    let source = "Some intro text\n\n| Col A | Col B |\n|---|---|\n| val 1 | val 2 |\n";
+    let (mut app, context) = scratch(source);
+    frame(&mut app, &context, vec![]);
+
+    // 1. Move cursor to table row 2 (| Col A | Col B |)
+    frame(
+        &mut app,
+        &context,
+        vec![Event::Text("j".into()), Event::Text("j".into())],
+    );
+
+    // 2. Enter VisualLine mode with 'V'
+    let output_v_line = frame(&mut app, &context, vec![Event::Text("V".into())]);
+    assert_eq!(
+        app.application.shell.mode(),
+        truff_core::vim::Mode::VisualLine
+    );
+
+    // Check that a selection rect is painted for the table row
+    let sel_color = app.application.shell.theme().selection;
+    let [r, g, b, a] = sel_color.to_rgba_u8();
+    let expected_color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+    let has_v_line_sel = output_v_line.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Rect(r) => r.fill == expected_color,
+        _ => false,
+    });
+    assert!(
+        has_v_line_sel,
+        "VisualLine mode must paint selection rect for table row"
+    );
+
+    // 3. Switch to VisualChar mode at column 0 (leading pipe / padding)
+    frame(&mut app, &context, vec![key(egui::Key::Escape)]);
+    frame(&mut app, &context, vec![Event::Text("0".into())]);
+    frame(&mut app, &context, vec![Event::Text("v".into())]);
+    let output_v_char_col0 = frame(&mut app, &context, vec![Event::Text("l".into())]);
+    assert_eq!(
+        app.application.shell.mode(),
+        truff_core::vim::Mode::VisualChar
+    );
+    let has_v_char_col0_sel = output_v_char_col0.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Rect(r) => r.fill == expected_color,
+        _ => false,
+    });
+    assert!(
+        has_v_char_col0_sel,
+        "VisualChar mode must paint selection rect for table column 0 / padding"
+    );
+
+    // 4. Switch to VisualChar mode inside cell content ("Col A")
+    frame(&mut app, &context, vec![key(egui::Key::Escape)]);
+    frame(&mut app, &context, vec![Event::Text("w".into())]);
+    frame(&mut app, &context, vec![Event::Text("v".into())]);
+    let output_v_char_word = frame(&mut app, &context, vec![Event::Text("l".into())]);
+    assert_eq!(
+        app.application.shell.mode(),
+        truff_core::vim::Mode::VisualChar
+    );
+    let has_v_char_word_sel = output_v_char_word.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Rect(r) => r.fill == expected_color,
+        _ => false,
+    });
+    assert!(
+        has_v_char_word_sel,
+        "VisualChar mode must paint character selection rect in table cell content"
+    );
+}
+
+#[test]
+fn test_heading_folding_vim_motions_and_indicators() {
+    let source = "# Heading One\nLine 1\nLine 2\n# Heading Two\nLine 3\n";
+    let (mut app, context) = scratch(source);
+    let output = frame(&mut app, &context, vec![]);
+
+    // 1. Initially, all lines are unfolded. Chevron "▼" is rendered.
+    let has_down_chevron = output.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Text(t) => t.galley.job.text.contains('▼'),
+        _ => false,
+    });
+    assert!(has_down_chevron, "Unfolded heading must render '▼' chevron");
+    assert!(!app.editor.is_line_folded(1));
+    assert!(!app.editor.is_line_folded(2));
+
+    // 2. Press `za` on line 0 (Heading One) to toggle fold
+    frame(&mut app, &context, vec![Event::Text("z".into())]);
+    let fold_output = frame(&mut app, &context, vec![Event::Text("a".into())]);
+
+    assert!(app.editor.is_line_folded(1), "Line 1 must be folded");
+    assert!(app.editor.is_line_folded(2), "Line 2 must be folded");
+    assert!(
+        !app.editor.is_line_folded(0),
+        "Heading One must remain visible"
+    );
+    assert!(
+        !app.editor.is_line_folded(3),
+        "Heading Two must remain visible"
+    );
+
+    // Check that folded heading renders '▶' and '...' badge
+    let has_right_chevron = fold_output.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Text(t) => t.galley.job.text.contains('▶'),
+        _ => false,
+    });
+    assert!(has_right_chevron, "Folded heading must render '▶' chevron");
+
+    let has_dots_badge = fold_output.shapes.iter().any(|s| match &s.shape {
+        egui::Shape::Text(t) => t.galley.job.text.contains("..."),
+        _ => false,
+    });
+    assert!(has_dots_badge, "Folded heading must render '...' badge");
+
+    // 3. Motion `j` must jump over folded lines 1 and 2 to line 3 (Heading Two)
+    frame(&mut app, &context, vec![Event::Text("j".into())]);
+    let cursor_line = {
+        let buffer = app.application.shell.editor_buffer().unwrap();
+        let view = app.application.shell.editor_view().unwrap();
+        buffer.line_of_byte(view.head().get())
+    };
+    assert_eq!(
+        cursor_line, 3,
+        "Motion 'j' must jump past folded lines to Heading Two"
+    );
+
+    // 4. Motion `k` from line 3 must jump back up to line 0 (Heading One)
+    frame(&mut app, &context, vec![Event::Text("k".into())]);
+    let cursor_line = {
+        let buffer = app.application.shell.editor_buffer().unwrap();
+        let view = app.application.shell.editor_view().unwrap();
+        buffer.line_of_byte(view.head().get())
+    };
+    assert_eq!(
+        cursor_line, 0,
+        "Motion 'k' must jump past folded lines back to Heading One"
+    );
+
+    // 5. Press `zo` on line 0 to open fold
+    frame(&mut app, &context, vec![Event::Text("z".into())]);
+    frame(&mut app, &context, vec![Event::Text("o".into())]);
+    assert!(
+        !app.editor.is_line_folded(1),
+        "Line 1 must be unfolded after 'zo'"
+    );
+    assert!(
+        !app.editor.is_line_folded(2),
+        "Line 2 must be unfolded after 'zo'"
+    );
+
+    // 6. Press `zc` on line 0 to close fold again
+    frame(&mut app, &context, vec![Event::Text("z".into())]);
+    frame(&mut app, &context, vec![Event::Text("c".into())]);
+    assert!(
+        app.editor.is_line_folded(1),
+        "Line 1 must be folded after 'zc'"
+    );
+
+    // 7. Press `zR` to open all folds
+    frame(&mut app, &context, vec![Event::Text("z".into())]);
+    frame(&mut app, &context, vec![Event::Text("R".into())]);
+    assert!(
+        !app.editor.is_line_folded(1),
+        "All folds must be open after 'zR'"
+    );
+
+    // 8. Press `zM` to close all folds
+    frame(&mut app, &context, vec![Event::Text("z".into())]);
+    frame(&mut app, &context, vec![Event::Text("M".into())]);
+    assert!(
+        app.editor.is_line_folded(1),
+        "Heading One section must be closed after 'zM'"
+    );
+    assert!(
+        app.editor.is_line_folded(4),
+        "Heading Two section must be closed after 'zM'"
+    );
+}
+
+#[test]
+fn test_heading_folding_toggle_api() {
+    let source = "# First\nChild 1\nChild 2\n## Sub\nSub 1\n# Second\n";
+    let (mut app, context) = scratch(source);
+    frame(&mut app, &context, vec![]);
+
+    let buffer = app.application.shell.editor_buffer().unwrap();
+    // Toggle fold on line 0 (First)
+    app.editor.toggle_fold(0, buffer);
+    assert!(app.editor.is_line_folded(1));
+    assert!(app.editor.is_line_folded(2));
+    assert!(app.editor.is_line_folded(3)); // ## Sub is also inside First
+    assert!(app.editor.is_line_folded(4)); // Sub 1 is inside First
+    assert!(!app.editor.is_line_folded(0)); // # First itself visible
+    assert!(!app.editor.is_line_folded(5)); // # Second visible
+
+    // Toggle fold on line 0 again (unfold)
+    app.editor.toggle_fold(0, buffer);
+    assert!(!app.editor.is_line_folded(1));
+    assert!(!app.editor.is_line_folded(2));
+    assert!(!app.editor.is_line_folded(3));
+    assert!(!app.editor.is_line_folded(4));
 }

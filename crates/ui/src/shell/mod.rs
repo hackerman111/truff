@@ -37,6 +37,7 @@ pub enum ShellAction {
     OpenNavigator(crate::navigator::NavigatorMode),
     OpenTextActionMenu,
     ScrollCursor(truff_core::vim::ScrollPosition),
+    Fold(truff_core::vim::FoldCommand),
 }
 
 #[derive(Debug)]

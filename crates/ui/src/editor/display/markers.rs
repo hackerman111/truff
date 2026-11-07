@@ -252,10 +252,11 @@ impl DisplayMap {
                     }
                 }
                 Event::Text(_) => {
-                    if let Some(previous) = text_ranges
-                        .last_mut()
-                        .filter(|previous| previous.end == range.start)
-                    {
+                    if let Some(previous) = text_ranges.last_mut().filter(|previous| {
+                        previous.end == range.start
+                            || (previous.end + 1 == range.start
+                                && text.as_bytes().get(previous.end) == Some(&b'\\'))
+                    }) {
                         previous.end = range.end;
                     } else {
                         text_ranges.push(range);
@@ -285,6 +286,20 @@ impl DisplayMap {
                 };
                 let close = open + 2 + close;
                 let span = open..close + 2;
+                let inner = &text[open + 2..close];
+                if let Some(pipe_idx) = inner.find('|') {
+                    let alias_start = open + 2 + pipe_idx + 1;
+                    if alias_start < close && !text[alias_start..close].trim().is_empty() {
+                        self.markers.push((open..alias_start, Some(span.clone())));
+                        self.markers.push((close..close + 2, Some(span)));
+                        self.styles.push(StyledSpan {
+                            content: alias_start..close,
+                            style: InlineStyle::Link,
+                        });
+                        start = close + 2;
+                        continue;
+                    }
+                }
                 self.markers.push((open..open + 2, Some(span.clone())));
                 self.markers.push((close..close + 2, Some(span)));
                 self.styles.push(StyledSpan {
@@ -455,11 +470,70 @@ impl DisplayMap {
                 }
             }
         }
+        for span in &self.colors {
+            let content_str = &text[span.content.clone()];
+            let ws_inner = content_str
+                .bytes()
+                .take_while(|b| matches!(*b, b' ' | b'\t'))
+                .count();
+            let after_ws = &content_str[ws_inner..];
+            if after_ws.starts_with("- ")
+                || after_ws.starts_with("* ")
+                || after_ws.starts_with("+ ")
+                || (after_ws.len() >= 2
+                    && after_ws.as_bytes()[0].is_ascii_digit()
+                    && (after_ws.as_bytes()[1] == b'.' || after_ws.as_bytes()[1] == b')'))
+            {
+                let line_start = text[..span.opening.start].rfind('\n').map_or(0, |i| i + 1);
+                let ws_indent = (span.opening.start - line_start) + ws_inner;
+                let depth = ws_indent / 2;
+                if let Some(marker) = truff_core::markdown::presentation::parse_line_list_marker(
+                    &text[line_start..],
+                    line_start,
+                    depth,
+                ) && !self.lists.iter().any(|m| m.range == marker.range)
+                {
+                    self.lists.push(marker);
+                }
+            }
+        }
+        for span in highlight_spans(text) {
+            let content_str = &text[span.content.clone()];
+            let ws_inner = content_str
+                .bytes()
+                .take_while(|b| matches!(*b, b' ' | b'\t'))
+                .count();
+            let after_ws = &content_str[ws_inner..];
+            if after_ws.starts_with("- ")
+                || after_ws.starts_with("* ")
+                || after_ws.starts_with("+ ")
+                || (after_ws.len() >= 2
+                    && after_ws.as_bytes()[0].is_ascii_digit()
+                    && (after_ws.as_bytes()[1] == b'.' || after_ws.as_bytes()[1] == b')'))
+            {
+                let line_start = text[..span.opening.start].rfind('\n').map_or(0, |i| i + 1);
+                let ws_indent = (span.opening.start - line_start) + ws_inner;
+                let depth = ws_indent / 2;
+                if let Some(marker) = truff_core::markdown::presentation::parse_line_list_marker(
+                    &text[line_start..],
+                    line_start,
+                    depth,
+                ) && !self.lists.iter().any(|m| m.range == marker.range)
+                {
+                    self.lists.push(marker);
+                }
+            }
+        }
+        self.lists.sort_by_key(|m| m.range.start);
         if let Some(LinePresentation { list, .. }) = &self.presentation {
             self.lists.clear();
             self.lists.extend(list.iter().cloned());
         }
         let has_presentation = self.presentation.is_some();
+        let ws_len = text
+            .bytes()
+            .take_while(|b| *b == b' ' || *b == b'\t')
+            .count();
         for list in &mut self.lists {
             // Normalize marker spacing while keeping the source indentation intact.
             while list.range.start < list.range.end
@@ -473,8 +547,8 @@ impl DisplayMap {
             let end = text[list.range.end..]
                 .find('\n')
                 .map_or(text.len(), |len| list.range.end + len);
-            if has_presentation && list.range.start > 0 {
-                self.markers.push((0..list.range.start, None));
+            if has_presentation && ws_len > 0 && ws_len <= list.range.start {
+                self.markers.push((0..ws_len, None));
             }
             self.markers
                 .push((list.range.clone(), Some(list.range.start..end)));
@@ -507,7 +581,7 @@ impl DisplayMap {
         }
         for span in &self.colors {
             self.markers.retain(|(range, _)| {
-                !ranges_touch(range, &span.opening) && !ranges_touch(range, &span.closing)
+                !ranges_intersect(range, &span.opening) && !ranges_intersect(range, &span.closing)
             });
             let enclosing = Some(span.opening.start..span.closing.end);
             self.markers.push((span.opening.clone(), enclosing.clone()));
@@ -519,7 +593,7 @@ impl DisplayMap {
         }
         for span in highlight_spans(text) {
             self.markers.retain(|(range, _)| {
-                !ranges_touch(range, &span.opening) && !ranges_touch(range, &span.closing)
+                !ranges_intersect(range, &span.opening) && !ranges_intersect(range, &span.closing)
             });
             let enclosing = Some(span.opening.start..span.closing.end);
             self.markers.push((span.opening.clone(), enclosing.clone()));
@@ -544,7 +618,11 @@ impl DisplayMap {
         if self.presentation.is_some()
             && range.start == 0
             && let Some(list) = self.lists.first()
-            && list.range.start == range.end
+            && (list.range.start == range.end
+                || self
+                    .source_text
+                    .get(..range.end)
+                    .is_some_and(|s| s.bytes().all(|b| b == b' ' || b == b'\t')))
             && range.end > 0
         {
             const INDENTS: [&str; 7] = [
@@ -657,6 +735,10 @@ impl DisplayMap {
 
         visual_graphemes
     }
+}
+
+pub(super) fn ranges_intersect(a: &Range<usize>, b: &Range<usize>) -> bool {
+    a.start < b.end && a.end > b.start
 }
 
 pub(super) fn ranges_touch(a: &Range<usize>, b: &Range<usize>) -> bool {

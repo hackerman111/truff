@@ -9,6 +9,7 @@ pub(super) enum FieldOwner {
     Command,
     Navigator,
     Help,
+    TextAction,
 }
 
 impl NativeApp {
@@ -144,6 +145,37 @@ impl NativeApp {
         {
             let _ = self.application.save(false);
         }
+        if self.application.shell.focus() == Focus::Editor
+            && let Some((buffer, view)) = self
+                .application
+                .shell
+                .editor_buffer()
+                .zip(self.application.shell.editor_view())
+        {
+            let cursor_line = buffer.line_of_byte(view.head().get());
+            if self.editor.is_line_folded(cursor_line) {
+                let target_line = if matches!(key, Key::Char('j') | Key::Down) {
+                    self.editor
+                        .active_hidden_ranges
+                        .iter()
+                        .find(|r| r.contains(&cursor_line))
+                        .map(|r| r.end.min(buffer.line_len().saturating_sub(1)))
+                        .unwrap_or(cursor_line)
+                } else {
+                    self.editor
+                        .active_hidden_ranges
+                        .iter()
+                        .find(|r| r.contains(&cursor_line))
+                        .map(|r| r.start.saturating_sub(1))
+                        .unwrap_or(cursor_line)
+                };
+                let head = buffer.byte_of_line(target_line);
+                let _ = self
+                    .application
+                    .shell
+                    .apply_input(EditorInput::SetSelection { anchor: head, head });
+            }
+        }
         if let Some((buffer, view)) = self
             .application
             .shell
@@ -180,6 +212,84 @@ impl NativeApp {
             }
             ShellAction::ScrollCursor(pos) => {
                 self.editor.scroll_cursor(pos);
+            }
+            ShellAction::Fold(cmd) => {
+                let Some(buffer) = self.application.shell.editor_buffer() else {
+                    return;
+                };
+                let Some(view) = self.application.shell.editor_view() else {
+                    return;
+                };
+                let cursor_byte = view.head().get();
+                let cursor_line = buffer.line_of_byte(cursor_byte);
+                let headings = self.editor.headings_for_buffer(buffer);
+                let total_lines = buffer.line_len();
+
+                match cmd {
+                    truff_core::vim::FoldCommand::Toggle => {
+                        if let Some(idx) = truff_core::markdown::find_heading_for_line(
+                            &headings,
+                            cursor_line,
+                            total_lines,
+                        ) {
+                            let h_line = headings[idx].line;
+                            self.editor.toggle_fold(h_line, buffer);
+                            if self.editor.is_line_folded(cursor_line) {
+                                let head = buffer.byte_of_line(h_line);
+                                let _ = self
+                                    .application
+                                    .shell
+                                    .apply_input(EditorInput::SetSelection { anchor: head, head });
+                            }
+                        }
+                    }
+                    truff_core::vim::FoldCommand::Close => {
+                        if let Some(idx) = truff_core::markdown::find_heading_for_line(
+                            &headings,
+                            cursor_line,
+                            total_lines,
+                        ) {
+                            let h_line = headings[idx].line;
+                            self.editor.fold_close(h_line, buffer);
+                            if self.editor.is_line_folded(cursor_line) {
+                                let head = buffer.byte_of_line(h_line);
+                                let _ = self
+                                    .application
+                                    .shell
+                                    .apply_input(EditorInput::SetSelection { anchor: head, head });
+                            }
+                        }
+                    }
+                    truff_core::vim::FoldCommand::Open => {
+                        if let Some(idx) = truff_core::markdown::find_heading_for_line(
+                            &headings,
+                            cursor_line,
+                            total_lines,
+                        ) {
+                            let h_line = headings[idx].line;
+                            self.editor.fold_open(h_line, buffer);
+                        }
+                    }
+                    truff_core::vim::FoldCommand::CloseAll => {
+                        self.editor.fold_close_all(buffer);
+                        if self.editor.is_line_folded(cursor_line)
+                            && let Some(idx) = truff_core::markdown::find_heading_for_line(
+                                &headings,
+                                cursor_line,
+                                total_lines,
+                            )
+                        {
+                            let head = buffer.byte_of_line(headings[idx].line);
+                            let _ = self
+                                .application
+                                .shell
+                                .apply_input(EditorInput::SetSelection { anchor: head, head });
+                        }
+                    }
+                    truff_core::vim::FoldCommand::OpenAll => {
+                        self.editor.fold_open_all(buffer);
+                    }
+                }
             }
             ShellAction::EditorEdit if self.application.shell.focus() == Focus::RightPanel => {}
             ShellAction::VisualRow { down, count } => {
@@ -329,6 +439,13 @@ impl NativeApp {
                     }
                 }
             }
+            TextActionResponse::ApplyTask { status } => {
+                if let Some(target) = self.text_action_target.take()
+                    && let Err(e) = self.application.apply_task_target(&target, status)
+                {
+                    self.application.status = e.to_string();
+                }
+            }
             TextActionResponse::RemoveStyle => {
                 if let Some(target) = self.text_action_target.take()
                     && let Err(e) = self.application.remove_style_target(target)
@@ -345,6 +462,7 @@ impl NativeApp {
                 FieldOwner::Navigator => self.navigator.is_open() && !self.dialogs.is_any_open(),
                 FieldOwner::Command => self.application.shell.command().is_some(),
                 FieldOwner::Help => self.application.shell.which_key().is_visible(),
+                FieldOwner::TextAction => self.application.shell.text_action().is_open(),
             };
             if !active {
                 continue;
@@ -412,6 +530,11 @@ impl NativeApp {
             }
             help_owned |= help;
             navigator_owned |= self.navigator.is_open();
+            let is_text_action_input = self.application.shell.text_action().is_open()
+                && matches!(
+                    self.application.shell.text_action().mode(),
+                    crate::overlays::text_action::TextActionMode::LinkInput { .. }
+                );
             let field_owner = if self.navigator.is_open() && self.navigator.search_mode {
                 Some(FieldOwner::Navigator)
             } else if self
@@ -423,6 +546,8 @@ impl NativeApp {
                 Some(FieldOwner::Command)
             } else if help && self.application.shell.which_key().help.inserting {
                 Some(FieldOwner::Help)
+            } else if is_text_action_input {
+                Some(FieldOwner::TextAction)
             } else {
                 None
             };

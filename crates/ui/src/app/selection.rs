@@ -1,4 +1,5 @@
 use super::{AppResult, Application};
+use crate::overlays::text_action::TaskStatus;
 use std::ops::Range;
 use truff_core::{
     BufferId, ViewId,
@@ -183,6 +184,57 @@ impl Application {
         self.apply_selection_edit(target.clone(), transaction)
     }
 
+    pub(crate) fn apply_task_target(
+        &mut self,
+        target: &SelectionTarget,
+        status: TaskStatus,
+    ) -> AppResult<()> {
+        let buffer = self.selection_buffer(target)?;
+        let first_line = buffer.line_of_byte(target.range.start);
+        let end_pos =
+            if target.range.end > target.range.start && target.range.end <= buffer.byte_len() {
+                let mut boundary = target.range.end;
+                if boundary > 0 && buffer.rope().byte(boundary - 1) == b'\n' {
+                    boundary -= 1;
+                    if boundary > 0 && buffer.rope().byte(boundary - 1) == b'\r' {
+                        boundary -= 1;
+                    }
+                }
+                boundary
+            } else {
+                target.range.end
+            };
+        let last_line = buffer.line_of_byte(end_pos);
+
+        let range_start = buffer.byte_of_line(first_line);
+        let range_end = if last_line + 1 < buffer.line_len() {
+            buffer.byte_of_line(last_line + 1)
+        } else {
+            buffer.byte_len()
+        };
+
+        let mut new_text = String::new();
+        for line_idx in first_line..=last_line {
+            let start = buffer.byte_of_line(line_idx);
+            let end = if line_idx + 1 < buffer.line_len() {
+                buffer.byte_of_line(line_idx + 1)
+            } else {
+                buffer.byte_len()
+            };
+            let line_slice = buffer.slice(start..end).to_string();
+            new_text.push_str(&apply_task_to_line(&line_slice, status));
+        }
+
+        let cursor_offset = match status {
+            TaskStatus::Remove => range_start,
+            _ => (range_start + 6).min(range_start + new_text.len()),
+        };
+        let cursor_pos = truff_core::text::BytePos::new(cursor_offset);
+        let transaction = truff_core::Transaction::replace(range_start..range_end, new_text)
+            .with_cursor(cursor_pos, cursor_pos);
+        self.apply_selection_edit(target.clone(), transaction)
+    }
+
     fn apply_selection_edit(
         &mut self,
         target: SelectionTarget,
@@ -197,4 +249,90 @@ impl Application {
         self.handle_shell_action(crate::shell::ShellAction::EditorEdit);
         Ok(())
     }
+}
+
+pub(crate) fn apply_task_to_line(line: &str, status: TaskStatus) -> String {
+    let newline = if line.ends_with("\r\n") {
+        "\r\n"
+    } else if line.ends_with('\n') {
+        "\n"
+    } else {
+        ""
+    };
+    let content = &line[..line.len() - newline.len()];
+    let ws_len = content
+        .bytes()
+        .take_while(|b| *b == b' ' || *b == b'\t')
+        .count();
+    let ws = &content[..ws_len];
+    let rest = &content[ws_len..];
+
+    // Check if rest starts with a list bullet or task
+    let bytes = rest.as_bytes();
+    if bytes.len() >= 2
+        && matches!(bytes[0], b'-' | b'*' | b'+')
+        && matches!(bytes[1], b' ' | b'\t')
+    {
+        let after_bullet = &rest[2..];
+        let bytes_after = after_bullet.as_bytes();
+        // Check if it has a checkbox `[ ]`, `[x]`, `[/]`, `[-]`
+        if bytes_after.len() >= 3
+            && bytes_after[0] == b'['
+            && matches!(bytes_after[1], b' ' | b'x' | b'X' | b'/' | b'-')
+            && bytes_after[2] == b']'
+        {
+            let post_cb = if bytes_after.get(3).is_some_and(|&b| b == b' ' || b == b'\t') {
+                4
+            } else {
+                3
+            };
+            let task_body = &after_bullet[post_cb..];
+            if status == TaskStatus::Remove {
+                return format!("{}{}{}", ws, task_body, newline);
+            }
+            let cb = status.checkbox_str().unwrap_or("[ ]");
+            return format!("{}- {} {}{}", ws, cb, task_body, newline);
+        }
+
+        // Plain bullet `- body`
+        if status == TaskStatus::Remove {
+            return format!("{}{}{}", ws, after_bullet, newline);
+        }
+        let cb = status.checkbox_str().unwrap_or("[ ]");
+        return format!("{}- {} {}{}", ws, cb, after_bullet, newline);
+    }
+
+    // Check if rest starts with ordered list e.g. `1. ` or `1) `
+    let digit_count = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+    if digit_count > 0
+        && bytes
+            .get(digit_count)
+            .is_some_and(|&b| b == b'.' || b == b')')
+        && bytes
+            .get(digit_count + 1)
+            .is_some_and(|&b| b == b' ' || b == b'\t')
+    {
+        let task_body = &rest[digit_count + 2..];
+        if status == TaskStatus::Remove {
+            return format!("{}{}{}", ws, task_body, newline);
+        }
+        let cb = status.checkbox_str().unwrap_or("[ ]");
+        return format!("{}- {} {}{}", ws, cb, task_body, newline);
+    }
+
+    // Empty / whitespace line
+    if rest.is_empty() {
+        if status == TaskStatus::Remove {
+            return format!("{}{}", ws, newline);
+        }
+        let cb = status.checkbox_str().unwrap_or("[ ]");
+        return format!("{}- {} {}", ws, cb, newline);
+    }
+
+    // Regular text line
+    if status == TaskStatus::Remove {
+        return line.to_string();
+    }
+    let cb = status.checkbox_str().unwrap_or("[ ]");
+    format!("{}- {} {}{}", ws, cb, rest, newline)
 }

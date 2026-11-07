@@ -63,6 +63,7 @@ pub enum InputResult {
         argument: String,
     },
     ScrollCursor(crate::vim::parser::ScrollPosition),
+    Fold(crate::vim::parser::FoldCommand),
     FollowLink,
 }
 

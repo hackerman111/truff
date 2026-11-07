@@ -1,6 +1,6 @@
 mod command;
 
-pub use command::{Command, InsertEntry, Operator, ParseResult, ScrollPosition};
+pub use command::{Command, FoldCommand, InsertEntry, Operator, ParseResult, ScrollPosition};
 
 use super::motion::{Motion, TextObject, TextObjectKind, TextObjectTarget};
 use super::{Key, Mode};
@@ -435,6 +435,26 @@ impl VimParser {
                     Key::Char('b') => {
                         self.reset();
                         ParseResult::Complete(Command::ScrollCursor(ScrollPosition::Bottom))
+                    }
+                    Key::Char('a') => {
+                        self.reset();
+                        ParseResult::Complete(Command::Fold(FoldCommand::Toggle))
+                    }
+                    Key::Char('c') => {
+                        self.reset();
+                        ParseResult::Complete(Command::Fold(FoldCommand::Close))
+                    }
+                    Key::Char('o') => {
+                        self.reset();
+                        ParseResult::Complete(Command::Fold(FoldCommand::Open))
+                    }
+                    Key::Char('M') => {
+                        self.reset();
+                        ParseResult::Complete(Command::Fold(FoldCommand::CloseAll))
+                    }
+                    Key::Char('R') => {
+                        self.reset();
+                        ParseResult::Complete(Command::Fold(FoldCommand::OpenAll))
                     }
                     _ => {
                         self.reset();

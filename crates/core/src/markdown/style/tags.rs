@@ -108,17 +108,18 @@ pub fn color_spans(text: &str) -> Vec<ColorSpan> {
     let Some(first) = text.find(prefix) else {
         return Vec::new();
     };
-    let mut code = Vec::new();
+    let mut code_blocks = Vec::new();
+    let mut inline_code = Vec::new();
     let mut fence_start = None;
     for (event, range) in Parser::new(text).into_offset_iter() {
         match event {
             Event::Start(Tag::CodeBlock(_)) => fence_start = Some(range.start),
             Event::End(TagEnd::CodeBlock) => {
                 if let Some(start) = fence_start.take() {
-                    code.push(start..range.end);
+                    code_blocks.push(start..range.end);
                 }
             }
-            Event::Code(_) => code.push(range),
+            Event::Code(_) => inline_code.push(range),
             _ => {}
         }
     }
@@ -142,8 +143,19 @@ pub fn color_spans(text: &str) -> Vec<ColorSpan> {
         let close_start = content_start + close_relative;
         let end = close_start + 7;
         offset = end;
-        let index = code.partition_point(|range| range.end <= start);
-        if code.get(index).is_some_and(|range| range.start < end) {
+        let fb_idx = code_blocks.partition_point(|range| range.end <= start);
+        if code_blocks
+            .get(fb_idx)
+            .is_some_and(|range| range.start < end)
+        {
+            continue;
+        }
+        let opening = start..content_start;
+        let closing = close_start..end;
+        if inline_code.iter().any(|range| {
+            (range.start < opening.end && opening.start < range.end)
+                || (range.start < closing.end && closing.start < range.end)
+        }) {
             continue;
         }
         let channel =

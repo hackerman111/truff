@@ -256,6 +256,48 @@ fn live_preview_projects_color_wrappers_and_keeps_code_literal() {
 }
 
 #[test]
+fn test_colored_list_rendering_and_styling() {
+    // 1. Bullet list with color tag following the marker: `- <span...>`
+    let text1 = "- <span style=\"color:#3388ff\">blue</span>";
+    let mut d1 = DisplayMap::new(text1, ProjectionMode::LivePreview);
+    d1.set_cursor(BytePos::new(100));
+    assert_eq!(d1.visual_text(), "• blue");
+
+    // 2. Bullet list inside color wrapper: `<span...>- text</span>`
+    let text2 = "<span style=\"color:#3388ff\">- blue</span>";
+    let mut d2 = DisplayMap::new(text2, ProjectionMode::LivePreview);
+    d2.set_cursor(BytePos::new(100));
+    assert_eq!(d2.visual_text(), "• blue");
+    assert!(
+        d2.styled_spans()
+            .iter()
+            .any(|s| s.style == InlineStyle::TextColor([0x33, 0x88, 0xff, 255]))
+    );
+
+    // 3. Task lists inside color wrapper
+    let text_task_unchecked = "<span style=\"color:#3388ff\">- [ ] task</span>";
+    let mut d_task = DisplayMap::new(text_task_unchecked, ProjectionMode::LivePreview);
+    d_task.set_cursor(BytePos::new(100));
+    assert_eq!(d_task.visual_text(), "☐ task");
+
+    let text_task_checked = "<span style=\"color:#3388ff\">- [x] done</span>";
+    let mut d_task_checked = DisplayMap::new(text_task_checked, ProjectionMode::LivePreview);
+    d_task_checked.set_cursor(BytePos::new(100));
+    assert_eq!(d_task_checked.visual_text(), "☑ done");
+
+    // 4. Nested list inside color wrapper
+    let text_nested = "  <span style=\"color:#3388ff\">- nested</span>";
+    let mut d_nested = DisplayMap::new(text_nested, ProjectionMode::LivePreview);
+    d_nested.set_cursor(BytePos::new(100));
+    assert_eq!(d_nested.visual_text(), "  ◦ nested");
+
+    // 5. Cursor revealing in LivePreview
+    let mut d_reveal = DisplayMap::new(text2, ProjectionMode::LivePreview);
+    d_reveal.set_cursor(BytePos::new(text2.find("blue").unwrap()));
+    assert!(d_reveal.visual_text().contains("color:#3388ff"));
+}
+
+#[test]
 fn test_editor_readable_column_and_margin() {
     let available_width = 1200.0;
     let (content_width, margin_x) =
@@ -378,6 +420,63 @@ fn standard_inline_markers_and_wiki_links_still_project() {
     );
     display.set_cursor(BytePos::new(100));
     assert_eq!(display.visual_text(), "bold italic note code");
+}
+
+#[test]
+fn wikilink_with_alias_projects_alias_and_reveals_on_cursor() {
+    let source = "See [[Blitzkrieg/index|test]] for details.";
+    let mut display = DisplayMap::new(source, ProjectionMode::LivePreview);
+    // Cursor outside the link
+    display.set_cursor(BytePos::new(0));
+    assert_eq!(display.visual_text(), "See test for details.");
+
+    let link_style = display
+        .styled_spans()
+        .iter()
+        .find(|s| s.style == InlineStyle::Link)
+        .expect("should have link styled span");
+    assert_eq!(&source[link_style.content.clone()], "test");
+
+    // Cursor inside the link (e.g. on the alias "test")
+    let test_pos = source.find("test").unwrap();
+    display.set_cursor(BytePos::new(test_pos));
+    assert_eq!(display.visual_text(), source);
+
+    // Cursor inside the target "Blitzkrieg"
+    let target_pos = source.find("Blitzkrieg").unwrap();
+    display.set_cursor(BytePos::new(target_pos));
+    assert_eq!(display.visual_text(), source);
+
+    // Cursor moved back outside
+    display.set_cursor(BytePos::new(source.len()));
+    assert_eq!(display.visual_text(), "See test for details.");
+}
+
+#[test]
+fn wikilink_with_alias_in_reading_mode_unconditionally_shows_alias() {
+    let source = "See [[Blitzkrieg/index|test]] for details.";
+    let mut display = DisplayMap::new(source, ProjectionMode::Reading);
+    assert_eq!(display.visual_text(), "See test for details.");
+
+    let test_pos = source.find("test").unwrap();
+    display.set_cursor(BytePos::new(test_pos));
+    assert_eq!(display.visual_text(), "See test for details.");
+}
+
+#[test]
+fn wikilink_table_escaped_pipe_projects_alias() {
+    let source = "[[Note\\|Cell Alias]]";
+    let mut display = DisplayMap::new(source, ProjectionMode::LivePreview);
+    display.set_cursor(BytePos::new(100));
+    assert_eq!(display.visual_text(), "Cell Alias");
+}
+
+#[test]
+fn wikilink_empty_alias_fallbacks_gracefully() {
+    let source = "[[Target|]] and [[Target|   ]]";
+    let mut display = DisplayMap::new(source, ProjectionMode::LivePreview);
+    display.set_cursor(BytePos::new(100));
+    assert_eq!(display.visual_text(), "Target| and Target|   ");
 }
 
 #[test]
@@ -645,4 +744,58 @@ fn test_shape_quote_indent_and_code_transparent_bg() {
         );
     });
     output.textures_delta.clear();
+}
+
+#[test]
+fn test_colored_list_with_inline_code_and_nesting() {
+    let ctx = egui::Context::default();
+    let typo = truff_ui::app::global_config::TypographyConfig::default();
+
+    let text = "<span style=\"color:#BF616A\">- Нажмите `Esc`, чтобы вернуться в нормальный режим (Normal).</span>";
+    let spans = truff_core::markdown::style::color_spans(text);
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].rgba, [0xBF, 0x61, 0x6A, 255]);
+
+    let tree = truff_core::markdown::IncrementalSyntaxTree::parse_fresh(text);
+    let snapshot = tree.snapshot();
+    let pres = snapshot.line_presentation_in_str(text, 0..text.len());
+    let mut map_away = DisplayMap::from_owned_with_presentation(
+        text.to_string(),
+        ProjectionMode::LivePreview,
+        Some(pres.clone()),
+    );
+    map_away.set_cursor(BytePos::new(usize::MAX));
+    assert_eq!(
+        map_away.visual_text(),
+        "• Нажмите Esc, чтобы вернуться в нормальный режим (Normal)."
+    );
+
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let (galley_away, _) =
+            truff_ui::native::shape(ui.painter(), &map_away, egui::Color32::WHITE, 720.0, &typo);
+        let expected_color = egui::Color32::from_rgba_unmultiplied(0xBF, 0x61, 0x6A, 255);
+        for sec in &galley_away.job.sections {
+            assert_eq!(
+                sec.format.color, expected_color,
+                "Text section must be colored in #BF616A"
+            );
+        }
+    });
+    output.textures_delta.clear();
+
+    // Nested colored list variants
+    let nested_text = "<span style=\"color:#BF616A\">  - Нажмите `Esc`, чтобы вернуться.</span>";
+    let nested_tree = truff_core::markdown::IncrementalSyntaxTree::parse_fresh(nested_text);
+    let nested_snapshot = nested_tree.snapshot();
+    let nested_pres = nested_snapshot.line_presentation_in_str(nested_text, 0..nested_text.len());
+    let mut nested_map = DisplayMap::from_owned_with_presentation(
+        nested_text.to_string(),
+        ProjectionMode::LivePreview,
+        Some(nested_pres),
+    );
+    nested_map.set_cursor(BytePos::new(usize::MAX));
+    assert_eq!(
+        nested_map.visual_text(),
+        "  ◦ Нажмите Esc, чтобы вернуться."
+    );
 }

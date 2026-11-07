@@ -44,6 +44,11 @@ impl HeightIndex {
         }
     }
 
+    /// Default estimated line height.
+    pub fn default_line_height(&self) -> f32 {
+        self.default_line_height
+    }
+
     /// Initializes block entries from text, assigning initial estimated heights.
     pub fn init_from_text(&mut self, text: &str) {
         self.blocks.clear();
@@ -288,7 +293,7 @@ impl HeightIndex {
             return;
         }
 
-        if !new_height.is_finite() || new_height <= 0.0 {
+        if !new_height.is_finite() || new_height < 0.0 {
             return;
         }
 
