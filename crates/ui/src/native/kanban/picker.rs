@@ -1,0 +1,383 @@
+use truff_core::markdown::kanban::KanbanCardLink;
+use truff_core::vim::Key;
+
+fn file_stem(path: &str) -> &str {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let base = base.rsplit('\\').next().unwrap_or(base);
+    base.strip_suffix(".md").unwrap_or(base)
+}
+
+fn is_subsequence(needle: &str, haystack: &str) -> bool {
+    let mut hay_chars = haystack.chars();
+    for n in needle.chars() {
+        if !hay_chars.any(|h| h == n) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Matches and ranks files: exact stem (0) > stem prefix (1) > path prefix (2) >
+/// stem substring (3) > path substring (4) > stem fuzzy (5) > path fuzzy (6).
+fn rank_match(query: &str, path: &str) -> Option<(u8, usize, String)> {
+    if query.is_empty() {
+        return Some((0, path.len(), path.to_string()));
+    }
+    let query_lower = query.to_lowercase();
+    let stem = file_stem(path);
+    let stem_lower = stem.to_lowercase();
+    let path_lower = path.to_lowercase();
+
+    let tier = if stem_lower == query_lower {
+        0
+    } else if stem_lower.starts_with(&query_lower) {
+        1
+    } else if path_lower.starts_with(&query_lower) {
+        2
+    } else if stem_lower.contains(&query_lower) {
+        3
+    } else if path_lower.contains(&query_lower) {
+        4
+    } else if is_subsequence(&query_lower, &stem_lower) {
+        5
+    } else if is_subsequence(&query_lower, &path_lower) {
+        6
+    } else {
+        return None;
+    };
+
+    Some((tier, path.len(), path.to_string()))
+}
+
+/// Action resulting from handling a key event in `FuzzyFilePicker`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickerAction {
+    Confirm(String),
+    Cancel,
+    Handled,
+}
+
+/// Fuzzy file picker overlay state for attaching links to Kanban cards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FuzzyFilePicker {
+    pub query: String,
+    pub active: bool,
+    pub selected: usize,
+    pub filtered: Vec<String>,
+    pub all_files: Vec<String>,
+}
+
+impl FuzzyFilePicker {
+    pub fn new(vault_files: &[String]) -> Self {
+        let mut picker = Self {
+            query: String::new(),
+            active: true,
+            selected: 0,
+            filtered: Vec::new(),
+            all_files: vault_files.to_vec(),
+        };
+        picker.filter();
+        picker
+    }
+
+    /// Recomputes filtered files based on current query using tiered ranking.
+    pub fn filter(&mut self) {
+        if self.query.trim().is_empty() {
+            self.filtered = self.all_files.clone();
+        } else {
+            let mut matches: Vec<(u8, usize, String)> = self
+                .all_files
+                .iter()
+                .filter_map(|file| rank_match(&self.query, file))
+                .collect();
+            matches.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.cmp(&b.1))
+                    .then_with(|| a.2.cmp(&b.2))
+            });
+            self.filtered = matches.into_iter().map(|(_, _, path)| path).collect();
+        }
+        if self.selected >= self.filtered.len() {
+            self.selected = 0;
+        }
+    }
+
+    pub fn type_char(&mut self, c: char) {
+        self.query.push(c);
+        self.filter();
+    }
+
+    pub fn backspace(&mut self) {
+        self.query.pop();
+        self.filter();
+    }
+
+    pub fn next(&mut self) {
+        if !self.filtered.is_empty() {
+            self.selected = (self.selected + 1) % self.filtered.len();
+        }
+    }
+
+    pub fn prev(&mut self) {
+        if !self.filtered.is_empty() {
+            if self.selected == 0 {
+                self.selected = self.filtered.len() - 1;
+            } else {
+                self.selected -= 1;
+            }
+        }
+    }
+
+    pub fn selected_file(&self) -> Option<&str> {
+        self.filtered.get(self.selected).map(|s| s.as_str())
+    }
+
+    pub fn handle_key(&mut self, key: Key) -> Option<PickerAction> {
+        match key {
+            Key::Char(c) => {
+                self.type_char(c);
+                Some(PickerAction::Handled)
+            }
+            Key::Backspace => {
+                self.backspace();
+                Some(PickerAction::Handled)
+            }
+            Key::Down | Key::Ctrl('j') => {
+                self.next();
+                Some(PickerAction::Handled)
+            }
+            Key::Up | Key::Ctrl('k') => {
+                self.prev();
+                Some(PickerAction::Handled)
+            }
+            Key::Esc => Some(PickerAction::Cancel),
+            Key::Enter => self
+                .selected_file()
+                .map(|f| PickerAction::Confirm(f.to_string())),
+            _ => None,
+        }
+    }
+}
+
+/// Inline autocomplete state for `[[` triggers while editing Kanban cards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineFileAutocomplete {
+    pub active: bool,
+    pub trigger_pos: usize,
+    pub query: String,
+    pub selected: usize,
+    pub candidates: Vec<String>,
+}
+
+impl InlineFileAutocomplete {
+    /// Detects an unclosed `[[` in `buffer` and constructs autocomplete candidates from `vault_files`.
+    pub fn detect(buffer: &str, vault_files: &[String]) -> Option<Self> {
+        let pos = buffer.rfind("[[")?;
+        let after = &buffer[pos + 2..];
+        if after.contains("]]") {
+            return None;
+        }
+        let mut ac = Self {
+            active: true,
+            trigger_pos: pos,
+            query: after.to_string(),
+            selected: 0,
+            candidates: Vec::new(),
+        };
+        ac.refresh(vault_files);
+        Some(ac)
+    }
+
+    pub fn refresh(&mut self, vault_files: &[String]) {
+        if self.query.trim().is_empty() {
+            self.candidates = vault_files.to_vec();
+        } else {
+            let mut matches: Vec<(u8, usize, String)> = vault_files
+                .iter()
+                .filter_map(|file| rank_match(&self.query, file))
+                .collect();
+            matches.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.cmp(&b.1))
+                    .then_with(|| a.2.cmp(&b.2))
+            });
+            self.candidates = matches.into_iter().map(|(_, _, path)| path).collect();
+        }
+        if self.selected >= self.candidates.len() {
+            self.selected = 0;
+        }
+    }
+
+    pub fn next(&mut self) {
+        if !self.candidates.is_empty() {
+            self.selected = (self.selected + 1) % self.candidates.len();
+        }
+    }
+
+    pub fn prev(&mut self) {
+        if !self.candidates.is_empty() {
+            if self.selected == 0 {
+                self.selected = self.candidates.len() - 1;
+            } else {
+                self.selected -= 1;
+            }
+        }
+    }
+
+    pub fn selected_candidate(&self) -> Option<&str> {
+        self.candidates.get(self.selected).map(|s| s.as_str())
+    }
+
+    pub fn apply_completion(&self, buffer: &mut String) -> bool {
+        let Some(candidate) = self.selected_candidate() else {
+            return false;
+        };
+        let target = candidate.strip_suffix(".md").unwrap_or(candidate);
+        if self.trigger_pos <= buffer.len() {
+            buffer.truncate(self.trigger_pos);
+            buffer.push_str(&format!("[[{target}]]"));
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Action resulting from handling a key in `LinkJumpPicker`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkJumpAction {
+    Jump(String),
+    Cancel,
+    Handled,
+}
+
+/// Picker overlay for navigating multiple wiki-links on a card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkJumpPicker {
+    pub links: Vec<KanbanCardLink>,
+    pub selected: usize,
+}
+
+impl LinkJumpPicker {
+    pub fn new(links: Vec<KanbanCardLink>) -> Self {
+        Self { links, selected: 0 }
+    }
+
+    pub fn next(&mut self) {
+        if !self.links.is_empty() {
+            self.selected = (self.selected + 1) % self.links.len();
+        }
+    }
+
+    pub fn prev(&mut self) {
+        if !self.links.is_empty() {
+            if self.selected == 0 {
+                self.selected = self.links.len() - 1;
+            } else {
+                self.selected -= 1;
+            }
+        }
+    }
+
+    pub fn select_index(&mut self, idx: usize) -> Option<String> {
+        if idx < self.links.len() {
+            self.selected = idx;
+            Some(self.links[idx].navigation_target())
+        } else {
+            None
+        }
+    }
+
+    pub fn selected_target(&self) -> Option<String> {
+        self.links.get(self.selected).map(|l| l.navigation_target())
+    }
+
+    pub fn handle_key(&mut self, key: Key) -> Option<LinkJumpAction> {
+        match key {
+            Key::Char(c) if ('1'..='9').contains(&c) => {
+                let idx = (c as usize) - ('1' as usize);
+                if idx < self.links.len() {
+                    Some(LinkJumpAction::Jump(self.links[idx].navigation_target()))
+                } else {
+                    None
+                }
+            }
+            Key::Down | Key::Char('j') | Key::Ctrl('j') => {
+                self.next();
+                Some(LinkJumpAction::Handled)
+            }
+            Key::Up | Key::Char('k') | Key::Ctrl('k') => {
+                self.prev();
+                Some(LinkJumpAction::Handled)
+            }
+            Key::Enter => self.selected_target().map(LinkJumpAction::Jump),
+            Key::Esc | Key::Char('q') => Some(LinkJumpAction::Cancel),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fuzzy_file_picker_ranking() {
+        let files = vec![
+            "src/doc_parser.md".to_string(),
+            "notes/doc.md".to_string(),
+            "docs/architecture.md".to_string(),
+            "notes/random_d_o_c.md".to_string(),
+        ];
+        let mut picker = FuzzyFilePicker::new(&files);
+        picker.type_char('d');
+        picker.type_char('o');
+        picker.type_char('c');
+
+        // Exact stem "doc" should rank first
+        assert_eq!(picker.selected_file(), Some("notes/doc.md"));
+
+        picker.next();
+        // Stem prefix "doc_parser" should rank second
+        assert_eq!(picker.selected_file(), Some("src/doc_parser.md"));
+    }
+
+    #[test]
+    fn test_inline_file_autocomplete() {
+        let files = vec!["notes/target.md".to_string(), "docs/spec.md".to_string()];
+        let mut buffer = "Task [[tar".to_string();
+        let ac = InlineFileAutocomplete::detect(&buffer, &files).expect("detects unclosed [[");
+        assert_eq!(ac.query, "tar");
+        assert_eq!(ac.selected_candidate(), Some("notes/target.md"));
+
+        assert!(ac.apply_completion(&mut buffer));
+        assert_eq!(buffer, "Task [[notes/target]]");
+    }
+
+    #[test]
+    fn test_link_jump_picker_navigation() {
+        let links = vec![
+            KanbanCardLink {
+                target: "docs/one".to_string(),
+                heading: None,
+                alias: None,
+                raw_range_in_line: 0..0,
+            },
+            KanbanCardLink {
+                target: "docs/two".to_string(),
+                heading: None,
+                alias: None,
+                raw_range_in_line: 0..0,
+            },
+        ];
+        let mut picker = LinkJumpPicker::new(links);
+        assert_eq!(picker.selected_target(), Some("docs/one".to_string()));
+
+        picker.next();
+        assert_eq!(picker.selected_target(), Some("docs/two".to_string()));
+
+        // Quick selection via '1'
+        let action = picker.handle_key(Key::Char('1'));
+        assert_eq!(action, Some(LinkJumpAction::Jump("docs/one".to_string())));
+    }
+}

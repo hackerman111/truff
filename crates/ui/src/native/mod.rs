@@ -8,6 +8,7 @@ mod events;
 mod file_commands;
 mod hints;
 pub mod icons;
+pub mod kanban;
 mod navigator;
 mod navigator_search;
 mod outline;
