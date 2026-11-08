@@ -1,5 +1,5 @@
-use crate::markdown::kanban::parser::{KanbanBoard, KanbanTaskStatus};
-use crate::text::{SingleEdit, Transaction, UndoGroup};
+use crate::markdown::kanban::parser::{KanbanBoard, KanbanColumn, KanbanTaskStatus};
+use crate::text::{LineEnding, SingleEdit, Transaction, UndoGroup};
 
 /// Position where a new card should be inserted relative to existing cards in a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,7 +11,7 @@ pub enum CardInsertPos {
 
 /// Detects whether text uses CRLF or LF line endings.
 pub fn detect_line_ending(text: &str) -> &'static str {
-    if text.contains("\r\n") { "\r\n" } else { "\n" }
+    LineEnding::detect(text).as_str()
 }
 
 /// Generates a standard Markdown Kanban template with default columns.
@@ -29,37 +29,8 @@ pub fn default_kanban_template(title: &str, line_ending: &str) -> String {
     format!("<!-- truff:kanban -->{nl}# {t}{nl}{nl}## План{nl}{nl}## В работе{nl}{nl}## Готово{nl}")
 }
 
-/// Plans an addition of a card to a column.
-///
-/// If `board.columns` is empty, generates the default Kanban template with the card placed
-/// in the "План" column; otherwise inserts `- [ ] {card_text}{nl}` at the target position.
-pub fn plan_add_card(
-    text: &str,
-    board: &KanbanBoard,
-    col_idx: usize,
-    pos: CardInsertPos,
-    card_text: &str,
-) -> Option<Transaction> {
-    let nl = detect_line_ending(text);
-    let clean_card_title = card_text.trim_end_matches(['\r', '\n']);
-
-    if board.columns.is_empty() {
-        let title = board.title.as_deref().unwrap_or("Канбан");
-        let formatted_card = if clean_card_title.starts_with("- [") {
-            format!("{clean_card_title}{nl}")
-        } else {
-            format!("- [ ] {clean_card_title}{nl}")
-        };
-        let content = format!(
-            "<!-- truff:kanban -->{nl}# {title}{nl}{nl}## План{nl}{formatted_card}{nl}## В работе{nl}{nl}## Готово{nl}"
-        );
-        return Some(
-            Transaction::replace(0..text.len(), content).with_undo_group(UndoGroup::next()),
-        );
-    }
-
-    let col = board.columns.get(col_idx)?;
-    let insert_pos = match pos {
+fn card_insert_offset(col: &KanbanColumn, pos: CardInsertPos) -> usize {
+    match pos {
         CardInsertPos::Before(idx) => {
             if idx < col.cards.len() {
                 col.cards[idx].full_range.start
@@ -79,7 +50,45 @@ pub fn plan_add_card(
             }
         }
         CardInsertPos::End => col.insert_card_offset,
-    };
+    }
+}
+
+/// Plans an addition of a card to a column.
+///
+/// If `board.columns` is empty, generates the default Kanban template with the card placed
+/// in the "План" column (only if `text` is empty/whitespace, to prevent overwriting documents);
+/// otherwise inserts `- [ ] {card_text}{nl}` at the target position.
+pub fn plan_add_card(
+    text: &str,
+    board: &KanbanBoard,
+    col_idx: usize,
+    pos: CardInsertPos,
+    card_text: &str,
+) -> Option<Transaction> {
+    let nl = detect_line_ending(text);
+    let clean_card_title = card_text.trim_end_matches(['\r', '\n']);
+
+    if board.columns.is_empty() {
+        if !text.trim().is_empty() {
+            // Do not wipe out an existing markdown note without columns.
+            return None;
+        }
+        let title = board.title.as_deref().unwrap_or("Канбан");
+        let formatted_card = if clean_card_title.starts_with("- [") {
+            format!("{clean_card_title}{nl}")
+        } else {
+            format!("- [ ] {clean_card_title}{nl}")
+        };
+        let content = format!(
+            "<!-- truff:kanban -->{nl}# {title}{nl}{nl}## План{nl}{formatted_card}{nl}## В работе{nl}{nl}## Готово{nl}"
+        );
+        return Some(
+            Transaction::replace(0..text.len(), content).with_undo_group(UndoGroup::next()),
+        );
+    }
+
+    let col = board.columns.get(col_idx)?;
+    let insert_pos = card_insert_offset(col, pos);
 
     let card_line = if clean_card_title.starts_with("- [") {
         format!("{clean_card_title}{nl}")
@@ -100,8 +109,9 @@ pub fn plan_edit_card_title(
 ) -> Option<Transaction> {
     let col = board.columns.get(col_idx)?;
     let card = col.cards.get(card_idx)?;
+    let sanitized_title = new_title.trim_end_matches(['\r', '\n']);
     Some(
-        Transaction::replace(card.title_range.clone(), new_title)
+        Transaction::replace(card.title_range.clone(), sanitized_title)
             .with_undo_group(UndoGroup::next()),
     )
 }
@@ -161,28 +171,7 @@ pub fn plan_paste_card(
     }
     let col = board.columns.get(col_idx)?;
     let nl = detect_line_ending(text);
-
-    let insert_pos = match pos {
-        CardInsertPos::Before(idx) => {
-            if idx < col.cards.len() {
-                col.cards[idx].full_range.start
-            } else if col.cards.is_empty() {
-                col.insert_card_offset
-            } else {
-                col.cards.last().unwrap().full_range.end
-            }
-        }
-        CardInsertPos::After(idx) => {
-            if idx < col.cards.len() {
-                col.cards[idx].full_range.end
-            } else if col.cards.is_empty() {
-                col.insert_card_offset
-            } else {
-                col.cards.last().unwrap().full_range.end
-            }
-        }
-        CardInsertPos::End => col.insert_card_offset,
-    };
+    let insert_pos = card_insert_offset(col, pos);
 
     let trimmed = raw_card.trim_end_matches(['\r', '\n']);
     let normalized = format!("{trimmed}{nl}");
@@ -198,7 +187,7 @@ pub fn plan_move_card_vertical(
     card_idx: usize,
     direction: isize,
 ) -> Option<Transaction> {
-    if direction == 0 {
+    if direction != -1 && direction != 1 {
         return None;
     }
     let col = board.columns.get(col_idx)?;
@@ -212,8 +201,18 @@ pub fn plan_move_card_vertical(
 
     let card_a = &col.cards[idx_a];
     let card_b = &col.cards[idx_b];
+    let nl = detect_line_ending(text);
     let raw_a = text.get(card_a.full_range.clone())?;
     let raw_b = text.get(card_b.full_range.clone())?;
+
+    let mut raw_a = raw_a.to_string();
+    if !raw_a.ends_with('\n') {
+        raw_a.push_str(nl);
+    }
+    let mut raw_b = raw_b.to_string();
+    if !raw_b.ends_with('\n') {
+        raw_b.push_str(nl);
+    }
 
     let tx = Transaction::new()
         .with_edit(SingleEdit::replace(card_a.full_range.clone(), raw_b))
@@ -265,7 +264,7 @@ pub fn plan_move_card_column(
 /// Plans attaching a file link to a card title (e.g. `[[path]]`).
 ///
 /// Strips `.md` extension from `file_path`. If the card already links to this target,
-/// returns `None`.
+/// or if `file_path` is empty, returns `None`.
 pub fn plan_attach_file_link(
     _text: &str,
     board: &KanbanBoard,
@@ -276,8 +275,8 @@ pub fn plan_attach_file_link(
     let col = board.columns.get(col_idx)?;
     let card = col.cards.get(card_idx)?;
 
-    let clean_path = file_path.strip_suffix(".md").unwrap_or(file_path);
-    if card.links.iter().any(|link| link.target == clean_path) {
+    let clean_path = file_path.trim().strip_suffix(".md").unwrap_or(file_path.trim());
+    if clean_path.is_empty() || card.links.iter().any(|link| link.target == clean_path) {
         return None;
     }
 
@@ -339,14 +338,16 @@ pub fn plan_rename_column(
 
 /// Plans deleting an empty column.
 ///
-/// Returns `None` if the column contains any cards or `col_idx` is out of bounds.
+/// Returns `None` if the column contains any cards, non-whitespace body text (such as notes),
+/// or `col_idx` is out of bounds.
 pub fn plan_delete_empty_column(
-    _text: &str,
+    text: &str,
     board: &KanbanBoard,
     col_idx: usize,
 ) -> Option<Transaction> {
     let col = board.columns.get(col_idx)?;
-    if !col.cards.is_empty() || col.section_range.is_empty() {
+    let body = text.get(col.heading_range.end..col.section_range.end)?;
+    if !col.cards.is_empty() || !body.trim().is_empty() || col.section_range.is_empty() {
         return None;
     }
     Some(Transaction::delete(col.section_range.clone()).with_undo_group(UndoGroup::next()))
@@ -359,7 +360,7 @@ pub fn plan_move_column(
     col_idx: usize,
     direction: isize,
 ) -> Option<Transaction> {
-    if direction == 0 {
+    if direction != -1 && direction != 1 {
         return None;
     }
     let target_idx = (col_idx as isize) + direction;

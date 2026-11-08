@@ -361,3 +361,41 @@ fn default_template_and_insert_positions() {
     assert_eq!(b2.columns[0].cards.len(), 4);
     assert_eq!(b2.columns[0].cards[1].clean_title, "Card 1.5");
 }
+
+#[test]
+fn defensive_boundaries_and_data_loss_protection() {
+    // 1. plan_add_card does NOT wipe out non-empty documents that lack columns
+    let note = "# Some Note\n\nSome paragraphs that should not be erased.\n";
+    let b = KanbanBoard::parse(note);
+    assert!(b.columns.is_empty());
+    assert!(plan_add_card(note, &b, 0, CardInsertPos::End, "New Card").is_none());
+
+    // 2. plan_delete_empty_column refuses if column body has text (notes/tables)
+    let col_with_notes = "## Column A\n\nSome important notes.\n\n## Column B\n";
+    let b_notes = KanbanBoard::parse(col_with_notes);
+    assert!(b_notes.columns[0].cards.is_empty());
+    assert!(plan_delete_empty_column(col_with_notes, &b_notes, 0).is_none());
+
+    // 3. plan_move_card_vertical at EOF without trailing newline preserves proper formatting
+    let no_eof_nl = "## Col\n- [ ] Card 1\n- [ ] Card 2";
+    let mut buf = Buffer::from_text(BufferId::new(1), no_eof_nl).unwrap();
+    let b_eof = KanbanBoard::parse(no_eof_nl);
+    let tx = plan_move_card_vertical(no_eof_nl, &b_eof, 0, 1, -1).expect("move up");
+    buf.apply(tx).unwrap();
+    let re_parsed = KanbanBoard::parse(&buf.as_str());
+    assert_eq!(re_parsed.columns[0].cards.len(), 2);
+    assert_eq!(re_parsed.columns[0].cards[0].clean_title, "Card 2");
+    assert_eq!(reparsed_clean_title(&re_parsed, 0, 1), "Card 1");
+
+    // 4. plan_attach_file_link with empty path returns None
+    assert!(plan_attach_file_link(no_eof_nl, &b_eof, 0, 0, "").is_none());
+    assert!(plan_attach_file_link(no_eof_nl, &b_eof, 0, 0, "   ").is_none());
+
+    // 5. direction != 1 and != -1 is rejected
+    assert!(plan_move_card_vertical(no_eof_nl, &b_eof, 0, 0, 2).is_none());
+    assert!(plan_move_column(col_with_notes, &b_notes, 0, 2).is_none());
+}
+
+fn reparsed_clean_title(board: &KanbanBoard, col: usize, card: usize) -> &str {
+    &board.columns[col].cards[card].clean_title
+}
