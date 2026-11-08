@@ -3,6 +3,7 @@
 pub mod facts;
 pub mod flash;
 pub mod folding;
+pub mod kanban;
 pub mod link_selection;
 pub mod links;
 pub mod presentation;
