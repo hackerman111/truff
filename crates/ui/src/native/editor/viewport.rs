@@ -397,10 +397,7 @@ impl EditorWidget {
             let title_y = rect.top() + Self::TOP_MARGIN - title_size - 32.0 - self.scroll;
             if title_y + title_size + 16.0 > rect.top() && title_y < rect.bottom() {
                 let title_pos = egui::pos2(rect.left() + margin_x, title_y);
-                let title_font = egui::FontId::new(
-                    title_size,
-                    egui::FontFamily::Proportional,
-                );
+                let title_font = egui::FontId::new(title_size, egui::FontFamily::Proportional);
                 let title_color = if theme.is_dark() {
                     egui::Color32::from_rgb(235, 203, 139)
                 } else {
