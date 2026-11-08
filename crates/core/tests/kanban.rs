@@ -92,3 +92,17 @@ fn test_task_status_methods() {
     );
     assert_eq!(KanbanTaskStatus::Done.toggle_done(), KanbanTaskStatus::Todo);
 }
+
+#[test]
+fn test_issue_numbers_and_heading_links() {
+    let md = "\
+## Column
+- [ ] Fix issue #42 and #100 with [[#Subheading]]
+";
+    let board = KanbanBoard::parse(md);
+    let card = &board.columns[0].cards[0];
+    assert_eq!(card.clean_title, "Fix issue #42 and #100 with");
+    assert!(card.tags.is_empty(), "Numeric #42 must not be parsed as a tag");
+    assert_eq!(card.links.len(), 1);
+    assert_eq!(card.links[0].display(), "Subheading");
+}

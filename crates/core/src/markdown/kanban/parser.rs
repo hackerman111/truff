@@ -63,10 +63,14 @@ impl KanbanCardLink {
     pub fn display(&self) -> &str {
         if let Some(alias) = &self.alias {
             alias.as_str()
-        } else {
+        } else if !self.target.is_empty() {
             let base = self.target.rsplit('/').next().unwrap_or(&self.target);
             let base = base.rsplit('\\').next().unwrap_or(base);
             base.strip_suffix(".md").unwrap_or(base)
+        } else if let Some(heading) = &self.heading {
+            heading.as_str()
+        } else {
+            ""
         }
     }
 
@@ -452,7 +456,7 @@ fn extract_links_and_tags(
                 }
                 if tag_end > tag_start {
                     let tag_candidate = &raw_title[tag_start..tag_end];
-                    if tag_candidate.chars().any(|c| c.is_alphanumeric()) {
+                    if tag_candidate.chars().any(|c| c.is_alphabetic()) {
                         tags.push(tag_candidate.to_string());
                         tag_ranges.push(i..tag_end);
                         i = tag_end;
@@ -467,58 +471,48 @@ fn extract_links_and_tags(
     // Build clean_title by stripping wiki-links and tags
     let mut all_ranges = link_ranges;
     all_ranges.extend(tag_ranges);
-    all_ranges.sort_by_key(|r| r.start);
 
-    let mut cleaned = String::with_capacity(raw_title.len());
-    let mut last_end = 0;
-    for r in all_ranges {
-        if r.start > last_end {
-            cleaned.push_str(&raw_title[last_end..r.start]);
-        }
-        cleaned.push(' ');
-        last_end = last_end.max(r.end);
-    }
-    if last_end < raw_title.len() {
-        cleaned.push_str(&raw_title[last_end..]);
-    }
-
-    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    let clean_title = if collapsed.is_empty() && !links.is_empty() {
-        links
-            .iter()
-            .map(|l| l.display())
-            .collect::<Vec<_>>()
-            .join(" ")
+    let clean_title = if all_ranges.is_empty() {
+        raw_title.trim().to_string()
     } else {
-        collapsed
+        all_ranges.sort_by_key(|r| r.start);
+        let mut cleaned = String::with_capacity(raw_title.len());
+        let mut last_end = 0;
+        for r in all_ranges {
+            if r.start > last_end {
+                cleaned.push_str(&raw_title[last_end..r.start]);
+            }
+            cleaned.push(' ');
+            last_end = last_end.max(r.end);
+        }
+        if last_end < raw_title.len() {
+            cleaned.push_str(&raw_title[last_end..]);
+        }
+
+        let mut collapsed = String::with_capacity(cleaned.len());
+        for word in cleaned.split_whitespace() {
+            if !collapsed.is_empty() {
+                collapsed.push(' ');
+            }
+            collapsed.push_str(word);
+        }
+
+        if collapsed.is_empty() && !links.is_empty() {
+            links
+                .iter()
+                .map(|l| l.display())
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            collapsed
+        }
     };
 
     (links, tags, clean_title)
 }
 
 fn parse_wiki_inner(inner: &str, raw_range_in_line: Range<usize>) -> KanbanCardLink {
-    let (target_part, alias) = match inner.find('|') {
-        Some(idx) => {
-            let path_end = if idx > 0 && inner.as_bytes()[idx - 1] == b'\\' {
-                idx - 1
-            } else {
-                idx
-            };
-            (
-                &inner[..path_end],
-                Some(inner[idx + 1..].trim().to_string()),
-            )
-        }
-        None => (inner, None),
-    };
-
-    let (target, heading) = match target_part.find('#') {
-        Some(idx) => (
-            target_part[..idx].trim().to_string(),
-            Some(target_part[idx + 1..].trim().to_string()),
-        ),
-        None => (target_part.trim().to_string(), None),
-    };
+    let (target, heading, alias) = crate::markdown::links::split_wiki_link_inner(inner);
 
     KanbanCardLink {
         target,
