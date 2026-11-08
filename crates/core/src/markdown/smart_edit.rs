@@ -25,10 +25,15 @@ struct ParsedLinePrefix {
 
 impl ParsedLinePrefix {
     fn is_empty_item(&self, line_text: &str) -> bool {
-        let rel_content = self.content_start - self.line_start;
-        line_text
-            .get(rel_content..)
-            .is_none_or(|s| s.trim().is_empty())
+        let rel_content = self.content_start.saturating_sub(self.line_start);
+        line_text.get(rel_content..).is_none_or(|s| {
+            let t = s.trim();
+            let clean = t
+                .trim_end_matches("</span>")
+                .trim_end_matches("</mark>")
+                .trim();
+            clean.is_empty()
+        })
     }
 }
 
@@ -73,7 +78,20 @@ fn parse_line_prefix(buffer: &Buffer, line_idx: usize) -> Option<ParsedLinePrefi
         idx += 1;
     }
     let indent = line_str[indent_start..idx].to_string();
-    let rest = &line_str[idx..];
+    let mut rest = &line_str[idx..];
+
+    if (rest.starts_with("<span style=\"color:#")
+        || rest.starts_with("<mark style=\"background-color:#"))
+        && let Some(tag_end) = rest.find('>')
+    {
+        let after_tag = tag_end + 1;
+        let ws_inner = rest[after_tag..]
+            .bytes()
+            .take_while(|b| matches!(*b, b' ' | b'\t'))
+            .count();
+        idx += after_tag + ws_inner;
+        rest = &line_str[idx..];
+    }
 
     // 3. Check bullet or task list: `- `, `* `, `+ `
     if let Some(first) = rest.chars().next()

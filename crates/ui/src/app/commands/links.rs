@@ -22,15 +22,35 @@ impl Application {
                 .ok_or("Open a note first")?
                 .head()
                 .get();
-            let facts = MarkdownFacts::extract(&self.shell.editor_text())?;
-            let link = facts
+            let buffer = self.shell.editor_buffer().ok_or("Open a note first")?;
+            let line_idx = buffer.line_of_byte(head);
+            let line_start = buffer.byte_of_line(line_idx);
+            let line_end = if line_idx + 1 < buffer.line_len() {
+                buffer.byte_of_line(line_idx + 1)
+            } else {
+                buffer.byte_len()
+            };
+            let local_head = head.saturating_sub(line_start);
+            let line_text = buffer.slice(line_start..line_end).to_string();
+            let line_facts = MarkdownFacts::extract(&line_text)?;
+            let link = line_facts
                 .links
-                .iter()
-                .find(|link| link.range.start <= head && head <= link.range.end)
+                .into_iter()
+                .find(|link| link.range.start <= local_head && local_head <= link.range.end)
+                .or_else(|| {
+                    MarkdownFacts::extract(&buffer.as_str())
+                        .ok()
+                        .and_then(|facts| {
+                            facts
+                                .links
+                                .into_iter()
+                                .find(|link| link.range.start <= head && head <= link.range.end)
+                        })
+                })
                 .ok_or("Place the cursor inside a link")?;
             match &link.heading {
                 Some(heading) => format!("{}#{}", link.target, heading),
-                None => link.target.clone(),
+                None => link.target,
             }
         } else {
             argument.to_owned()

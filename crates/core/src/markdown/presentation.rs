@@ -154,6 +154,42 @@ fn indent_columns(line_str: &str) -> usize {
         .sum()
 }
 
+fn compute_line_list_depth(line_str: &str) -> usize {
+    let mut tabs = 0;
+    let mut spaces = 0;
+    for b in line_str.bytes().take_while(|b| matches!(*b, b' ' | b'\t')) {
+        if b == b'\t' {
+            tabs += 1;
+        } else {
+            spaces += 1;
+        }
+    }
+    let rest = line_str.trim_start_matches([' ', '\t']);
+    let ws_inner = if (rest.starts_with("<span style=\"color:#")
+        || rest.starts_with("<mark style=\"background-color:#"))
+        && let Some(tag_end) = rest.find('>')
+    {
+        rest[tag_end + 1..]
+            .bytes()
+            .take_while(|b| matches!(*b, b' ' | b'\t'))
+            .count()
+    } else {
+        0
+    };
+    if tabs > 0 {
+        tabs.max((spaces + ws_inner) / 4)
+    } else {
+        let total_spaces = spaces + ws_inner;
+        if total_spaces >= 4 {
+            total_spaces / 4
+        } else if total_spaces >= 2 {
+            1
+        } else {
+            0
+        }
+    }
+}
+
 fn is_tasks_fence_header(header_line: &str) -> bool {
     let trimmed = header_line.trim_start();
     let after_fence = if let Some(rest) = trimmed.strip_prefix("```") {
@@ -316,42 +352,25 @@ impl SyntaxSnapshot {
                         result.list = parse_line_list_marker(line, range.start, depth);
                     }
                 }
-            } else if result.list.is_none() && list_item_ancestors > 0 {
-                if let Some(marker) = parse_line_list_marker(line, range.start, list_item_ancestors)
-                {
+            } else {
+                let line_depth = compute_line_list_depth(line);
+                if let Some(ref mut list) = result.list {
+                    list.depth = list.depth.max(line_depth);
+                    if let Some(parsed) = parse_line_list_marker(line, range.start, list.depth) {
+                        list.range = parsed.range;
+                        list.kind = parsed.kind;
+                    }
                     result.code = false;
-                    result.list = Some(marker);
-                }
-            } else if result.list.is_none()
-                && !result.code
-                && (line.contains("<span style=\"color:#")
-                    || line.contains("<mark style=\"background-color:#"))
-            {
-                let ws_before = line.len() - line.trim_start_matches([' ', '\t']).len();
-                let rest = &line[ws_before..];
-                let ws_inner = if (rest.starts_with("<span style=\"color:#")
-                    || rest.starts_with("<mark style=\"background-color:#"))
-                    && let Some(tag_end) = rest.find('>')
-                {
-                    rest[tag_end + 1..]
-                        .bytes()
-                        .take_while(|b| matches!(*b, b' ' | b'\t'))
-                        .count()
                 } else {
-                    0
-                };
-                let depth = (ws_before + ws_inner) / 2;
-                if let Some(marker) = parse_line_list_marker(line, range.start, depth) {
-                    result.list = Some(marker);
+                    let depth = list_item_ancestors.max(line_depth);
+                    if let Some(marker) = parse_line_list_marker(line, range.start, depth) {
+                        result.code = false;
+                        result.list = Some(marker);
+                    }
                 }
-            } else if let Some(ref mut list) = result.list
-                && list.kind == ListKind::Bullet
-                && let Some(parsed) = parse_line_list_marker(line, range.start, list.depth)
-                && matches!(parsed.kind, ListKind::Task { .. })
-            {
-                *list = parsed;
             }
         }
+
         result
     }
 }

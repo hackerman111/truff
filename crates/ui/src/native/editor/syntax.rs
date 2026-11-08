@@ -25,6 +25,19 @@ fn may_need_block_context(source: crop::RopeSlice<'_>) -> bool {
                 matches!(end, Some('.' | ')')) && chars.next().is_some_and(char::is_whitespace)
             }
             Some('>') => true,
+            Some('<') => {
+                let mut prefix = [0u8; 4];
+                let mut count = 0;
+                for ch in chars.by_ref().take(4) {
+                    if ch.is_ascii() {
+                        prefix[count] = ch as u8;
+                        count += 1;
+                    } else {
+                        break;
+                    }
+                }
+                &prefix[..count] == b"span" || &prefix[..count] == b"mark"
+            }
             _ => false,
         }
     })
@@ -56,7 +69,7 @@ impl EditorSyntax {
             return;
         }
         if let Some(tree) = &mut self.tree {
-            tree.replace_rope_range(
+            tree.update_block_context_rope(
                 &self.source,
                 buffer.rope(),
                 change.old_range.clone(),

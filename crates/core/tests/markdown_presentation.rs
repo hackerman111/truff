@@ -124,3 +124,108 @@ fn test_presentation_recognizes_colored_and_highlighted_lists() {
     assert!(lines[2].list.is_some());
     assert_eq!(lines[2].list.as_ref().unwrap().kind, ListKind::Bullet);
 }
+
+#[test]
+fn test_tab_nested_lists_render_correct_depth() {
+    // 1. Two tabs on a second item without intermediate 4-space item
+    let text = "- first\n        - second\n";
+    let snapshot = IncrementalSyntaxTree::parse_fresh(text).snapshot();
+    let l1 = snapshot.line_presentation_in_str(text, 0..7);
+    let l2 = snapshot.line_presentation_in_str(text, 8..text.len());
+    assert_eq!(l1.list.as_ref().unwrap().depth, 0);
+    assert_eq!(
+        l2.list.as_ref().unwrap().depth,
+        2,
+        "8 spaces must be recognized as depth 2"
+    );
+
+    let text_trailing_empty = "- item 1\n    - ";
+    let snap_empty = IncrementalSyntaxTree::parse_fresh(text_trailing_empty).snapshot();
+    let l_empty =
+        snap_empty.line_presentation_in_str(text_trailing_empty, 9..text_trailing_empty.len());
+    assert_eq!(l_empty.list.as_ref().unwrap().depth, 1);
+    assert_eq!(l_empty.list.as_ref().unwrap().range, 13..15);
+
+    // 2. Single item indented by 1 tab (4 spaces) at start of doc
+    let text_tab1 = "    - standalone\n";
+    let snap_tab1 = IncrementalSyntaxTree::parse_fresh(text_tab1).snapshot();
+    let l_tab1 = snap_tab1.line_presentation_in_str(text_tab1, 0..text_tab1.len());
+    assert!(
+        !l_tab1.code,
+        "Indented list item must not be treated as code"
+    );
+    assert_eq!(l_tab1.list.as_ref().unwrap().depth, 1);
+
+    // 3. Single item indented by 2 tabs (8 spaces) at start of doc
+    let text_tab2 = "        - standalone\n";
+    let snap_tab2 = IncrementalSyntaxTree::parse_fresh(text_tab2).snapshot();
+    let l_tab2 = snap_tab2.line_presentation_in_str(text_tab2, 0..text_tab2.len());
+    assert!(
+        !l_tab2.code,
+        "8-space indented list item must not be treated as code"
+    );
+    assert_eq!(l_tab2.list.as_ref().unwrap().depth, 2);
+}
+
+#[test]
+fn test_colored_list_tab_indentation_and_presentation() {
+    use truff_core::markdown::plan_tab;
+    use truff_core::{Buffer, BytePos};
+
+    // 1. Line 1 colored, Line 2 plain -> press Tab on Line 2
+    let text = "<span style=\"color:#BF616A\">- item 1</span>\n- item 2\n";
+    let buffer = Buffer::from_str(text);
+    let cursor = BytePos::new(text.find("- item 2").unwrap());
+    let tx = plan_tab(&buffer, cursor).expect("Tab on item 2 below colored item 1 must succeed");
+    let mut b_after = Buffer::from_str(text);
+    b_after.apply(tx).unwrap();
+    assert_eq!(
+        b_after.as_str(),
+        "<span style=\"color:#BF616A\">- item 1</span>\n    - item 2\n"
+    );
+
+    let s_after = b_after.as_str();
+    let snap = IncrementalSyntaxTree::parse_fresh(&s_after).snapshot();
+    let l2 = snap.line_presentation_in_str(
+        &s_after,
+        s_after.find("    - item 2").unwrap()..s_after.len(),
+    );
+    assert!(
+        !l2.code,
+        "Lower list item below colored item must not be treated as code"
+    );
+    assert!(
+        l2.list.is_some(),
+        "Lower list item below colored item must be recognized as list"
+    );
+    assert_eq!(
+        l2.list.as_ref().unwrap().depth,
+        1,
+        "Lower list item indented with 4 spaces must have depth 1"
+    );
+
+    // 2. Both items colored -> press Tab on Line 2
+    let text_both = "<span style=\"color:#BF616A\">- item 1</span>\n<span style=\"color:#BF616A\">- item 2</span>\n";
+    let buffer_both = Buffer::from_str(text_both);
+    let cursor_both = BytePos::new(text_both.rfind("<span").unwrap());
+    let tx_both = plan_tab(&buffer_both, cursor_both).expect("Tab on colored item 2 must succeed");
+    let mut b_both_after = Buffer::from_str(text_both);
+    b_both_after.apply(tx_both).unwrap();
+    assert_eq!(
+        b_both_after.as_str(),
+        "<span style=\"color:#BF616A\">- item 1</span>\n    <span style=\"color:#BF616A\">- item 2</span>\n"
+    );
+
+    let s_both_after = b_both_after.as_str();
+    let snap_both = IncrementalSyntaxTree::parse_fresh(&s_both_after).snapshot();
+    let l2_both = snap_both.line_presentation_in_str(
+        &s_both_after,
+        s_both_after.rfind("    <span").unwrap()..s_both_after.len(),
+    );
+    assert!(!l2_both.code);
+    assert!(
+        l2_both.list.is_some(),
+        "Indented colored list item must be recognized as list"
+    );
+    assert_eq!(l2_both.list.as_ref().unwrap().depth, 1);
+}

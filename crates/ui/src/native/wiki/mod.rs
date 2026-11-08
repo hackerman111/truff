@@ -34,6 +34,7 @@ impl FolderWiki {
 
     pub fn close(&mut self) {
         self.is_open = false;
+        self.data.clear_memory();
     }
 
     pub fn show(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<WikiAction> {
@@ -51,14 +52,43 @@ impl FolderWiki {
         if !self.is_open {
             return None;
         }
+        if self.data.search_active {
+            if key == Key::Esc {
+                self.data.search_active = false;
+                self.data.search_query.clear();
+                self.data.clamp_selection();
+            } else if key == Key::Enter {
+                self.data.search_active = false;
+            }
+            return None;
+        }
 
         match key {
+            Key::Char('/') => {
+                self.data.search_active = true;
+                None
+            }
             Key::Char('j') | Key::Down => {
                 self.data.move_down(1);
                 None
             }
             Key::Char('k') | Key::Up => {
                 self.data.move_up(1);
+                None
+            }
+            Key::Char('h') | Key::Left if self.data.active_tab == WikiTab::NotesTree => {
+                if let Some((path, _)) = self.data.notes_tree_target(self.data.selected_index) {
+                    let path = path.to_owned();
+                    self.data.collapsed_notes.insert(path);
+                    self.data.clamp_selection();
+                }
+                None
+            }
+            Key::Char('l') | Key::Right if self.data.active_tab == WikiTab::NotesTree => {
+                if let Some((path, _)) = self.data.notes_tree_target(self.data.selected_index) {
+                    let path = path.to_owned();
+                    self.data.collapsed_notes.remove(&path);
+                }
                 None
             }
             Key::Tab => {
@@ -99,40 +129,40 @@ impl FolderWiki {
             Key::Char('a') => Some(WikiAction::CreateNewNote {
                 folder: self.data.folder_path.clone(),
             }),
-            Key::Enter => {
-                match self.data.active_tab {
-                    WikiTab::Overview | WikiTab::MetadataTable => {
-                        self.data.notes.get(self.data.selected_index).map(|note| {
-                            WikiAction::OpenNote {
-                                path: note.path.clone(),
-                                line: None,
-                            }
-                        })
-                    }
-                    WikiTab::NotesTree => {
-                        self.data.notes.get(self.data.selected_index).map(|note| {
-                            WikiAction::OpenNote {
-                                path: note.path.clone(),
-                                line: None,
-                            }
-                        })
-                    }
-                    WikiTab::Tasks => self.data.tasks.get(self.data.selected_index).map(|task| {
-                        WikiAction::OpenNote {
-                            path: task.note_path.clone(),
-                            line: Some(task.line),
-                        }
+            Key::Enter => match self.data.active_tab {
+                WikiTab::Overview | WikiTab::MetadataTable => self
+                    .data
+                    .filtered_notes()
+                    .get(self.data.selected_index)
+                    .map(|note| WikiAction::OpenNote {
+                        path: note.path.clone(),
+                        line: None,
                     }),
-                    WikiTab::Backlinks => {
-                        self.data.backlinks.get(self.data.selected_index).map(|bl| {
-                            WikiAction::OpenNote {
-                                path: bl.source_note.clone(),
-                                line: None,
-                            }
+                WikiTab::NotesTree => {
+                    self.data
+                        .notes_tree_target(self.data.selected_index)
+                        .map(|(path, line)| WikiAction::OpenNote {
+                            path: path.to_owned(),
+                            line,
                         })
-                    }
                 }
-            }
+                WikiTab::Tasks => self
+                    .data
+                    .filtered_tasks()
+                    .get(self.data.selected_index)
+                    .map(|task| WikiAction::OpenNote {
+                        path: task.note_path.clone(),
+                        line: Some(task.line),
+                    }),
+                WikiTab::Backlinks => self
+                    .data
+                    .filtered_backlinks()
+                    .get(self.data.selected_index)
+                    .map(|bl| WikiAction::OpenNote {
+                        path: bl.source_note.clone(),
+                        line: None,
+                    }),
+            },
             Key::Esc => {
                 self.close();
                 Some(WikiAction::Close)

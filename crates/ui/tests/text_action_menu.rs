@@ -599,3 +599,101 @@ fn test_space_c_task_preserves_indent() {
         "    - [ ] nested item\n"
     );
 }
+
+#[test]
+fn test_tab_in_url_link_input() {
+    let (mut app, ctx) = setup_app("\n");
+    app.key(Key::Char(' '));
+    app.key(Key::Char('c'));
+    app.key(Key::Char('u')); // opens LinkInput with is_url: true, active_field: 0
+
+    // Frame 1: render popup and request focus on title
+    frame(&mut app, &ctx, vec![]);
+    // Frame 2: focus settled on title
+    frame(&mut app, &ctx, vec![]);
+
+    let target_edit_id = egui::Id::new("text_action_target_input");
+    let title_edit_id = egui::Id::new("text_action_title_input");
+
+    assert_eq!(ctx.memory(|m| m.focused()), Some(title_edit_id));
+    if let TextActionMode::LinkInput { active_field, .. } =
+        app.application.shell.text_action().mode()
+    {
+        assert_eq!(*active_field, 0);
+    }
+
+    // Press Tab to switch from Title -> URL/Target
+    frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    // Settle frame
+    frame(&mut app, &ctx, vec![]);
+
+    assert_eq!(ctx.memory(|m| m.focused()), Some(target_edit_id));
+    if let TextActionMode::LinkInput { active_field, .. } =
+        app.application.shell.text_action().mode()
+    {
+        assert_eq!(
+            *active_field, 1,
+            "active_field should be 1 (target/URL) after Tab"
+        );
+    }
+
+    // Press Tab again to switch from URL/Target -> Title
+    frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    // Settle frame
+    frame(&mut app, &ctx, vec![]);
+
+    assert_eq!(ctx.memory(|m| m.focused()), Some(title_edit_id));
+    if let TextActionMode::LinkInput { active_field, .. } =
+        app.application.shell.text_action().mode()
+    {
+        assert_eq!(
+            *active_field, 0,
+            "active_field should be 0 (title) after second Tab"
+        );
+    }
+
+    // Press Shift+Tab to switch backwards from Title -> URL/Target
+    frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        }],
+    );
+    // Settle frame
+    frame(&mut app, &ctx, vec![]);
+
+    assert_eq!(ctx.memory(|m| m.focused()), Some(target_edit_id));
+    if let TextActionMode::LinkInput { active_field, .. } =
+        app.application.shell.text_action().mode()
+    {
+        assert_eq!(
+            *active_field, 1,
+            "active_field should be 1 (target/URL) after Shift+Tab"
+        );
+    }
+}

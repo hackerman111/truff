@@ -1,219 +1,9 @@
 use truff_core::Buffer;
 use truff_core::markdown::facts::DocFacts;
 
-/// Scope of the Table of Contents hierarchy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TocScope {
-    #[default]
-    ActiveFile,
-    Folder,
-    Vault,
-}
-
-impl TocScope {
-    pub const ALL: [Self; 3] = [Self::ActiveFile, Self::Folder, Self::Vault];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::ActiveFile => "Активная заметка",
-            Self::Folder => "Текущая папка",
-            Self::Vault => "Всё хранилище",
-        }
-    }
-
-    pub fn next(&self) -> Self {
-        match self {
-            Self::ActiveFile => Self::Folder,
-            Self::Folder => Self::Vault,
-            Self::Vault => Self::ActiveFile,
-        }
-    }
-
-    pub fn prev(&self) -> Self {
-        match self {
-            Self::ActiveFile => Self::Vault,
-            Self::Folder => Self::ActiveFile,
-            Self::Vault => Self::Folder,
-        }
-    }
-}
-
-/// The specific payload of a TOC tree item.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TocItemKind {
-    Folder {
-        path: String,
-    },
-    Note {
-        path: String,
-    },
-    Heading {
-        level: u8,
-        text: String,
-        line: usize,
-        byte_offset: usize,
-    },
-    Block {
-        id: String,
-        line: usize,
-        byte_offset: usize,
-    },
-    Related {
-        path: String,
-    },
-}
-
-/// A single row / item in the hierarchical TOC tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TocItem {
-    pub id: u64,
-    pub title: String,
-    pub level: usize,
-    pub kind: TocItemKind,
-    pub line: Option<usize>,
-    pub path: Option<String>,
-    pub is_collapsed: bool,
-    pub has_children: bool,
-    pub parent_idx: Option<usize>,
-    pub is_active: bool,
-}
-
-impl TocItem {
-    pub fn new_heading(
-        id: u64,
-        level: u8,
-        text: String,
-        line: usize,
-        byte_offset: usize,
-        path: Option<String>,
-    ) -> Self {
-        let display_level = level.saturating_sub(1) as usize;
-        Self {
-            id,
-            title: text.clone(),
-            level: display_level,
-            kind: TocItemKind::Heading {
-                level,
-                text,
-                line,
-                byte_offset,
-            },
-            line: Some(line),
-            path,
-            is_collapsed: false,
-            has_children: false,
-            parent_idx: None,
-            is_active: false,
-        }
-    }
-
-    pub fn new_block(
-        id: u64,
-        block_id: String,
-        line: usize,
-        byte_offset: usize,
-        path: Option<String>,
-        parent_level: usize,
-    ) -> Self {
-        Self {
-            id,
-            title: format!("^{block_id}"),
-            level: parent_level + 1,
-            kind: TocItemKind::Block {
-                id: block_id,
-                line,
-                byte_offset,
-            },
-            line: Some(line),
-            path,
-            is_collapsed: false,
-            has_children: false,
-            parent_idx: None,
-            is_active: false,
-        }
-    }
-
-    pub fn new_note(id: u64, name: String, path: String, level: usize) -> Self {
-        Self {
-            id,
-            title: name,
-            level,
-            kind: TocItemKind::Note { path: path.clone() },
-            line: None,
-            path: Some(path),
-            is_collapsed: false,
-            has_children: false,
-            parent_idx: None,
-            is_active: false,
-        }
-    }
-
-    pub fn new_folder(id: u64, name: String, path: String, level: usize) -> Self {
-        Self {
-            id,
-            title: name,
-            level,
-            kind: TocItemKind::Folder { path: path.clone() },
-            line: None,
-            path: Some(path),
-            is_collapsed: false,
-            has_children: false,
-            parent_idx: None,
-            is_active: false,
-        }
-    }
-
-    pub fn new_related(id: u64, target: String, level: usize) -> Self {
-        Self {
-            id,
-            title: format!("[[{target}]]"),
-            level,
-            kind: TocItemKind::Related {
-                path: target.clone(),
-            },
-            line: None,
-            path: Some(target),
-            is_collapsed: false,
-            has_children: false,
-            parent_idx: None,
-            is_active: false,
-        }
-    }
-}
-
-/// Computes the sticky parent chain (breadcrumbs) for the active item.
-pub fn compute_sticky_chain(all_items: &[TocItem], active_idx: usize) -> Vec<String> {
-    if active_idx >= all_items.len() {
-        return Vec::new();
-    }
-    let mut chain = Vec::new();
-    let mut curr_idx = Some(active_idx);
-
-    while let Some(idx) = curr_idx {
-        let item = &all_items[idx];
-        chain.push(item.title.clone());
-        curr_idx = item.parent_idx;
-    }
-    chain.reverse();
-    chain
-}
-
-/// Identifies the active heading index in `facts` based on current cursor byte offset.
-pub fn find_active_heading_index(facts: &DocFacts, caret_byte: usize) -> Option<usize> {
-    if facts.headings.is_empty() {
-        return None;
-    }
-    // Find the last heading whose starting byte range is <= caret_byte
-    let mut active = None;
-    for (idx, heading) in facts.headings.iter().enumerate() {
-        if heading.range.start <= caret_byte {
-            active = Some(idx);
-        } else {
-            break;
-        }
-    }
-    active
-}
+pub use super::types::{
+    TocItem, TocItemKind, TocScope, compute_sticky_chain, find_active_heading_index,
+};
 
 /// State model managing the hierarchical Table of Contents.
 #[derive(Debug, Clone, Default)]
@@ -228,11 +18,62 @@ pub struct TocModel {
     pub search_active: bool,
     pub last_active_facts: Option<usize>,
     pub last_active_path: Option<String>,
+    last_hierarchy_key: Option<(TocScope, u64, Option<usize>, Option<String>)>,
 }
 
 impl TocModel {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Drops retained heap buffers when the unpinned TOC panel is closed.
+    pub fn clear_memory(&mut self) {
+        self.all_items.clear();
+        self.all_items.shrink_to_fit();
+        self.visible_indices.clear();
+        self.visible_indices.shrink_to_fit();
+        self.sticky_breadcrumbs.clear();
+        self.sticky_breadcrumbs.shrink_to_fit();
+        self.search_query.clear();
+        self.search_query.shrink_to_fit();
+        self.selected_index = 0;
+        self.active_item_index = None;
+        self.search_active = false;
+        self.last_active_facts = None;
+        self.last_active_path = None;
+        self.last_hierarchy_key = None;
+    }
+
+    pub fn hierarchy_is_fresh(
+        &self,
+        scope: TocScope,
+        catalog_rev: u64,
+        facts_ptr: Option<usize>,
+        active_path: Option<&str>,
+    ) -> bool {
+        let Some((last_scope, last_rev, last_facts, ref last_path)) = self.last_hierarchy_key
+        else {
+            return false;
+        };
+        last_scope == scope
+            && last_rev == catalog_rev
+            && last_facts == facts_ptr
+            && last_path.as_deref() == active_path
+    }
+
+    pub fn set_hierarchy_key(
+        &mut self,
+        scope: TocScope,
+        catalog_rev: u64,
+        facts_ptr: Option<usize>,
+        active_path: Option<&str>,
+    ) {
+        self.last_hierarchy_key = Some((
+            scope,
+            catalog_rev,
+            facts_ptr,
+            active_path.map(str::to_owned),
+        ));
     }
 
     /// Rebuilds the TOC item tree for the active note from its buffer and DocFacts.
@@ -243,11 +84,10 @@ impl TocModel {
         active_path: Option<&str>,
         caret_byte: usize,
     ) {
+        self.last_hierarchy_key = None;
         let facts_ptr = facts.map(|f| f as *const DocFacts as usize);
-        let path_str = active_path.map(str::to_owned);
-
         if self.last_active_facts == facts_ptr
-            && self.last_active_path == path_str
+            && self.last_active_path.as_deref() == active_path
             && !self.all_items.is_empty()
         {
             self.sync_caret(caret_byte, facts);
@@ -255,7 +95,7 @@ impl TocModel {
         }
 
         self.last_active_facts = facts_ptr;
-        self.last_active_path = path_str;
+        self.last_active_path = active_path.map(str::to_owned);
         self.all_items.clear();
         let Some(buffer) = buffer else {
             self.refresh_visible();
@@ -358,6 +198,7 @@ impl TocModel {
         self.scope = scope;
         self.last_active_facts = None;
         self.last_active_path = None;
+        self.last_hierarchy_key = None;
         if scope == TocScope::ActiveFile {
             let caret = 0;
             self.rebuild_active_file(active_buffer, active_facts, active_path, caret);
@@ -372,25 +213,20 @@ impl TocModel {
             .and_then(|p| p.to_str())
             .unwrap_or("");
 
-        let filtered_files: Vec<&String> = files
-            .iter()
-            .filter(|p| {
-                if scope == TocScope::Folder {
-                    let parent = std::path::Path::new(p.as_str())
-                        .parent()
-                        .and_then(|p| p.to_str())
-                        .unwrap_or("");
-                    parent == active_dir
-                } else {
-                    true
-                }
-            })
-            .collect();
-
         let mut current_folder = String::new();
         let mut folder_idx = None;
 
-        for file in filtered_files {
+        for file in files {
+            if scope == TocScope::Folder {
+                let parent = std::path::Path::new(file.as_str())
+                    .parent()
+                    .and_then(|p| p.to_str())
+                    .unwrap_or("");
+                if parent != active_dir {
+                    continue;
+                }
+            }
+
             let path_obj = std::path::Path::new(file.as_str());
             let folder_part = path_obj.parent().and_then(|p| p.to_str()).unwrap_or("");
             let file_name = path_obj

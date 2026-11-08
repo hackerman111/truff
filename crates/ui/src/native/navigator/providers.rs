@@ -93,36 +93,23 @@ impl NativeApp {
                 let mut id = 1u64;
 
                 // 1. Text colors (foreground)
-                for (name, hex) in [
-                    ("Красный", "#BF616A"),
-                    ("Оранжевый", "#D08770"),
-                    ("Жёлтый", "#EBCB8B"),
-                    ("Зелёный", "#A3BE8C"),
-                    ("Голубой", "#88C0D0"),
-                    ("Синий", "#81A1C1"),
-                    ("Фиолетовый", "#B48EAD"),
-                ] {
-                    let mut item = NavigatorItem::new_file(id, name, hex.into(), false, 0);
-                    item.shortcut = Some(hex.into());
+                for opt in crate::overlays::PALETTE {
+                    let mut item = NavigatorItem::new_file(id, opt.name, opt.hex.into(), false, 0);
+                    item.shortcut = Some(opt.hex.into());
                     item.category = Some(std::borrow::Cow::Borrowed("Цвет текста"));
-                    item.payload = crate::navigator::NavigatorItemPayload::Color { hex };
+                    item.payload = crate::navigator::NavigatorItemPayload::Color { hex: opt.hex };
                     items.push(item);
                     id += 1;
                 }
 
                 // 2. Highlights (background <mark>)
-                for (name, hex) in [
-                    ("Жёлтый (маркер)", "#EBCB8B"),
-                    ("Зелёный (маркер)", "#A3BE8C"),
-                    ("Голубой (маркер)", "#88C0D0"),
-                    ("Оранжевый (маркер)", "#D08770"),
-                    ("Красный (маркер)", "#BF616A"),
-                    ("Фиолетовый (маркер)", "#B48EAD"),
-                ] {
-                    let mut item = NavigatorItem::new_file(id, name, hex.into(), false, 0);
-                    item.shortcut = Some(hex.into());
+                for opt in crate::overlays::PALETTE {
+                    let label = format!("{} (маркер)", opt.name);
+                    let mut item = NavigatorItem::new_file(id, &label, opt.hex.into(), false, 0);
+                    item.shortcut = Some(opt.hex.into());
                     item.category = Some(std::borrow::Cow::Borrowed("Маркер (Highlight)"));
-                    item.payload = crate::navigator::NavigatorItemPayload::Highlight { hex };
+                    item.payload =
+                        crate::navigator::NavigatorItemPayload::Highlight { hex: opt.hex };
                     items.push(item);
                     id += 1;
                 }

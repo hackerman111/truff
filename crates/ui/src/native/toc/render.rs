@@ -243,31 +243,16 @@ fn render_breadcrumbs(
 }
 
 fn render_search(model: &mut TocModel, ui: &mut egui::Ui, theme: &Theme) {
-    ui.horizontal(|ui| {
-        let (icon_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-        icons::render_icon(
-            ui.painter(),
-            icons::Icon::Search,
-            icon_rect,
-            color(theme.text_muted),
-            1.2,
-        );
-
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut model.search_query)
-                .hint_text("Фильтр разделов... (/ для ввода)")
-                .desired_width(ui.available_width() - 20.0),
-        );
-        if resp.changed() {
-            model.refresh_visible();
-        }
-        if !model.search_query.is_empty()
-            && widgets::icon_button(ui, icons::Icon::Close, "Очистить").clicked()
-        {
-            model.search_query.clear();
-            model.refresh_visible();
-        }
-    });
+    if widgets::search_filter_bar(
+        ui,
+        "toc_search_input",
+        &mut model.search_query,
+        Some(&mut model.search_active),
+        "Фильтр разделов... (/ для ввода)",
+        theme,
+    ) {
+        model.refresh_visible();
+    }
 }
 
 fn render_items_list(

@@ -103,8 +103,16 @@ pub struct ColorSpan {
 
 /// Extract supported color wrappers outside fenced and inline code.
 pub fn color_spans(text: &str) -> Vec<ColorSpan> {
+    styled_html_spans(text, "<span style=\"color:#", "</span>")
+}
+
+/// Extract supported highlight wrappers outside fenced and inline code.
+pub fn highlight_spans(text: &str) -> Vec<ColorSpan> {
+    styled_html_spans(text, "<mark style=\"background-color:#", "</mark>")
+}
+
+fn styled_html_spans(text: &str, prefix: &str, closing_tag: &str) -> Vec<ColorSpan> {
     use pulldown_cmark::{Event, Parser, Tag, TagEnd};
-    let prefix = "<span style=\"color:#";
     let Some(first) = text.find(prefix) else {
         return Vec::new();
     };
@@ -113,7 +121,9 @@ pub fn color_spans(text: &str) -> Vec<ColorSpan> {
     let mut fence_start = None;
     for (event, range) in Parser::new(text).into_offset_iter() {
         match event {
-            Event::Start(Tag::CodeBlock(_)) => fence_start = Some(range.start),
+            Event::Start(Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(_))) => {
+                fence_start = Some(range.start)
+            }
             Event::End(TagEnd::CodeBlock) => {
                 if let Some(start) = fence_start.take() {
                     code_blocks.push(start..range.end);
@@ -137,11 +147,11 @@ pub fn color_spans(text: &str) -> Vec<ColorSpan> {
             continue;
         }
         let content_start = hex_end + 2;
-        let Some(close_relative) = text[content_start..].find("</span>") else {
+        let Some(close_relative) = text[content_start..].find(closing_tag) else {
             break;
         };
         let close_start = content_start + close_relative;
-        let end = close_start + 7;
+        let end = close_start + closing_tag.len();
         offset = end;
         let fb_idx = code_blocks.partition_point(|range| range.end <= start);
         if code_blocks
@@ -161,9 +171,9 @@ pub fn color_spans(text: &str) -> Vec<ColorSpan> {
         let channel =
             |index| u8::from_str_radix(&hex[index..index + 2], 16).expect("validated hex pair");
         spans.push(ColorSpan {
-            opening: start..content_start,
+            opening,
             content: content_start..close_start,
-            closing: close_start..end,
+            closing,
             rgba: [channel(0), channel(2), channel(4), 255],
         });
     }

@@ -24,6 +24,7 @@ use crate::app::Application;
 use crate::native::NativeApp;
 use crate::native::rasterizer::SoftwareRasterizer;
 
+pub const MAX_TEXTURE_SIDE: usize = 2048;
 const EGUI_MEMORY_KEY: &str = "egui";
 const WINDOW_KEY: &str = "window";
 
@@ -167,6 +168,7 @@ struct SoftwareWinitApp {
     viewport_info: ViewportInfo,
     window_surface: Option<WindowSurface>,
     next_repaint_time: Option<Instant>,
+    app_requested_redraw: bool,
 }
 
 impl SoftwareWinitApp {
@@ -186,7 +188,7 @@ impl SoftwareWinitApp {
         storage.flush();
     }
 
-    fn render_frame(&mut self, event_loop: &ActiveEventLoop) {
+    fn render_frame(&mut self, event_loop: &ActiveEventLoop, os_expose: bool) {
         let Some(ws) = self.window_surface.as_mut() else {
             return;
         };
@@ -294,18 +296,34 @@ impl SoftwareWinitApp {
         {
             let clear_color =
                 crate::theme::style::color(self.app.application.shell.theme().bg_canvas);
-            self.rasterizer.paint_primitives(
-                &mut buffer,
-                width.get() as usize,
-                height.get() as usize,
-                full_output.pixels_per_point,
-                clear_color,
-                &clipped_primitives,
-            );
-            // Notify winit before presenting so Wayland frame callbacks pace redraws
-            // non-blockingly without starving xdg_wm_base.ping -> pong in background.
-            ws.window.pre_present_notify();
-            let _ = buffer.present();
+            let age = buffer.age();
+            let damage: Vec<softbuffer::Rect> = self
+                .rasterizer
+                .paint_frame(
+                    &mut buffer,
+                    width.get() as usize,
+                    height.get() as usize,
+                    full_output.pixels_per_point,
+                    clear_color,
+                    &clipped_primitives,
+                    age,
+                )
+                .to_vec();
+            if !damage.is_empty() {
+                // Notify winit before presenting so Wayland frame callbacks pace redraws
+                // non-blockingly without starving xdg_wm_base.ping -> pong in background.
+                ws.window.pre_present_notify();
+                let _ = buffer.present_with_damage(&damage);
+            } else if age == 0 || os_expose {
+                ws.window.pre_present_notify();
+                let full = [softbuffer::Rect {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                }];
+                let _ = buffer.present_with_damage(&full);
+            }
         }
 
         self.rasterizer
@@ -379,9 +397,10 @@ impl ApplicationHandler<UserEvent> for SoftwareWinitApp {
             event_loop,
             Some(window.scale_factor() as f32),
             window.theme(),
-            Some(8192),
+            Some(MAX_TEXTURE_SIDE),
         );
 
+        self.app_requested_redraw = true;
         window.request_redraw();
 
         self.window_surface = Some(WindowSurface {
@@ -398,6 +417,7 @@ impl ApplicationHandler<UserEvent> for SoftwareWinitApp {
                 if deadline <= Instant::now() {
                     self.next_repaint_time = None;
                     if let Some(ws) = &self.window_surface {
+                        self.app_requested_redraw = true;
                         ws.window.request_redraw();
                     }
                 } else {
@@ -439,19 +459,23 @@ impl ApplicationHandler<UserEvent> for SoftwareWinitApp {
         match event {
             WindowEvent::CloseRequested => {
                 self.viewport_info.events.push(egui::ViewportEvent::Close);
+                self.app_requested_redraw = true;
                 ws.window.request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                self.render_frame(event_loop);
+                let os_expose = !std::mem::replace(&mut self.app_requested_redraw, false);
+                self.render_frame(event_loop, os_expose);
             }
             WindowEvent::Resized(_) => {
                 let response = ws.winit_state.on_window_event(&ws.window, &event);
                 let _ = response;
+                self.app_requested_redraw = true;
                 ws.window.request_redraw();
             }
             _ => {
                 let response = ws.winit_state.on_window_event(&ws.window, &event);
                 if response.repaint {
+                    self.app_requested_redraw = true;
                     ws.window.request_redraw();
                 }
             }
@@ -463,6 +487,7 @@ impl ApplicationHandler<UserEvent> for SoftwareWinitApp {
             if Instant::now() >= deadline {
                 self.next_repaint_time = None;
                 if let Some(ws) = &self.window_surface {
+                    self.app_requested_redraw = true;
                     ws.window.request_redraw();
                 }
                 event_loop.set_control_flow(ControlFlow::Wait);
@@ -514,6 +539,7 @@ pub fn run_native(title: &str, application: Application) -> Result<(), String> {
         viewport_info: ViewportInfo::default(),
         window_surface: None,
         next_repaint_time: None,
+        app_requested_redraw: true,
     };
 
     event_loop.run_app(&mut runner).map_err(|e| e.to_string())

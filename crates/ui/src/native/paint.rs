@@ -119,101 +119,122 @@ pub fn shape(
         base_color,
         width,
     );
-    job.sections[0].format.line_height = Some(line_height);
-    let base = job.sections[0].format.clone();
-
-    let visual_len = display.visual_text().len();
-    let mut mapped_styles: Vec<(std::ops::Range<usize>, &InlineStyle)> = Vec::new();
-    for span in display.styled_spans() {
-        let start_affinity = if display
-            .list_markers()
-            .iter()
-            .any(|l| l.range.start == span.content.start)
-        {
-            Affinity::Left
-        } else {
-            Affinity::Right
-        };
-        let start = display
-            .source_to_visual(BytePos::new(span.content.start), start_affinity)
-            .get();
-        let end = display
-            .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
-            .get();
-        if start < end && end <= visual_len {
-            mapped_styles.push((start..end, &span.style));
-        }
-    }
-
-    let mut boundaries = vec![0, visual_len];
-    for (range, _) in &mapped_styles {
-        boundaries.push(range.start);
-        boundaries.push(range.end);
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-
-    job.sections.clear();
-    for window in boundaries.windows(2) {
-        let start = window[0];
-        let end = window[1];
-        if start >= end {
-            continue;
-        }
-        let mut format = base.clone();
-        for (range, style) in &mapped_styles {
-            if range.start <= start && range.end >= end {
-                match style {
-                    InlineStyle::Bold => {
-                        format.color = Color32::from_rgba_unmultiplied(
-                            (format.color.r() as u16 + 50).min(255) as u8,
-                            (format.color.g() as u16 + 50).min(255) as u8,
-                            (format.color.b() as u16 + 50).min(255) as u8,
-                            format.color.a(),
-                        );
-                    }
-                    InlineStyle::Italic => {
-                        format.italics = true;
-                    }
-                    InlineStyle::Strikethrough => {
-                        format.strikethrough = egui::Stroke::new(1.0, format.color);
-                    }
-                    InlineStyle::Code => {
-                        format.font_id =
-                            FontId::new((font.size * 0.95).max(9.0), egui::FontFamily::Monospace);
-                        format.background = Color32::TRANSPARENT;
-                    }
-                    InlineStyle::Link => {
-                        format.color = Color32::from_rgb(136, 192, 208);
-                        format.underline = egui::Stroke::NONE;
-                    }
-                    InlineStyle::TextColor([r, g, b, a]) => {
-                        format.color = Color32::from_rgba_unmultiplied(*r, *g, *b, *a);
-                    }
-                    InlineStyle::Highlight([r, g, b, a]) => {
-                        let alpha = (*a as u16 * 75 / 255) as u8;
-                        format.background = Color32::from_rgba_unmultiplied(*r, *g, *b, alpha);
-                    }
-                    InlineStyle::Math => {
-                        format.italics = true;
-                        format.color = Color32::from_rgb(143, 188, 187);
-                        format.background = Color32::from_rgba_unmultiplied(143, 188, 187, 40);
-                    }
-                }
-            }
-        }
-        job.sections.push(egui::text::LayoutSection {
-            leading_space: 0.0,
-            byte_range: start.into()..end.into(),
-            format,
-        });
-    }
-    if job.sections.is_empty() {
+    if let Some(first) = job.sections.first_mut() {
+        first.format.line_height = Some(line_height);
+    } else {
+        let mut format = egui::TextFormat::simple(font.clone(), base_color);
+        format.line_height = Some(line_height);
         job.sections.push(egui::text::LayoutSection {
             leading_space: 0.0,
             byte_range: 0.into()..0.into(),
-            format: base,
+            format,
         });
+    }
+
+    if !display.styled_spans().is_empty() {
+        let base = job.sections[0].format.clone();
+        let visual_len = display.visual_text().len();
+        let mut mapped_styles: Vec<(std::ops::Range<usize>, &InlineStyle)> =
+            Vec::with_capacity(display.styled_spans().len());
+        for span in display.styled_spans() {
+            let start_affinity = if display
+                .list_markers()
+                .iter()
+                .any(|l| l.range.start == span.content.start)
+            {
+                Affinity::Left
+            } else {
+                Affinity::Right
+            };
+            let start = display
+                .source_to_visual(BytePos::new(span.content.start), start_affinity)
+                .get();
+            let end = display
+                .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
+                .get();
+            if start < end && end <= visual_len {
+                mapped_styles.push((start..end, &span.style));
+            }
+        }
+
+        if !mapped_styles.is_empty() {
+            let mut boundaries = Vec::with_capacity(mapped_styles.len() * 2 + 2);
+            boundaries.push(0);
+            boundaries.push(visual_len);
+            for (range, _) in &mapped_styles {
+                boundaries.push(range.start);
+                boundaries.push(range.end);
+            }
+            boundaries.sort_unstable();
+            boundaries.dedup();
+
+            job.sections.clear();
+            for window in boundaries.windows(2) {
+                let start = window[0];
+                let end = window[1];
+                if start >= end {
+                    continue;
+                }
+                let mut format = base.clone();
+                for (range, style) in &mapped_styles {
+                    if range.start <= start && range.end >= end {
+                        match style {
+                            InlineStyle::Bold => {
+                                format.color = Color32::from_rgba_unmultiplied(
+                                    (format.color.r() as u16 + 50).min(255) as u8,
+                                    (format.color.g() as u16 + 50).min(255) as u8,
+                                    (format.color.b() as u16 + 50).min(255) as u8,
+                                    format.color.a(),
+                                );
+                            }
+                            InlineStyle::Italic => {
+                                format.italics = true;
+                            }
+                            InlineStyle::Strikethrough => {
+                                format.strikethrough = egui::Stroke::new(1.0, format.color);
+                            }
+                            InlineStyle::Code => {
+                                format.font_id = FontId::new(
+                                    (font.size * 0.95).max(9.0),
+                                    egui::FontFamily::Monospace,
+                                );
+                                format.background = Color32::TRANSPARENT;
+                            }
+                            InlineStyle::Link => {
+                                format.color = Color32::from_rgb(136, 192, 208);
+                                format.underline = egui::Stroke::NONE;
+                            }
+                            InlineStyle::TextColor([r, g, b, a]) => {
+                                format.color = Color32::from_rgba_unmultiplied(*r, *g, *b, *a);
+                            }
+                            InlineStyle::Highlight([r, g, b, a]) => {
+                                let alpha = (*a as u16 * 75 / 255) as u8;
+                                format.background =
+                                    Color32::from_rgba_unmultiplied(*r, *g, *b, alpha);
+                            }
+                            InlineStyle::Math => {
+                                format.italics = true;
+                                format.color = Color32::from_rgb(143, 188, 187);
+                                format.background =
+                                    Color32::from_rgba_unmultiplied(143, 188, 187, 40);
+                            }
+                        }
+                    }
+                }
+                job.sections.push(egui::text::LayoutSection {
+                    leading_space: 0.0,
+                    byte_range: start.into()..end.into(),
+                    format,
+                });
+            }
+            if job.sections.is_empty() {
+                job.sections.push(egui::text::LayoutSection {
+                    leading_space: 0.0,
+                    byte_range: 0.into()..0.into(),
+                    format: base,
+                });
+            }
+        }
     }
     job.wrap.max_width = if width.is_infinite() {
         f32::INFINITY

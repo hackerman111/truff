@@ -98,6 +98,7 @@ pub struct FolderWikiData {
     pub active_tab: WikiTab,
     pub selected_index: usize,
     pub search_query: String,
+    pub search_active: bool,
     pub collapsed_notes: HashSet<String>,
 }
 
@@ -125,12 +126,31 @@ impl FolderWikiData {
             active_tab: WikiTab::Overview,
             selected_index: 0,
             search_query: String::new(),
+            search_active: false,
             collapsed_notes: HashSet::new(),
         }
     }
 
+    pub fn clear_memory(&mut self) {
+        self.notes.clear();
+        self.notes.shrink_to_fit();
+        self.tasks.clear();
+        self.tasks.shrink_to_fit();
+        self.backlinks.clear();
+        self.backlinks.shrink_to_fit();
+        self.master_preview.clear();
+        self.master_preview.shrink_to_fit();
+        self.collapsed_notes.clear();
+        self.collapsed_notes.shrink_to_fit();
+        self.search_query.clear();
+        self.search_query.shrink_to_fit();
+        self.selected_index = 0;
+        self.search_active = false;
+    }
+
     /// Loads notes, master file, tasks and statistics from the application's catalog/workspace.
     pub fn load_from_vault(&mut self, folder: &str, app: &Application) {
+        self.search_active = false;
         self.folder_path = folder.trim_matches('/').to_string();
         self.folder_name = if self.folder_path.is_empty() {
             "Корень хранилища".to_string()
@@ -160,7 +180,6 @@ impl FolderWikiData {
             format!("{}/README.md", self.folder_path)
         };
 
-        // Collect matching file paths
         let folder_prefix = if self.folder_path.is_empty() {
             String::new()
         } else {
@@ -220,13 +239,12 @@ impl FolderWikiData {
                 .unwrap_or(file_path)
                 .to_string();
 
-            // Try reading buffer if currently open in workspace
             let mut line_count = 0;
             let mut byte_size = 0;
             let mut headings = Vec::new();
             let mut note_tasks = Vec::new();
+            let capture_preview = is_master && self.master_preview.is_empty();
 
-            // Check if buffer is resident in workspace
             let buffers = app.shell.workspace().buffers();
             if let Some(buf) = buffers
                 .get_by_path(std::path::Path::new(file_path))
@@ -234,29 +252,18 @@ impl FolderWikiData {
             {
                 line_count = buf.line_len();
                 byte_size = buf.byte_len();
-                extract_note_facts(buf, &mut headings, &mut note_tasks, file_path, &name);
+                let text = buf.as_str();
+                extract_text_facts(&text, &mut headings, &mut note_tasks, file_path, &name);
+                if capture_preview {
+                    self.master_preview = text.lines().take(6).map(str::to_owned).collect();
+                }
             } else if let Some(root) = app.vault_path() {
-                // Read from disk safely if not resident
                 let full = root.join(file_path);
                 if let Ok(content) = std::fs::read_to_string(&full) {
                     byte_size = content.len();
                     line_count = content.lines().count();
                     extract_text_facts(&content, &mut headings, &mut note_tasks, file_path, &name);
-                }
-            }
-
-            if is_master && self.master_preview.is_empty() {
-                // Populate master preview lines
-                let buffers = app.shell.workspace().buffers();
-                if let Some(buf) = buffers
-                    .get_by_path(std::path::Path::new(file_path))
-                    .and_then(|id| buffers.get_buffer(id))
-                {
-                    let text = buf.as_str();
-                    self.master_preview = text.lines().take(6).map(str::to_owned).collect();
-                } else if let Some(root) = app.vault_path() {
-                    let full = root.join(file_path);
-                    if let Ok(content) = std::fs::read_to_string(&full) {
+                    if capture_preview {
                         self.master_preview = content.lines().take(6).map(str::to_owned).collect();
                     }
                 }
@@ -278,7 +285,6 @@ impl FolderWikiData {
             });
         }
 
-        // Sort notes so master file comes first, then alphabetically
         self.notes.sort_by(|a, b| {
             if a.is_master != b.is_master {
                 b.is_master.cmp(&a.is_master)
@@ -287,7 +293,6 @@ impl FolderWikiData {
             }
         });
 
-        // Collect backlinks from app backlinks
         for bl in &app.backlinks {
             let target_in_folder = file_paths.iter().any(|p| p.ends_with(&bl.raw_target));
             if target_in_folder {
@@ -298,6 +303,73 @@ impl FolderWikiData {
                 });
             }
         }
+        self.clamp_selection();
+    }
+
+    pub fn filtered_notes(&self) -> Vec<&WikiNoteItem> {
+        let query = self.search_query.trim().to_lowercase();
+        if query.is_empty() {
+            return self.notes.iter().collect();
+        }
+        self.notes
+            .iter()
+            .filter(|n| {
+                n.name.to_lowercase().contains(&query)
+                    || n.path.to_lowercase().contains(&query)
+                    || n.headings
+                        .iter()
+                        .any(|(_, text, _)| text.to_lowercase().contains(&query))
+            })
+            .collect()
+    }
+
+    pub fn filtered_tasks(&self) -> Vec<&WikiTask> {
+        let query = self.search_query.trim().to_lowercase();
+        if query.is_empty() {
+            return self.tasks.iter().collect();
+        }
+        self.tasks
+            .iter()
+            .filter(|t| {
+                t.text.to_lowercase().contains(&query)
+                    || t.note_title.to_lowercase().contains(&query)
+            })
+            .collect()
+    }
+
+    pub fn filtered_backlinks(&self) -> Vec<&WikiBacklink> {
+        let query = self.search_query.trim().to_lowercase();
+        if query.is_empty() {
+            return self.backlinks.iter().collect();
+        }
+        self.backlinks
+            .iter()
+            .filter(|bl| {
+                bl.source_note.to_lowercase().contains(&query)
+                    || bl.target_note.to_lowercase().contains(&query)
+                    || bl.snippet.to_lowercase().contains(&query)
+            })
+            .collect()
+    }
+
+    /// Resolves a flat row index in `NotesTree` to `(note_path, optional_heading_line)`.
+    pub fn notes_tree_target(&self, row_index: usize) -> Option<(&str, Option<usize>)> {
+        let mut cur = 0usize;
+        for note in self.filtered_notes() {
+            if cur == row_index {
+                return Some((note.path.as_str(), None));
+            }
+            cur += 1;
+            if !self.collapsed_notes.contains(&note.path) {
+                for (_, _, line) in &note.headings {
+                    if cur == row_index {
+                        return Some((note.path.as_str(), Some(*line)));
+                    }
+                    cur += 1;
+                }
+            }
+        }
+        None
     }
 
     pub fn total_tasks(&self) -> usize {
@@ -331,20 +403,30 @@ impl FolderWikiData {
         }
     }
 
+    pub fn clamp_selection(&mut self) {
+        let max_len = self.current_tab_item_count();
+        if max_len == 0 {
+            self.selected_index = 0;
+        } else if self.selected_index >= max_len {
+            self.selected_index = max_len - 1;
+        }
+    }
+
     pub fn current_tab_item_count(&self) -> usize {
         match self.active_tab {
-            WikiTab::Overview | WikiTab::MetadataTable => self.notes.len(),
+            WikiTab::Overview | WikiTab::MetadataTable => self.filtered_notes().len(),
             WikiTab::NotesTree => {
-                let mut count = self.notes.len();
-                for note in &self.notes {
+                let notes = self.filtered_notes();
+                let mut count = notes.len();
+                for note in notes {
                     if !self.collapsed_notes.contains(&note.path) {
                         count += note.headings.len();
                     }
                 }
                 count
             }
-            WikiTab::Tasks => self.tasks.len(),
-            WikiTab::Backlinks => self.backlinks.len(),
+            WikiTab::Tasks => self.filtered_tasks().len(),
+            WikiTab::Backlinks => self.filtered_backlinks().len(),
         }
     }
 
@@ -354,9 +436,11 @@ impl FolderWikiData {
         } else {
             self.collapsed_notes.insert(path.to_string());
         }
+        self.clamp_selection();
     }
 }
 
+#[allow(dead_code)]
 fn extract_note_facts(
     buf: &Buffer,
     headings: &mut Vec<(u8, String, usize)>,
@@ -375,41 +459,26 @@ fn extract_text_facts(
     path: &str,
     note_name: &str,
 ) {
+    use crate::navigator::tasks::{HubTaskStatus, parse_task_line};
+
     for (line_idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
-        // Headings
         if trimmed.starts_with('#') {
-            let level = trimmed.chars().take_while(|&c| c == '#').count();
-            if level > 0 && level <= 6 {
-                let heading_text = trimmed[level..].trim().to_string();
+            let level = trimmed.bytes().take_while(|&b| b == b'#').count();
+            if (1..=6).contains(&level) {
+                let heading_text = trimmed[level..].trim();
                 if !heading_text.is_empty() {
-                    headings.push((level as u8, heading_text, line_idx + 1));
+                    headings.push((level as u8, heading_text.to_string(), line_idx + 1));
                 }
             }
         }
-        // Tasks: - [ ] or - [x] or * [ ]
-        if let Some(rest) = trimmed
-            .strip_prefix("- [ ] ")
-            .or_else(|| trimmed.strip_prefix("* [ ] "))
-        {
+        if let Some((_, status, task_text)) = parse_task_line(line) {
             tasks.push(WikiTask {
                 note_path: path.to_string(),
                 note_title: note_name.to_string(),
                 line: line_idx + 1,
-                text: rest.to_string(),
-                checked: false,
-            });
-        } else if let Some(rest) = trimmed
-            .strip_prefix("- [x] ")
-            .or_else(|| trimmed.strip_prefix("- [X] "))
-            .or_else(|| trimmed.strip_prefix("* [x] "))
-        {
-            tasks.push(WikiTask {
-                note_path: path.to_string(),
-                note_title: note_name.to_string(),
-                line: line_idx + 1,
-                text: rest.to_string(),
-                checked: true,
+                text: task_text.to_string(),
+                checked: status == HubTaskStatus::Done,
             });
         }
     }

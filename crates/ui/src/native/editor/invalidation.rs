@@ -45,10 +45,17 @@ impl EditorWidget {
                 != Some(change.revision)
             || change.invalidate_suffix
         {
+            if self
+                .cached_headings
+                .as_ref()
+                .is_some_and(|c| c.buffer_id == buffer.id())
+            {
+                self.cached_headings = None;
+            }
             return;
         }
         let old_count = self.heights.block_count();
-        let new_count = super::viewport::line_count(buffer);
+        let new_count = super::preview::line_count(buffer);
         let line_delta = new_count as isize - old_count as isize;
         if change.new_range.end > buffer.byte_len() {
             return;
@@ -61,6 +68,8 @@ impl EditorWidget {
         if first > old_last || old_last >= old_count || new_last >= new_count {
             return;
         }
+        self.invalidate_active_table_on_edit(first, old_last, line_delta);
+        self.rebase_headings_and_folds(buffer, first, old_last, new_last, line_delta);
         let old_top = self
             .heights
             .block_at_y((self.scroll - Self::TOP_MARGIN).max(0.0));

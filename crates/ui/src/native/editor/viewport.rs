@@ -1,12 +1,18 @@
-use super::color;
-use super::paragraph::{Paragraph, ParagraphStyle, ParagraphView, TASK_PADDING_X};
-use super::{EditorWidget, LINE_HEIGHT, ViewScroll};
-use crate::app::global_config::TypographyConfig;
-use crate::editor::{EditorInput, ProjectionMode, ScrollAnchor, VisualPos};
-use crate::overlays::FlashTarget;
-use crate::theme::Theme;
 use egui::{Sense, Vec2};
 use truff_core::{Buffer, text::BytePos, vim::Mode, workspace::View};
+
+use super::color;
+use super::paragraph::{Paragraph, ParagraphStyle, ParagraphView, TASK_PADDING_X};
+use super::preview::{
+    line_count, line_start, normalize_list_presentation, slice_is_table_delimiter,
+    slice_is_table_row,
+};
+use super::{EditorWidget, LINE_HEIGHT, ViewScroll};
+use crate::app::global_config::TypographyConfig;
+use crate::editor::{EditorInput, ProjectionMode, ScrollAnchor};
+use crate::overlays::FlashTarget;
+use crate::theme::Theme;
+
 const MAX_LINE_BYTES: usize = 4096;
 
 impl EditorWidget {
@@ -113,9 +119,9 @@ impl EditorWidget {
             }
         }
         if !self.input_blocked && response.hovered() {
-            self.scroll_by(-ui.input(|input| input.smooth_scroll_delta.y));
-            self.horizontal =
-                (self.horizontal - ui.input(|input| input.smooth_scroll_delta.x)).max(0.0);
+            let scroll_delta = ui.input(|input| input.smooth_scroll_delta);
+            self.scroll_by(-scroll_delta.y);
+            self.horizontal = (self.horizontal - scroll_delta.x).max(0.0);
         }
         if !self.input_blocked
             && response.dragged()
@@ -159,30 +165,18 @@ impl EditorWidget {
         self.cache
             .retain(|line, _| (*line >= first && *line < last) || (follow && *line == cursor_line));
         let foreground = color(theme.text_primary);
-        let selection = if mode == Mode::VisualChar {
-            let start = view.anchor().get().min(cursor);
-            let end = view.anchor().get().max(cursor);
-            let end = buffer
-                .grapheme_next(BytePos::new(end))
-                .map_or(buffer.byte_len(), BytePos::get);
-            Some(start..end)
-        } else if mode == Mode::VisualLine {
-            let first = buffer.line_of_byte(view.anchor().get().min(cursor));
-            let last = buffer.line_of_byte(view.anchor().get().max(cursor));
-            let start = buffer.byte_of_line(first);
-            let end = if last + 1 < buffer.line_len() {
-                buffer.byte_of_line(last + 1)
-            } else {
-                buffer.byte_len()
-            };
-            Some(start..end)
-        } else if view.anchor().get() != cursor {
-            Some(view.anchor().get().min(cursor)..view.anchor().get().max(cursor))
-        } else {
-            None
-        };
+        let selection = buffer.selection_range(view.anchor(), BytePos::new(cursor), mode);
         let mut clicked = None;
         let syntax = self.syntax.snapshot(buffer);
+        let pixels_per_point = ui.ctx().pixels_per_point();
+        let cursor_visible = self.blink.resolve(
+            ui,
+            mode,
+            cursor_changed,
+            buffer.revision(),
+            self.input_blocked,
+        );
+
         // Measure a distant target directly, even when it is outside the virtual window.
         let target = (follow && !(first..last).contains(&cursor_line)).then_some(cursor_line);
         for line in (first..last).chain(target) {
@@ -192,8 +186,6 @@ impl EditorWidget {
             let start = line_start(buffer, line);
             let end = line_start(buffer, line + 1);
             let mut range = start..end;
-            // A pathological logical line uses a bounded source window around its caret.
-            // Other lines remain visible; the Rope and source offsets stay authoritative.
             let long = end - start > MAX_LINE_BYTES;
             if long {
                 let center = if line == cursor_line { cursor } else { start };
@@ -215,7 +207,7 @@ impl EditorWidget {
             let width = if long { f32::INFINITY } else { content_width };
             let style = ParagraphStyle {
                 foreground,
-                pixels_per_point: ui.ctx().pixels_per_point(),
+                pixels_per_point,
                 width,
                 projection: if long {
                     ProjectionMode::Source
@@ -243,26 +235,18 @@ impl EditorWidget {
                             syntax.line_presentation_in_rope(buffer.rope(), range.clone())
                         })
                         .unwrap_or_default();
-                    if let Some(list) = &mut presentation.list {
-                        list.range.start = list.range.start.saturating_sub(range.start);
-                        list.range.end = list
-                            .range
-                            .end
-                            .saturating_sub(range.start)
-                            .min(slice.byte_len());
-                        let line_str = slice.to_string();
-                        let ws_len = line_str[list.range.start..list.range.end]
-                            .bytes()
-                            .take_while(|b| *b == b' ' || *b == b'\t')
-                            .count();
-                        list.range.start += ws_len;
-                        if let truff_core::markdown::presentation::ListKind::Task {
-                            checkbox, ..
-                        } = &mut list.kind
-                        {
-                            *checkbox = checkbox.saturating_sub(range.start);
-                        }
-                    }
+                    normalize_list_presentation(
+                        &mut presentation,
+                        range.start,
+                        slice.byte_len(),
+                        |marker_range| {
+                            slice
+                                .byte_slice(marker_range)
+                                .bytes()
+                                .take_while(|&b| b == b' ' || b == b'\t')
+                                .count()
+                        },
+                    );
                     if is_table {
                         if slice_is_table_delimiter(&slice) {
                             presentation.table_delimiter = true;
@@ -363,11 +347,12 @@ impl EditorWidget {
             } else if is_hidden_delimiter {
                 0.001
             } else {
-                entry.galley.size().y.max(LINE_HEIGHT)
+                entry.size().y.max(LINE_HEIGHT)
             };
             self.heights
                 .update_block_height(line, block_height, Some(&mut anchor));
         }
+
         self.scroll = anchor.scroll_offset_y;
         if scroll_pos.is_none()
             && follow
@@ -404,6 +389,7 @@ impl EditorWidget {
         if paint_first < first || paint_last > last {
             ui.ctx().request_repaint();
         }
+
         if typography.show_inline_title
             && let Some(title) = note_title
         {
@@ -436,6 +422,7 @@ impl EditorWidget {
                 }
             }
         }
+
         for line in paint_first..paint_last {
             if self.is_line_folded(line) {
                 continue;
@@ -453,218 +440,69 @@ impl EditorWidget {
                         },
                     Self::TOP_MARGIN + self.heights.y_for_block(line) - self.scroll,
                 );
-            let intersects_viewport = origin.y < rect.bottom()
-                && origin.y + entry.galley.size().y.max(LINE_HEIGHT) > rect.top();
-            if intersects_viewport {
-                if self.painted_lines.is_empty() {
-                    self.painted_lines.start = line;
-                    self.visible.start = entry.range.start;
-                }
-                self.painted_lines.end = line + 1;
-                self.visible.end = entry.range.end;
+            let entry_h = entry.size().y.max(LINE_HEIGHT);
+            let intersects_viewport = origin.y < rect.bottom() && origin.y + entry_h > rect.top();
+            if !intersects_viewport {
+                continue;
             }
-            if intersects_viewport {
-                let line_flash = if flash.is_empty() {
-                    &[][..]
-                } else {
-                    let start_idx =
-                        flash.partition_point(|t| t.source_range.start < entry.range.start);
-                    let end_idx = flash[start_idx..]
-                        .partition_point(|t| t.source_range.start < entry.range.end)
-                        + start_idx;
-                    &flash[start_idx..end_idx]
-                };
-                if let Some(caret) = entry.paint(
-                    &painter,
-                    origin,
-                    &ParagraphView {
-                        theme,
-                        selection: selection.as_ref(),
-                        cursor: (line == cursor_line).then_some(cursor),
-                        mode,
-                        preedit,
-                        flash: line_flash,
-                        content_width,
-                    },
-                ) {
-                    self.cursor_rect = Some(caret);
-                }
-            }
-            if intersects_viewport {
-                let is_heading = heading_items.iter().any(|h| h.line == line);
-                let is_folded = is_heading && self.is_heading_folded(buffer.id(), line);
-                if is_heading {
-                    let chevron_text = if is_folded { "▶" } else { "▼" };
-                    let chevron_pos = egui::pos2(origin.x - 18.0, origin.y + 4.0);
-                    let chevron_rect = egui::Rect::from_min_size(
-                        egui::pos2(origin.x - 24.0, origin.y),
-                        egui::vec2(22.0, entry.galley.size().y.max(LINE_HEIGHT)),
-                    );
-                    let is_hovered = response
-                        .hover_pos()
-                        .is_some_and(|p| chevron_rect.contains(p));
-                    if is_hovered {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    let chevron_color = if is_folded || is_hovered {
-                        color(theme.text_secondary)
-                    } else {
-                        color(theme.text_muted).gamma_multiply(0.6)
-                    };
-                    painter.text(
-                        chevron_pos,
-                        egui::Align2::LEFT_TOP,
-                        chevron_text,
-                        egui::FontId::proportional(11.0),
-                        chevron_color,
-                    );
-                    if response.clicked()
-                        && response
-                            .interact_pointer_pos()
-                            .is_some_and(|p| chevron_rect.contains(p))
-                    {
-                        clicked = Some(EditorInput::ToggleFold { heading_line: line });
-                    }
 
-                    if is_folded {
-                        let text_width = entry.galley.size().x;
-                        let badge_pos = egui::pos2(origin.x + text_width + 8.0, origin.y + 4.0);
-                        let badge_rect =
-                            egui::Rect::from_min_size(badge_pos, egui::vec2(24.0, 16.0));
-                        let badge_hovered =
-                            response.hover_pos().is_some_and(|p| badge_rect.contains(p));
-                        if badge_hovered {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                        let badge_bg = if badge_hovered {
-                            color(theme.bg_secondary)
-                        } else {
-                            color(theme.bg_secondary).gamma_multiply(0.7)
-                        };
-                        painter.rect_filled(badge_rect, 4.0, badge_bg);
-                        painter.text(
-                            badge_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "...",
-                            egui::FontId::proportional(11.0),
-                            color(theme.text_muted),
-                        );
-                        if response.clicked()
-                            && response
-                                .interact_pointer_pos()
-                                .is_some_and(|p| badge_rect.contains(p))
-                        {
-                            clicked = Some(EditorInput::ToggleFold { heading_line: line });
-                        }
-                    }
-                }
+            if self.painted_lines.is_empty() {
+                self.painted_lines.start = line;
+                self.visible.start = entry.range.start;
             }
-            let galley_origin = if entry.is_task() {
-                egui::pos2(origin.x + TASK_PADDING_X, origin.y)
+            self.painted_lines.end = line + 1;
+            self.visible.end = entry.range.end;
+
+            let line_flash = if flash.is_empty() {
+                &[][..]
             } else {
-                origin
+                let start_idx = flash.partition_point(|t| t.source_range.start < entry.range.start);
+                let end_idx = flash[start_idx..]
+                    .partition_point(|t| t.source_range.start < entry.range.end)
+                    + start_idx;
+                &flash[start_idx..end_idx]
             };
-            if intersects_viewport
-                && let Some(pointer_pos) = response.hover_pos()
-                && pointer_pos.y >= origin.y
-                && pointer_pos.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
-            {
-                let index = entry.cursor_from_pos(pointer_pos - galley_origin);
-                let visual = entry
-                    .display
-                    .visual_text()
-                    .char_indices()
-                    .nth(index.index.0)
-                    .map_or(entry.display.visual_text().len(), |(offset, _)| offset);
-                let source_offset = entry
-                    .display
-                    .visual_to_source(VisualPos::new(visual))
-                    .pos
-                    .get();
-                let is_on_link = entry.display.styled_spans().iter().any(|span| {
-                    span.style == crate::editor::InlineStyle::Link
-                        && source_offset >= span.content.start
-                        && source_offset <= span.content.end
-                });
-                if is_on_link {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
+            if let Some(caret) = entry.paint(
+                &painter,
+                origin,
+                &ParagraphView {
+                    theme,
+                    selection: selection.as_ref(),
+                    cursor: (line == cursor_line).then_some(cursor),
+                    cursor_visible,
+                    pixels_per_point,
+                    mode,
+                    preedit,
+                    flash: line_flash,
+                    content_width,
+                },
+            ) {
+                self.cursor_rect = Some(caret);
             }
-            if intersects_viewport
-                && clicked.is_none()
-                && (!self.input_blocked && (response.clicked() || response.dragged()))
-                && let Some(position) = response.interact_pointer_pos()
-                && let position = if response.dragged() {
-                    rect.shrink(1.0).clamp(position)
-                } else {
-                    position
-                }
-                && position.y >= origin.y
-                && position.y < origin.y + entry.galley.size().y.max(LINE_HEIGHT)
+
+            let is_heading = heading_items
+                .binary_search_by_key(&line, |h| h.line)
+                .is_ok();
+            if is_heading
+                && let Some(fold_click) = self.paint_fold_gutter_and_hit_test(
+                    &painter,
+                    &response,
+                    theme,
+                    (buffer.id(), line),
+                    entry,
+                    origin,
+                )
             {
-                let index = entry.cursor_from_pos(position - galley_origin);
-                let visual = entry
-                    .display
-                    .visual_text()
-                    .char_indices()
-                    .nth(index.index.0)
-                    .map_or(entry.display.visual_text().len(), |(offset, _)| offset);
-                if response.clicked()
-                    && let Some(checkbox) = entry.display.task_at_visual(VisualPos::new(visual))
-                {
-                    clicked = Some(EditorInput::ToggleTask {
-                        checkbox: entry.range.start + checkbox,
-                    });
-                    continue;
-                }
-                let source_offset = entry
-                    .display
-                    .visual_to_source(VisualPos::new(visual))
-                    .pos
-                    .get();
-                if response.clicked() {
-                    let link_span = entry.display.styled_spans().iter().find(|span| {
-                        span.style == crate::editor::InlineStyle::Link
-                            && source_offset >= span.content.start
-                            && source_offset <= span.content.end
-                    });
-                    if let Some(span) = link_span
-                        && let Some(dest) =
-                            extract_link_destination(entry.display.source_text(), &span.content)
-                    {
-                        match dest {
-                            LinkDestination::External(url) => {
-                                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                                clicked = Some(EditorInput::SetSelection {
-                                    anchor: entry.range.start + source_offset,
-                                    head: entry.range.start + source_offset,
-                                });
-                            }
-                            LinkDestination::InternalHeading(heading) => {
-                                clicked = Some(EditorInput::FollowLink(format!("#{heading}")));
-                            }
-                            LinkDestination::Note { path, heading } => {
-                                let target = match heading {
-                                    Some(h) => format!("{path}#{h}"),
-                                    None => path,
-                                };
-                                clicked = Some(EditorInput::FollowLink(target));
-                            }
-                        }
-                        continue;
-                    }
-                }
-                let source = entry.range.start + source_offset;
-                clicked = Some(EditorInput::SetSelection {
-                    anchor: if response.dragged() {
-                        view.anchor().get()
-                    } else {
-                        source
-                    },
-                    head: source,
-                });
+                clicked = Some(fold_click);
+            }
+
+            if let Some(pointer_input) =
+                self.hit_test_line_pointer(&response, rect, view, entry, origin, clicked.is_some())
+            {
+                clicked = Some(pointer_input);
             }
         }
+
         if !self.input_blocked && clicked.is_none() && (response.clicked() || response.dragged()) {
             let end = buffer.byte_len();
             clicked = Some(EditorInput::SetSelection {
@@ -676,6 +514,7 @@ impl EditorWidget {
                 head: end,
             });
         }
+
         if mode == Mode::Insert
             && let Some(cursor_rect) = self.cursor_rect
         {
@@ -688,6 +527,7 @@ impl EditorWidget {
                 })
             });
         }
+
         let (top, _) = self
             .heights
             .block_at_y((self.scroll - Self::TOP_MARGIN).max(0.0));
@@ -702,278 +542,5 @@ impl EditorWidget {
             },
         );
         clicked
-    }
-}
-
-pub(super) fn line_count(buffer: &Buffer) -> usize {
-    let trailing = buffer
-        .rope()
-        .chunks()
-        .next_back()
-        .is_some_and(|chunk| chunk.ends_with('\n'));
-    (buffer.line_len() + usize::from(trailing)).max(1)
-}
-
-fn line_start(buffer: &Buffer, line: usize) -> usize {
-    if line >= buffer.line_len() {
-        buffer.byte_len()
-    } else {
-        buffer.byte_of_line(line)
-    }
-}
-
-fn slice_is_table_row(slice: &truff_core::RopeSlice<'_>) -> bool {
-    let mut non_ws = slice
-        .chunks()
-        .flat_map(str::bytes)
-        .filter(|b| !b.is_ascii_whitespace());
-    let Some(first) = non_ws.next() else {
-        return false;
-    };
-    first == b'|' && non_ws.next_back() == Some(b'|')
-}
-
-fn slice_is_table_delimiter(slice: &truff_core::RopeSlice<'_>) -> bool {
-    slice_is_table_row(slice)
-        && slice.chunks().flat_map(str::bytes).any(|b| b == b'-')
-        && slice
-            .chunks()
-            .flat_map(str::bytes)
-            .all(|b| b.is_ascii_whitespace() || matches!(b, b'|' | b'-' | b':'))
-}
-
-impl EditorWidget {
-    fn get_or_compute_table_col_widths(
-        &mut self,
-        buffer: &Buffer,
-        line: usize,
-    ) -> Option<std::sync::Arc<Vec<usize>>> {
-        if let Some((range, widths)) = &self.active_table
-            && range.contains(&line)
-        {
-            return Some(widths.clone());
-        }
-
-        let mut start_line = line;
-        while start_line > 0 {
-            let prev = start_line - 1;
-            let s = line_start(buffer, prev);
-            let e = line_start(buffer, start_line);
-            if slice_is_table_row(&buffer.slice(s..e)) {
-                start_line = prev;
-            } else {
-                break;
-            }
-        }
-
-        let mut end_line = line + 1;
-        while end_line < buffer.line_len() {
-            let s = line_start(buffer, end_line);
-            let e = line_start(buffer, end_line + 1);
-            if slice_is_table_row(&buffer.slice(s..e)) {
-                end_line += 1;
-            } else {
-                break;
-            }
-        }
-
-        let mut rows = Vec::with_capacity(end_line - start_line);
-        for l in start_line..end_line {
-            let s = line_start(buffer, l);
-            let e = line_start(buffer, l + 1);
-            let mut line_str = buffer.slice(s..e).to_string();
-            while line_str.ends_with('\n') || line_str.ends_with('\r') {
-                line_str.pop();
-            }
-            rows.push(line_str);
-        }
-
-        let row_refs: Vec<&str> = rows.iter().map(|s| s.as_str()).collect();
-        let widths = truff_core::markdown::table::compute_table_col_widths(row_refs)?;
-        let arc_widths = std::sync::Arc::new(widths);
-        self.active_table = Some((start_line..end_line, arc_widths.clone()));
-        Some(arc_widths)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LinkDestination {
-    External(String),
-    InternalHeading(String),
-    Note {
-        path: String,
-        heading: Option<String>,
-    },
-}
-
-pub(crate) fn extract_link_destination(
-    source_text: &str,
-    span_content: &std::ops::Range<usize>,
-) -> Option<LinkDestination> {
-    let suffix = source_text.get(span_content.end..)?;
-    let prefix = source_text.get(..span_content.start)?;
-
-    let target = if suffix.starts_with("]]") && prefix.ends_with("[[") {
-        let inner = source_text.get(span_content.clone())?;
-        inner.split('|').next().unwrap_or(inner).trim()
-    } else if suffix.starts_with("]]") && prefix.ends_with('|') {
-        let open_pos = prefix.rfind("[[")?;
-        let inside = &prefix[open_pos + 2..];
-        if inside.contains("]]") {
-            return None;
-        }
-        inside.trim_end_matches('|').trim_end_matches('\\').trim()
-    } else {
-        ""
-    };
-
-    if !target.is_empty() {
-        if let Some(heading) = target.strip_prefix('#') {
-            let h_trim = heading.trim();
-            if !h_trim.is_empty() {
-                return Some(LinkDestination::InternalHeading(h_trim.to_string()));
-            }
-        } else if let Some((note, heading)) = target.split_once('#') {
-            let n_trim = note.trim();
-            let h_trim = heading.trim();
-            if !n_trim.is_empty() {
-                return Some(LinkDestination::Note {
-                    path: n_trim.to_string(),
-                    heading: (!h_trim.is_empty()).then(|| h_trim.to_string()),
-                });
-            }
-        } else {
-            return Some(LinkDestination::Note {
-                path: target.to_string(),
-                heading: None,
-            });
-        }
-    }
-    if let Some(tail) = source_text.get(span_content.end..)
-        && let Some(after_paren) = tail.strip_prefix("](")
-        && let Some(close_paren) = after_paren.find(')')
-    {
-        let raw_url = &after_paren[..close_paren];
-        let mut url = raw_url.trim();
-        if let Some(first_word) = url.split_whitespace().next() {
-            url = first_word;
-        }
-        let clean = url.trim_matches(['<', '>']);
-        if clean.starts_with("http://")
-            || clean.starts_with("https://")
-            || clean.starts_with("mailto:")
-            || clean.starts_with("ftp://")
-        {
-            return Some(LinkDestination::External(clean.to_string()));
-        }
-        if clean.starts_with("www.") {
-            return Some(LinkDestination::External(format!("https://{clean}")));
-        }
-        if let Some(heading) = clean.strip_prefix('#') {
-            let h_trim = heading.trim();
-            if !h_trim.is_empty() {
-                return Some(LinkDestination::InternalHeading(h_trim.to_string()));
-            }
-        }
-        if let Some((note, heading)) = clean.split_once('#') {
-            let n_trim = note.trim();
-            let h_trim = heading.trim();
-            if !n_trim.is_empty() {
-                return Some(LinkDestination::Note {
-                    path: n_trim.to_string(),
-                    heading: (!h_trim.is_empty()).then(|| h_trim.to_string()),
-                });
-            }
-        } else if !clean.is_empty() {
-            return Some(LinkDestination::Note {
-                path: clean.to_string(),
-                heading: None,
-            });
-        }
-    }
-    if let Some(slice) = source_text.get(span_content.clone()) {
-        let trimmed = slice.trim().trim_matches(['<', '>']);
-        if trimmed.starts_with("http://")
-            || trimmed.starts_with("https://")
-            || trimmed.starts_with("mailto:")
-        {
-            return Some(LinkDestination::External(trimmed.to_string()));
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_link_destination_markdown_internal_heading() {
-        let text = "Check [TOC](#heading-1) now";
-        let start = text.find("TOC").unwrap();
-        let span = start..start + 3;
-        assert_eq!(
-            extract_link_destination(text, &span),
-            Some(LinkDestination::InternalHeading("heading-1".into()))
-        );
-    }
-
-    #[test]
-    fn test_extract_link_destination_markdown_note_and_heading() {
-        let text = "See [doc](notes/guide.md#setup) here";
-        let start = text.find("doc").unwrap();
-        let span = start..start + 3;
-        assert_eq!(
-            extract_link_destination(text, &span),
-            Some(LinkDestination::Note {
-                path: "notes/guide.md".into(),
-                heading: Some("setup".into()),
-            })
-        );
-    }
-
-    #[test]
-    fn test_extract_link_destination_wikilink_heading_only() {
-        let text = "Go to [[#Section Two]]";
-        let start = text.find("#Section Two").unwrap();
-        let span = start..start + "#Section Two".len();
-        assert_eq!(
-            extract_link_destination(text, &span),
-            Some(LinkDestination::InternalHeading("Section Two".into()))
-        );
-    }
-
-    #[test]
-    fn test_extract_link_destination_wikilink_note_and_heading() {
-        let text = "Refer to [[My Note#Important Points|Important]]";
-        let start = text.find("My Note#Important Points|Important").unwrap();
-        let span = start..start + "My Note#Important Points|Important".len();
-        assert_eq!(
-            extract_link_destination(text, &span),
-            Some(LinkDestination::Note {
-                path: "My Note".into(),
-                heading: Some("Important Points".into()),
-            })
-        );
-        let alias_start = text.find("Important]]").unwrap();
-        let alias_span = alias_start..alias_start + "Important".len();
-        assert_eq!(
-            extract_link_destination(text, &alias_span),
-            Some(LinkDestination::Note {
-                path: "My Note".into(),
-                heading: Some("Important Points".into()),
-            })
-        );
-    }
-
-    #[test]
-    fn test_extract_link_destination_external_url() {
-        let text = "Visit [Google](https://google.com)";
-        let start = text.find("Google").unwrap();
-        let span = start..start + 6;
-        assert_eq!(
-            extract_link_destination(text, &span),
-            Some(LinkDestination::External("https://google.com".into()))
-        );
     }
 }

@@ -43,7 +43,7 @@ impl Application {
             .editor_buffer()
             .ok_or("Selection buffer unavailable")?;
         let cursor = view.head().get();
-        if let Some(range) = crate::overlays::word_boundary_at(buffer, cursor) {
+        if let Some(range) = buffer.word_boundary_at(cursor) {
             return Ok((
                 SelectionTarget {
                     view: view.id(),

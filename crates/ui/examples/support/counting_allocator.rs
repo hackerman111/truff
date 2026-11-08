@@ -41,6 +41,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
     }
 }
 
+#[allow(dead_code)]
 pub fn measure<T>(name: &str, operation: impl FnOnce() -> T) -> T {
     let before = LIVE.load(Relaxed);
     let allocations = ALLOCATIONS.load(Relaxed);
@@ -53,4 +54,9 @@ pub fn measure<T>(name: &str, operation: impl FnOnce() -> T) -> T {
     let count = ALLOCATIONS.load(Relaxed) - allocations;
     println!("{name},{live},{peak},{count},{ns}");
     result
+}
+
+#[allow(dead_code)]
+pub fn live() -> usize {
+    LIVE.load(Relaxed)
 }

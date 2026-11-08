@@ -103,9 +103,7 @@ pub(super) fn show(
                 {
                     dialogs.vault.open = true;
                 }
-                let existing_vaults = recent.paths();
-
-                if !existing_vaults.is_empty() {
+                if !recent.paths().is_empty() {
                     ui.add_space(12.0);
                     ui.label(
                         egui::RichText::new("НЕДАВНИЕ")
@@ -114,54 +112,7 @@ pub(super) fn show(
                             .color(color(theme.text_muted)),
                     );
                     ui.add_space(4.0);
-                    let mut remove_path = None;
-                    for path in existing_vaults {
-                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("vault");
-                        let path_str = path.display().to_string();
-
-                        ui.horizontal(|ui| {
-                            let (icon_rect, _) = ui
-                                .allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-                            icons::render_icon(
-                                ui.painter(),
-                                icons::Icon::Folder,
-                                icon_rect,
-                                color(theme.accent),
-                                1.2,
-                            );
-
-                            let resp = ui
-                                .selectable_label(
-                                    false,
-                                    egui::RichText::new(name).color(color(theme.text_primary)),
-                                )
-                                .on_hover_text(&path_str);
-                            if resp.clicked()
-                                && let Err(e) = application.open_vault(path)
-                            {
-                                application.status = e.to_string();
-                            }
-
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if widgets::icon_button(
-                                        ui,
-                                        icons::Icon::Close,
-                                        "Удалить из недавних",
-                                    )
-                                    .clicked()
-                                    {
-                                        remove_path = Some(path.clone());
-                                    }
-                                },
-                            );
-                        });
-                        ui.add_space(2.0);
-                    }
-                    if let Some(to_remove) = remove_path {
-                        recent.remove(&to_remove);
-                    }
+                    recent.show_rows(application, ui, theme, false);
                 }
             } else {
                 let model = application.shell.sidebar_model();

@@ -1,12 +1,16 @@
 mod paint;
+mod spans;
 pub(super) mod table;
-use crate::app::global_config::TypographyConfig;
-use crate::editor::{DisplayMap, ProjectionMode};
-use egui::{Color32, Galley, Painter};
-pub(super) use paint::ParagraphView;
+
 use std::ops::Range;
 use std::sync::Arc;
+
+use egui::{Color32, Galley, Painter, Vec2};
 use truff_core::text::BytePos;
+
+use crate::app::global_config::TypographyConfig;
+use crate::editor::{DisplayMap, ProjectionMode};
+pub(super) use paint::ParagraphView;
 
 pub(super) struct Paragraph {
     pub(super) range: Range<usize>,
@@ -21,6 +25,7 @@ pub(super) struct Paragraph {
     pub(super) width: f32,
     typography: TypographyKey,
     pub(super) table_row: Option<table::TableRowLayout>,
+    pub(super) guide_xs: Box<[f32]>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -49,6 +54,7 @@ pub(super) struct ParagraphStyle<'a> {
     pub(super) typography: &'a TypographyConfig,
     pub(super) in_insert_mode: bool,
 }
+
 impl Paragraph {
     pub(super) fn new(
         range: Range<usize>,
@@ -71,20 +77,8 @@ impl Paragraph {
             BytePos::new(usize::MAX),
             None,
         );
-        let (mut galley, text_indent) = super::super::paint::shape(
-            painter,
-            &display,
-            style.foreground,
-            style.width,
-            style.typography,
-        );
-        if let Some(table) = &table_row {
-            let galley_mut = std::sync::Arc::make_mut(&mut galley);
-            galley_mut.rect = egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::Vec2::new(table.total_width, table.height),
-            );
-        }
+        let (galley, text_indent, guide_xs) =
+            shape_paragraph_or_table(painter, &display, &presentation, &table_row, style);
         Self {
             range,
             display,
@@ -98,8 +92,20 @@ impl Paragraph {
             width: style.width,
             typography: style.typography.into(),
             table_row,
+            guide_xs,
         }
     }
+
+    /// Logical layout dimensions of this paragraph (delegating to `TableRowLayout` on table rows).
+    #[inline]
+    pub(super) fn size(&self) -> Vec2 {
+        if let Some(table) = &self.table_row {
+            Vec2::new(table.total_width, table.height)
+        } else {
+            self.galley.size()
+        }
+    }
+
     /// Synchronizes view-dependent markers and reshapes only if the rendered paragraph changes.
     pub(super) fn refresh(
         &mut self,
@@ -138,22 +144,16 @@ impl Paragraph {
             cursor,
             selection,
         );
-        let (mut galley, text_indent) = super::super::paint::shape(
+        let (galley, text_indent, guide_xs) = shape_paragraph_or_table(
             painter,
             &self.display,
-            style.foreground,
-            style.width,
-            style.typography,
+            &self.presentation,
+            &self.table_row,
+            style,
         );
-        if let Some(table) = &self.table_row {
-            let galley_mut = std::sync::Arc::make_mut(&mut galley);
-            galley_mut.rect = egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::Vec2::new(table.total_width, table.height),
-            );
-        }
         self.galley = galley;
         self.text_indent = text_indent;
+        self.guide_xs = guide_xs;
         self.color = style.foreground;
         self.pixels_per_point = style.pixels_per_point;
         self.width = style.width;
@@ -181,6 +181,41 @@ impl Paragraph {
             self.display.is_task()
         }
     }
+}
+
+fn shape_paragraph_or_table(
+    painter: &Painter,
+    display: &DisplayMap,
+    presentation: &truff_core::markdown::presentation::LinePresentation,
+    table_row: &Option<table::TableRowLayout>,
+    style: ParagraphStyle<'_>,
+) -> (Arc<Galley>, f32, Box<[f32]>) {
+    // Table rows shape and paint their own cells; skip shaping the raw pipe-delimited line.
+    if table_row.is_some() {
+        let empty =
+            painter.layout_no_wrap(String::new(), egui::FontId::default(), style.foreground);
+        return (empty, 0.0, Box::default());
+    }
+    let (galley, text_indent) = super::super::paint::shape(
+        painter,
+        display,
+        style.foreground,
+        style.width,
+        style.typography,
+    );
+    let list_depth = presentation.list.as_ref().map_or(0, |l| l.depth);
+    let guide_xs = if list_depth > 0 {
+        let font = galley
+            .job
+            .sections
+            .first()
+            .map(|s| s.format.font_id.clone())
+            .unwrap_or_else(|| egui::FontId::new(15.0, egui::FontFamily::Proportional));
+        spans::compute_list_guide_offsets(painter, &font, style.foreground, list_depth)
+    } else {
+        Box::default()
+    };
+    (galley, text_indent, guide_xs)
 }
 
 pub const TASK_PADDING_X: f32 = 10.0;

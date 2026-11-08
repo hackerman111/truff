@@ -308,6 +308,69 @@ impl Buffer {
         start..end
     }
 
+    /// Active selection byte range for `mode`, or `None` when no text is selected.
+    pub fn selection_range(
+        &self,
+        anchor: BytePos,
+        head: BytePos,
+        mode: crate::vim::Mode,
+    ) -> Option<Range<usize>> {
+        let range = match mode {
+            crate::vim::Mode::VisualChar => self.visual_char_inclusive_range(anchor, head),
+            crate::vim::Mode::VisualLine => self.visual_line_range(anchor, head),
+            _ if anchor != head => {
+                let start = anchor.get().min(head.get()).min(self.byte_len());
+                let end = anchor.get().max(head.get()).min(self.byte_len());
+                start..end
+            }
+            _ => return None,
+        };
+        (!range.is_empty()).then_some(range)
+    }
+
+    /// Word boundary `start..end` around `byte_pos` within its logical line (`[[:alnum:]_]+`).
+    pub fn word_boundary_at(&self, byte_pos: usize) -> Option<Range<usize>> {
+        let len = self.byte_len();
+        if len == 0 || byte_pos >= len {
+            return None;
+        }
+        let line_idx = self.line_of_byte(byte_pos);
+        let line_start = self.byte_of_line(line_idx);
+        let next_line_start = if line_idx + 1 < self.line_len() {
+            self.byte_of_line(line_idx + 1)
+        } else {
+            len
+        };
+        let slice = self.slice(line_start..next_line_start);
+        let col = byte_pos.saturating_sub(line_start);
+        let range_in_str = |s: &str| -> Option<Range<usize>> {
+            let char_start = s.floor_char_boundary(col.min(s.len()));
+            let target = s.get(char_start..)?.chars().next()?;
+            if !is_word_char(target) {
+                return None;
+            }
+            let start_off = s[..char_start]
+                .char_indices()
+                .rev()
+                .take_while(|&(_, ch)| is_word_char(ch))
+                .last()
+                .map_or(char_start, |(idx, _)| idx);
+            let after_target = char_start + target.len_utf8();
+            let end_off = s[after_target..]
+                .char_indices()
+                .take_while(|&(_, ch)| is_word_char(ch))
+                .last()
+                .map_or(after_target, |(idx, ch)| after_target + idx + ch.len_utf8());
+            (start_off < end_off).then_some((line_start + start_off)..(line_start + end_off))
+        };
+        let mut iter = slice.chunks();
+        match (iter.next(), iter.next()) {
+            (Some(single), None) => range_in_str(single),
+            (None, _) => None,
+            _ => range_in_str(&slice.to_string()),
+        }
+    }
+
     /// Applies a transaction atomically to the buffer.
     pub fn apply(&mut self, tx: Transaction) -> Result<ChangeSet, EditError> {
         let mut normalized_edits = tx.edits;
@@ -503,4 +566,8 @@ impl Buffer {
         }
         Ok((rope, changes))
     }
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
 }

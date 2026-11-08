@@ -799,3 +799,66 @@ fn test_colored_list_with_inline_code_and_nesting() {
         "  ◦ Нажмите Esc, чтобы вернуться."
     );
 }
+
+#[test]
+fn test_colored_item_preserves_bullet_with_doc_context() {
+    let doc = "<span style=\"color:#BF616A\">- item 1</span>\n<span style=\"color:#BF616A\">- item 2</span>\n";
+    let text = "<span style=\"color:#BF616A\">- item 1</span>";
+    let tree = truff_core::markdown::IncrementalSyntaxTree::parse_fresh(doc);
+    let snapshot = tree.snapshot();
+    let pres = snapshot.line_presentation_in_str(doc, 0..text.len());
+    let mut map = DisplayMap::from_owned_with_presentation(
+        text.to_string(),
+        ProjectionMode::LivePreview,
+        Some(pres),
+    );
+    map.set_cursor(BytePos::new(usize::MAX));
+    assert_eq!(map.visual_text(), "• item 1");
+}
+
+#[test]
+fn test_display_map_tab_twice_and_colored_lower_list() {
+    // 1. Tab pressed twice on list item -> 8 spaces -> depth 2 bullet and indent
+    let text_tab2 = "        - Level 2 item";
+    let tree = truff_core::markdown::IncrementalSyntaxTree::parse_fresh(text_tab2);
+    let snapshot = tree.snapshot();
+    let pres = snapshot.line_presentation_in_str(text_tab2, 0..text_tab2.len());
+    let mut map = DisplayMap::from_owned_with_presentation(
+        text_tab2.to_string(),
+        ProjectionMode::LivePreview,
+        Some(pres),
+    );
+    map.set_cursor(BytePos::new(usize::MAX));
+    assert_eq!(
+        map.visual_text(),
+        "        • Level 2 item",
+        "8 spaces must project to 8 visual spaces with depth 2 bullet"
+    );
+
+    // 2. Lower list item below a colored list item:
+    // doc:
+    // <span style="color:#BF616A">- item 1</span>
+    //     - item 2
+    let doc = "<span style=\"color:#BF616A\">- item 1</span>\n    - item 2\n";
+    let tree_doc = truff_core::markdown::IncrementalSyntaxTree::parse_fresh(doc);
+    let snap_doc = tree_doc.snapshot();
+    let line2_text = "    - item 2";
+    let line2_start = doc.find(line2_text).unwrap();
+    let mut line2_pres =
+        snap_doc.line_presentation_in_str(doc, line2_start..line2_start + line2_text.len());
+    if let Some(list) = &mut line2_pres.list {
+        list.range.start = list.range.start.saturating_sub(line2_start);
+        list.range.end = list.range.end.saturating_sub(line2_start);
+    }
+    let mut map2 = DisplayMap::from_owned_with_presentation(
+        line2_text.to_string(),
+        ProjectionMode::LivePreview,
+        Some(line2_pres),
+    );
+    map2.set_cursor(BytePos::new(usize::MAX));
+    assert_eq!(
+        map2.visual_text(),
+        "    ◦ item 2",
+        "Lower item below colored item must project to 4 visual spaces with depth 1 bullet"
+    );
+}

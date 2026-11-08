@@ -6,6 +6,7 @@ pub mod folding;
 pub mod kanban;
 pub mod link_selection;
 pub mod links;
+pub mod math;
 pub mod presentation;
 pub mod smart_edit;
 pub mod snapshot;
@@ -20,7 +21,8 @@ pub use folding::{
     is_line_in_hidden_ranges,
 };
 pub use link_selection::{ExtractNotePlan, LinkSelection, LinkTarget};
-pub use links::LinkOccurrence;
+pub use links::{LinkDestination, LinkOccurrence, extract_link_destination};
+pub use math::format_latex_math;
 pub use presentation::{
     LinePresentation, ListKind, ListMarker, cycle_task_status, parse_line_list_marker, toggle_task,
 };
@@ -34,6 +36,6 @@ pub use snapshot::{
 };
 pub use style::{
     CalloutKind, ColorSpan, StyleError, apply_highlight, apply_text_color, color_spans,
-    remove_style, wrap_callout,
+    highlight_spans, remove_style, wrap_callout,
 };
 pub use syntax::{IncrementalSyntaxTree, SyntaxSnapshot, rope_byte_to_point};

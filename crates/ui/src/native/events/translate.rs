@@ -166,12 +166,14 @@ impl NativeApp {
                     let key = match key {
                         egui::Key::Escape => Key::Esc,
                         egui::Key::Enter => Key::Enter,
+                        egui::Key::Tab if modifiers.shift => Key::ShiftTab,
                         egui::Key::Tab => Key::Tab,
                         egui::Key::ArrowUp => Key::Up,
                         _ => Key::Down,
                     };
-                    let backwards =
-                        owner == FieldOwner::Navigator && key == Key::Tab && modifiers.shift;
+                    let backwards = owner == FieldOwner::Navigator
+                        && matches!(key, Key::Tab | Key::ShiftTab)
+                        && modifiers.shift;
                     self.field_keys.push((owner, key, backwards));
                     self.field_event_tail.extend(events);
                     break;

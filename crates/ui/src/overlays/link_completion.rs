@@ -25,10 +25,14 @@ impl LinkCompletionOverlay {
         let cursor = cursor.min(buffer.byte_len());
         let line_idx = buffer.line_of_byte(cursor);
         let line_start = buffer.byte_of_line(line_idx);
-        if cursor < line_start {
+        if cursor < line_start + 2 {
             return None;
         }
-        let line_to_cursor = buffer.slice(line_start..cursor).to_string();
+        let slice = buffer.slice(line_start..cursor);
+        if !slice.chunks().any(|chunk| chunk.as_bytes().contains(&b'[')) {
+            return None;
+        }
+        let line_to_cursor = slice.to_string();
         let pos = line_to_cursor.rfind("[[")?;
         let after_brackets = &line_to_cursor[pos + 2..];
         if after_brackets.contains("]]") {

@@ -72,7 +72,7 @@ pub(super) fn show(application: &mut Application, ui: &mut egui::Ui, theme: &The
                             .workspace()
                             .buffers()
                             .get_buffer(buffer_id)
-                            .is_none_or(|b| !b.is_dirty() && b.as_str().is_empty());
+                            .is_none_or(|b| !b.is_dirty() && b.is_empty());
                         if is_scratch && is_clean_empty {
                             continue;
                         }

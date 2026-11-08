@@ -34,6 +34,7 @@ impl NoteStream {
 
     pub fn close(&mut self) {
         self.is_open = false;
+        self.model.clear_memory();
     }
 
     pub fn show(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<StreamAction> {
@@ -51,8 +52,22 @@ impl NoteStream {
         if !self.is_open {
             return None;
         }
+        if self.model.search_active {
+            if key == Key::Esc {
+                self.model.search_active = false;
+                self.model.search_query.clear();
+                self.model.clamp_selection();
+            } else if key == Key::Enter {
+                self.model.search_active = false;
+            }
+            return None;
+        }
 
         match key {
+            Key::Char('/') => {
+                self.model.search_active = true;
+                None
+            }
             Key::Char('j') | Key::Down => {
                 self.model.move_down(1);
                 None

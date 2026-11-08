@@ -22,7 +22,7 @@ use self::tags::{
     strip_internal_highlight_marks,
 };
 
-pub use self::tags::{ColorSpan, color_spans};
+pub use self::tags::{ColorSpan, color_spans, highlight_spans};
 
 /// Supported Callout kinds following Obsidian conventions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

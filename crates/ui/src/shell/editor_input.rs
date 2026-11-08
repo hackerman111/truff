@@ -106,7 +106,7 @@ impl Shell {
         Ok(())
     }
 
-    pub(super) fn publish_vim_changes(
+    pub(crate) fn publish_vim_changes(
         &mut self,
         view_id: truff_core::workspace::ViewId,
     ) -> Result<(), InputError> {

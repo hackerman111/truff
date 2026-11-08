@@ -1,9 +1,9 @@
 use crate::components::{color, overlay_frame};
-use crate::native::NativeApp;
+use crate::native::{NativeApp, widgets};
 use crate::overlays::text_action::{
     PALETTE, TASK_STATUS_OPTIONS, TaskStatus, TextActionMode, TextActionResponse,
 };
-use egui::{Color32, Id, Order, RichText, Sense, Stroke, pos2, vec2};
+use egui::{Color32, Id, Order, RichText, Sense, pos2, vec2};
 
 pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
     if !app.application.shell.text_action().is_open() {
@@ -42,18 +42,27 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
         }
     }
 
-    let is_note_link_input = matches!(
-        app.application.shell.text_action().mode(),
-        TextActionMode::LinkInput { is_url: false, .. }
-    );
-    let sidebar_files: Vec<String> = if is_note_link_input {
-        app.application
-            .shell
-            .sidebar_file_paths()
-            .map(str::to_string)
-            .collect()
+    let note_suggestions: Option<Vec<String>> = if let TextActionMode::LinkInput {
+        is_url: false,
+        target_input,
+        ..
+    } = app.application.shell.text_action().mode()
+    {
+        let query = target_input.trim().to_lowercase();
+        Some(
+            app.application
+                .shell
+                .sidebar_file_paths()
+                .filter_map(|p| {
+                    let note = p.strip_suffix(".md").unwrap_or(p);
+                    (query.is_empty() || note.to_lowercase().contains(&query))
+                        .then(|| note.to_owned())
+                })
+                .take(6)
+                .collect(),
+        )
     } else {
-        Vec::new()
+        None
     };
 
     let mut key_to_handle: Option<truff_core::vim::Key> = None;
@@ -112,7 +121,7 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                             let resp = ui.allocate_ui(vec2(ui.available_width(), 26.0), |ui| {
                                 ui.horizontal(|ui| {
                                     if enabled {
-                                        render_key_pill(ui, key, &theme);
+                                        widgets::key_pill(ui, key, &theme, true);
                                         ui.label(
                                             RichText::new(title)
                                                 .strong()
@@ -129,7 +138,7 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                                             },
                                         );
                                     } else {
-                                        render_dimmed_key_pill(ui, key, &theme);
+                                        widgets::key_pill(ui, key, &theme, false);
                                         ui.label(
                                             RichText::new(title)
                                                 .small()
@@ -163,7 +172,7 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
 
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            render_key_pill(ui, "Esc", &theme);
+                            widgets::key_pill(ui, "Esc", &theme, true);
                             ui.label(
                                 RichText::new("Закрыть")
                                     .small()
@@ -203,7 +212,7 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                                     .inner_margin(egui::Margin::symmetric(6, 3))
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
-                                            render_key_pill(ui, &opt.key.to_string(), &theme);
+                                            widgets::key_pill(ui, &opt.key.to_string(), &theme, true);
 
                                             let swatch_color = Color32::from_hex(opt.hex)
                                                 .unwrap_or(Color32::WHITE);
@@ -247,7 +256,7 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
 
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
-                            render_key_pill(ui, "Esc", &theme);
+                            widgets::key_pill(ui, "Esc", &theme, true);
                             ui.label(
                                 RichText::new("Назад")
                                     .small()
@@ -279,7 +288,7 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                                 .inner_margin(egui::Margin::symmetric(6, 3))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        render_key_pill(ui, &opt.key.to_string(), &theme);
+                                        widgets::key_pill(ui, &opt.key.to_string(), &theme, true);
                                         let marker_color = match opt.status {
                                             TaskStatus::Todo => color(theme.text_muted),
                                             TaskStatus::InProgress => color(theme.accent),
@@ -336,20 +345,8 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                         let is_url = *is_url;
                         let has_sel = *has_selection;
 
-                        if !is_url {
-                            let query = target_input.trim().to_lowercase();
-                            *suggestions = sidebar_files
-                                .iter()
-                                .filter_map(|p| {
-                                    let note = p.strip_suffix(".md").unwrap_or(p);
-                                    if query.is_empty() || note.to_lowercase().contains(&query) {
-                                        Some(note.to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .take(6)
-                                .collect();
+                        if let Some(next_suggestions) = note_suggestions {
+                            *suggestions = next_suggestions;
                             if let Some(sel) = *selected_suggestion
                                 && sel >= suggestions.len()
                             {
@@ -398,9 +395,12 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                         let title_resp = ui.add(
                             egui::TextEdit::singleline(title_input)
                                 .id(title_edit_id)
+                                .lock_focus(true)
                                 .desired_width(ui.available_width()),
                         );
-                        if title_resp.gained_focus() || title_resp.clicked() {
+                        if title_resp.clicked()
+                            || (title_resp.has_focus() && ctx.input(|i| i.pointer.any_down()))
+                        {
                             *active_field = 0;
                         }
 
@@ -420,9 +420,12 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
                         let target_resp = ui.add(
                             egui::TextEdit::singleline(target_input)
                                 .id(target_edit_id)
+                                .lock_focus(true)
                                 .desired_width(ui.available_width()),
                         );
-                        if target_resp.gained_focus() || target_resp.clicked() {
+                        if target_resp.clicked()
+                            || (target_resp.has_focus() && ctx.input(|i| i.pointer.any_down()))
+                        {
                             *active_field = 1;
                         }
 
@@ -486,46 +489,4 @@ pub(super) fn show(app: &mut NativeApp, ctx: &egui::Context) {
         let resp = app.application.shell.text_action_mut().handle_key(key);
         app.handle_text_action_response(resp);
     }
-}
-
-fn render_key_pill(ui: &mut egui::Ui, key_str: &str, theme: &crate::theme::Theme) {
-    let bg = color(theme.bg_canvas);
-    let border = color(theme.accent);
-    let txt = color(theme.accent);
-
-    egui::Frame::new()
-        .fill(bg)
-        .stroke(Stroke::new(1.0, border))
-        .corner_radius(3.0)
-        .inner_margin(egui::Margin::symmetric(4, 1))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(key_str)
-                    .monospace()
-                    .strong()
-                    .small()
-                    .color(txt),
-            );
-        });
-}
-
-fn render_dimmed_key_pill(ui: &mut egui::Ui, key_str: &str, theme: &crate::theme::Theme) {
-    let bg = color(theme.bg_canvas);
-    let border = color(theme.text_muted);
-    let txt = color(theme.text_muted);
-
-    egui::Frame::new()
-        .fill(bg)
-        .stroke(Stroke::new(1.0, border))
-        .corner_radius(3.0)
-        .inner_margin(egui::Margin::symmetric(4, 1))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(key_str)
-                    .monospace()
-                    .strong()
-                    .small()
-                    .color(txt),
-            );
-        });
 }

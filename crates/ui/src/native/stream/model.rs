@@ -72,6 +72,7 @@ pub struct NoteStreamModel {
     pub filter: StreamFilter,
     pub selected_index: usize,
     pub search_query: String,
+    pub search_active: bool,
 }
 
 impl NoteStreamModel {
@@ -79,10 +80,20 @@ impl NoteStreamModel {
         Self::default()
     }
 
+    pub fn clear_memory(&mut self) {
+        self.all_cards.clear();
+        self.all_cards.shrink_to_fit();
+        self.search_query.clear();
+        self.search_query.shrink_to_fit();
+        self.selected_index = 0;
+        self.search_active = false;
+    }
+
     /// Collects notes from vault, evaluates filter conditions, extracts lightweight snippets.
     /// Does NOT concatenate text into a massive string; bounded memory per card.
     pub fn load_from_vault(&mut self, app: &Application) {
         self.all_cards.clear();
+        self.search_active = false;
 
         let active_path = app.active_relative_path();
         let today_str = chrono_today_str();
@@ -283,6 +294,8 @@ fn extract_stream_metrics(
     task_count: &mut usize,
     pending_tasks: &mut usize,
 ) {
+    use crate::navigator::tasks::{HubTaskStatus, parse_task_line};
+
     let mut collected = 0;
     for line in text.lines() {
         let trimmed = line.trim();
@@ -290,31 +303,47 @@ fn extract_stream_metrics(
             preview.push(trimmed.to_string());
             collected += 1;
         }
-        if trimmed.starts_with("- [ ] ") || trimmed.starts_with("* [ ] ") {
+        if let Some((_, status, _)) = parse_task_line(line) {
             *task_count += 1;
-            *pending_tasks += 1;
-        } else if trimmed.starts_with("- [x] ")
-            || trimmed.starts_with("- [X] ")
-            || trimmed.starts_with("* [x] ")
-        {
-            *task_count += 1;
+            if status != HubTaskStatus::Done {
+                *pending_tasks += 1;
+            }
         }
     }
 }
 
+fn civil_from_days(days_since_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = i64::from(yoe) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = (y + i64::from(m <= 2)) as i32;
+    (year, m, d)
+}
+
 fn chrono_today_str() -> String {
-    // Return standard ISO date for today or fallback
-    let now = std::time::SystemTime::now();
-    let since_epoch = now
+    let since_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Rough days since 1970
-    let days = since_epoch / 86400;
-    // Year approximate (days * 400 / 146097)
-    let year = 1970 + days / 365;
-    let day_of_year = days % 365;
-    let month = (day_of_year / 30).min(11) + 1;
-    let day = (day_of_year % 30) + 1;
+    let (year, month, day) = civil_from_days((since_epoch / 86_400) as i64);
     format!("{year:04}-{month:02}-{day:02}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::civil_from_days;
+
+    #[test]
+    fn civil_from_days_handles_leap_years_and_month_lengths() {
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(19_782), (2024, 2, 29));
+        assert_eq!(civil_from_days(19_783), (2024, 3, 1));
+        assert_eq!(civil_from_days(20_454), (2026, 1, 1));
+    }
 }

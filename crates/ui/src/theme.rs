@@ -170,7 +170,7 @@ impl Theme {
             border: border_subtle,
             accent,
             selection,
-            cursor: accent,
+            cursor: Color::from_hex("#bf616a").unwrap(),
 
             callout_note: Color::from_hex("#81a1c1").unwrap(),
             callout_warning: Color::from_hex("#ebcb8b").unwrap(),

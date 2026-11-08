@@ -11,15 +11,15 @@ impl NativeApp {
         let active_path = self.application.active_relative_path();
         let facts = self.application.document_facts();
         let buffer = self.application.shell.editor_buffer();
+        let caret_byte = self
+            .application
+            .shell
+            .editor_view()
+            .map(|v| v.head().get())
+            .unwrap_or(0);
 
         match self.toc.model.scope {
             TocScope::ActiveFile => {
-                let caret_byte = self
-                    .application
-                    .shell
-                    .editor_view()
-                    .map(|v| v.head().get())
-                    .unwrap_or(0);
                 self.toc.model.rebuild_active_file(
                     buffer,
                     facts.as_deref(),
@@ -28,19 +28,38 @@ impl NativeApp {
                 );
             }
             TocScope::Folder | TocScope::Vault => {
-                let files: Vec<String> = self
-                    .application
-                    .shell
-                    .sidebar_file_paths()
-                    .map(str::to_owned)
-                    .collect();
-                self.toc.model.rebuild_hierarchy(
-                    self.toc.model.scope,
-                    &files,
+                let scope = self.toc.model.scope;
+                let catalog_rev = self.application.catalog_revision();
+                let facts_ptr = facts.as_deref().map(|f| f as *const _ as usize);
+                if self.toc.model.hierarchy_is_fresh(
+                    scope,
+                    catalog_rev,
+                    facts_ptr,
                     active_path.as_deref(),
-                    buffer,
-                    facts.as_deref(),
-                );
+                ) {
+                    self.toc.model.sync_caret(caret_byte, facts.as_deref());
+                } else {
+                    let files: Vec<String> = self
+                        .application
+                        .shell
+                        .sidebar_file_paths()
+                        .map(str::to_owned)
+                        .collect();
+                    self.toc.model.rebuild_hierarchy(
+                        scope,
+                        &files,
+                        active_path.as_deref(),
+                        buffer,
+                        facts.as_deref(),
+                    );
+                    self.toc.model.set_hierarchy_key(
+                        scope,
+                        catalog_rev,
+                        facts_ptr,
+                        active_path.as_deref(),
+                    );
+                    self.toc.model.sync_caret(caret_byte, facts.as_deref());
+                }
             }
         }
     }

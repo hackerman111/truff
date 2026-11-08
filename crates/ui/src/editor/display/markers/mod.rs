@@ -1,3 +1,5 @@
+mod replacement;
+
 use std::ops::Range;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -6,42 +8,6 @@ use truff_core::markdown::style::ColorSpan;
 
 use super::DisplayMap;
 use super::types::{InlineStyle, StyledSpan};
-
-pub fn highlight_spans(text: &str) -> Vec<ColorSpan> {
-    let prefix = "<mark style=\"background-color:#";
-    let Some(first) = text.find(prefix) else {
-        return Vec::new();
-    };
-    let mut spans = Vec::new();
-    let mut offset = first;
-    while let Some(relative) = text[offset..].find(prefix) {
-        let start = offset + relative;
-        let hex_start = start + prefix.len();
-        let hex_end = hex_start + 6;
-        offset = hex_start;
-        let Some(hex) = text.get(hex_start..hex_end) else {
-            continue;
-        };
-        if !hex.bytes().all(|b| b.is_ascii_hexdigit()) || !text[hex_end..].starts_with("\">") {
-            continue;
-        }
-        let content_start = hex_end + 2;
-        let Some(close_relative) = text[content_start..].find("</mark>") else {
-            break;
-        };
-        let close_start = content_start + close_relative;
-        let end = close_start + "</mark>".len();
-        offset = end;
-        let channel = |index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap_or(0);
-        spans.push(ColorSpan {
-            opening: start..content_start,
-            content: content_start..close_start,
-            closing: close_start..end,
-            rgba: [channel(0), channel(2), channel(4), 255],
-        });
-    }
-    spans
-}
 
 #[inline]
 fn has_markdown_syntax(text: &str) -> bool {
@@ -66,6 +32,56 @@ fn has_markdown_syntax(text: &str) -> bool {
     })
 }
 
+fn collect_wrapped_list_markers(text: &str, spans: &[ColorSpan], lists: &mut Vec<ListMarker>) {
+    for span in spans {
+        let content_str = &text[span.content.clone()];
+        let ws_inner = content_str
+            .bytes()
+            .take_while(|b| matches!(*b, b' ' | b'\t'))
+            .count();
+        let after_ws = &content_str[ws_inner..];
+        if after_ws.starts_with("- ")
+            || after_ws.starts_with("* ")
+            || after_ws.starts_with("+ ")
+            || (after_ws.len() >= 2
+                && after_ws.as_bytes()[0].is_ascii_digit()
+                && (after_ws.as_bytes()[1] == b'.' || after_ws.as_bytes()[1] == b')'))
+        {
+            let line_start = text[..span.opening.start].rfind('\n').map_or(0, |i| i + 1);
+            let ws_indent = (span.opening.start - line_start) + ws_inner;
+            let depth = ws_indent / 2;
+            if let Some(marker) = truff_core::markdown::presentation::parse_line_list_marker(
+                &text[line_start..],
+                line_start,
+                depth,
+            ) && !lists.iter().any(|m| m.range == marker.range)
+            {
+                lists.push(marker);
+            }
+        }
+    }
+}
+
+fn apply_html_style_spans(
+    spans: &[ColorSpan],
+    markers: &mut Vec<(Range<usize>, Option<Range<usize>>)>,
+    styles: &mut Vec<StyledSpan>,
+    mk_style: fn([u8; 4]) -> InlineStyle,
+) {
+    for span in spans {
+        markers.retain(|(range, _)| {
+            !ranges_intersect(range, &span.opening) && !ranges_intersect(range, &span.closing)
+        });
+        let enclosing = Some(span.opening.start..span.closing.end);
+        markers.push((span.opening.clone(), enclosing.clone()));
+        markers.push((span.closing.clone(), enclosing));
+        styles.push(StyledSpan {
+            content: span.content.clone(),
+            style: mk_style(span.rgba),
+        });
+    }
+}
+
 impl DisplayMap {
     pub(super) fn scan_markers(&mut self) {
         self.markers.clear();
@@ -75,6 +91,7 @@ impl DisplayMap {
         self.table_pipes.clear();
         if self.presentation.as_ref().is_some_and(|line| line.code) {
             self.colors.clear();
+            self.highlights.clear();
             return;
         }
         if self
@@ -83,6 +100,7 @@ impl DisplayMap {
             .is_some_and(|line| line.task_fence)
         {
             self.colors.clear();
+            self.highlights.clear();
             if !self.source_text.is_empty() {
                 let len = self.source_text.len();
                 self.markers.push((0..len, Some(0..len)));
@@ -94,7 +112,11 @@ impl DisplayMap {
             .presentation
             .as_ref()
             .is_some_and(|line| line.list.is_some());
-        if !has_list_presentation && self.colors.is_empty() && !has_markdown_syntax(text) {
+        if !has_list_presentation
+            && self.colors.is_empty()
+            && self.highlights.is_empty()
+            && !has_markdown_syntax(text)
+        {
             return;
         }
         let indent = if has_list_presentation {
@@ -210,33 +232,20 @@ impl DisplayMap {
                 }
                 Event::Start(Tag::Link { .. }) => {
                     let source = &text[range.clone()];
-                    if source.starts_with('[') {
-                        if let Some(close_bracket) = source.find("](") {
-                            let open_marker = range.start..range.start + 1;
-                            let close_marker = (range.start + close_bracket)..range.end;
-                            let content_start = range.start + 1;
-                            let content_end = range.start + close_bracket;
-                            self.markers.push((open_marker, Some(range.clone())));
-                            self.markers.push((close_marker, Some(range.clone())));
-                            if content_start < content_end {
-                                self.styles.push(StyledSpan {
-                                    content: content_start..content_end,
-                                    style: InlineStyle::Link,
-                                });
-                            }
-                        } else if let Some(close_bracket) = source.find("][") {
-                            let open_marker = range.start..range.start + 1;
-                            let close_marker = (range.start + close_bracket)..range.end;
-                            let content_start = range.start + 1;
-                            let content_end = range.start + close_bracket;
-                            self.markers.push((open_marker, Some(range.clone())));
-                            self.markers.push((close_marker, Some(range.clone())));
-                            if content_start < content_end {
-                                self.styles.push(StyledSpan {
-                                    content: content_start..content_end,
-                                    style: InlineStyle::Link,
-                                });
-                            }
+                    if source.starts_with('[')
+                        && let Some(close_bracket) = source.find("](").or_else(|| source.find("]["))
+                    {
+                        let open_marker = range.start..range.start + 1;
+                        let close_marker = (range.start + close_bracket)..range.end;
+                        let content_start = range.start + 1;
+                        let content_end = range.start + close_bracket;
+                        self.markers.push((open_marker, Some(range.clone())));
+                        self.markers.push((close_marker, Some(range.clone())));
+                        if content_start < content_end {
+                            self.styles.push(StyledSpan {
+                                content: content_start..content_end,
+                                style: InlineStyle::Link,
+                            });
                         }
                     }
                 }
@@ -273,7 +282,7 @@ impl DisplayMap {
             let ws_before = text.len() - trimmed_start.len();
             let gt_count = trimmed_start.bytes().take_while(|b| *b == b'>').count();
             let after_gt = &trimmed_start[gt_count..];
-            let ws_after = if after_gt.starts_with(' ') { 1 } else { 0 };
+            let ws_after = usize::from(after_gt.starts_with(' '));
             let marker_len = ws_before + gt_count + ws_after;
             self.markers.push((0..marker_len, None));
         }
@@ -470,60 +479,8 @@ impl DisplayMap {
                 }
             }
         }
-        for span in &self.colors {
-            let content_str = &text[span.content.clone()];
-            let ws_inner = content_str
-                .bytes()
-                .take_while(|b| matches!(*b, b' ' | b'\t'))
-                .count();
-            let after_ws = &content_str[ws_inner..];
-            if after_ws.starts_with("- ")
-                || after_ws.starts_with("* ")
-                || after_ws.starts_with("+ ")
-                || (after_ws.len() >= 2
-                    && after_ws.as_bytes()[0].is_ascii_digit()
-                    && (after_ws.as_bytes()[1] == b'.' || after_ws.as_bytes()[1] == b')'))
-            {
-                let line_start = text[..span.opening.start].rfind('\n').map_or(0, |i| i + 1);
-                let ws_indent = (span.opening.start - line_start) + ws_inner;
-                let depth = ws_indent / 2;
-                if let Some(marker) = truff_core::markdown::presentation::parse_line_list_marker(
-                    &text[line_start..],
-                    line_start,
-                    depth,
-                ) && !self.lists.iter().any(|m| m.range == marker.range)
-                {
-                    self.lists.push(marker);
-                }
-            }
-        }
-        for span in highlight_spans(text) {
-            let content_str = &text[span.content.clone()];
-            let ws_inner = content_str
-                .bytes()
-                .take_while(|b| matches!(*b, b' ' | b'\t'))
-                .count();
-            let after_ws = &content_str[ws_inner..];
-            if after_ws.starts_with("- ")
-                || after_ws.starts_with("* ")
-                || after_ws.starts_with("+ ")
-                || (after_ws.len() >= 2
-                    && after_ws.as_bytes()[0].is_ascii_digit()
-                    && (after_ws.as_bytes()[1] == b'.' || after_ws.as_bytes()[1] == b')'))
-            {
-                let line_start = text[..span.opening.start].rfind('\n').map_or(0, |i| i + 1);
-                let ws_indent = (span.opening.start - line_start) + ws_inner;
-                let depth = ws_indent / 2;
-                if let Some(marker) = truff_core::markdown::presentation::parse_line_list_marker(
-                    &text[line_start..],
-                    line_start,
-                    depth,
-                ) && !self.lists.iter().any(|m| m.range == marker.range)
-                {
-                    self.lists.push(marker);
-                }
-            }
-        }
+        collect_wrapped_list_markers(text, &self.colors, &mut self.lists);
+        collect_wrapped_list_markers(text, &self.highlights, &mut self.lists);
         self.lists.sort_by_key(|m| m.range.start);
         if let Some(LinePresentation { list, .. }) = &self.presentation {
             self.lists.clear();
@@ -535,13 +492,19 @@ impl DisplayMap {
             .take_while(|b| *b == b' ' || *b == b'\t')
             .count();
         for list in &mut self.lists {
+            if list.range.start >= text.len() {
+                continue;
+            }
+            list.range.end = list.range.end.min(text.len());
             // Normalize marker spacing while keeping the source indentation intact.
             while list.range.start < list.range.end
                 && matches!(text.as_bytes().get(list.range.start), Some(b' ' | b'\t'))
             {
                 list.range.start += 1;
             }
-            while matches!(text.as_bytes().get(list.range.end), Some(b' ' | b'\t')) {
+            while list.range.end < text.len()
+                && matches!(text.as_bytes().get(list.range.end), Some(b' ' | b'\t'))
+            {
                 list.range.end += 1;
             }
             let end = text[list.range.end..]
@@ -579,389 +542,27 @@ impl DisplayMap {
                 }
             }
         }
-        for span in &self.colors {
-            self.markers.retain(|(range, _)| {
-                !ranges_intersect(range, &span.opening) && !ranges_intersect(range, &span.closing)
-            });
-            let enclosing = Some(span.opening.start..span.closing.end);
-            self.markers.push((span.opening.clone(), enclosing.clone()));
-            self.markers.push((span.closing.clone(), enclosing));
-            self.styles.push(StyledSpan {
-                content: span.content.clone(),
-                style: InlineStyle::TextColor(span.rgba),
-            });
-        }
-        for span in highlight_spans(text) {
-            self.markers.retain(|(range, _)| {
-                !ranges_intersect(range, &span.opening) && !ranges_intersect(range, &span.closing)
-            });
-            let enclosing = Some(span.opening.start..span.closing.end);
-            self.markers.push((span.opening.clone(), enclosing.clone()));
-            self.markers.push((span.closing.clone(), enclosing));
-            self.styles.push(StyledSpan {
-                content: span.content.clone(),
-                style: InlineStyle::Highlight(span.rgba),
-            });
-        }
+        apply_html_style_spans(
+            &self.colors,
+            &mut self.markers,
+            &mut self.styles,
+            InlineStyle::TextColor,
+        );
+        apply_html_style_spans(
+            &self.highlights,
+            &mut self.markers,
+            &mut self.styles,
+            InlineStyle::Highlight,
+        );
         self.markers
             .sort_by(|(a, _), (b, _)| a.start.cmp(&b.start).then_with(|| a.end.cmp(&b.end)));
     }
-
-    pub(super) fn replacement(&self, range: &Range<usize>) -> Option<std::borrow::Cow<'_, str>> {
-        use std::borrow::Cow;
-        if let Some((_, pad)) = self.table_paddings.iter().find(|(r, _)| r == range) {
-            return Some(Cow::Borrowed(pad.as_str()));
-        }
-        if self.table_pipes.iter().any(|r| r == range) {
-            return Some(Cow::Borrowed(" "));
-        }
-        if self.presentation.is_some()
-            && range.start == 0
-            && let Some(list) = self.lists.first()
-            && (list.range.start == range.end
-                || self
-                    .source_text
-                    .get(..range.end)
-                    .is_some_and(|s| s.bytes().all(|b| b == b' ' || b == b'\t')))
-            && range.end > 0
-        {
-            const INDENTS: [&str; 7] = [
-                "",
-                "    ",
-                "        ",
-                "            ",
-                "                ",
-                "                    ",
-                "                        ",
-            ];
-            return Some(
-                INDENTS
-                    .get(list.depth)
-                    .copied()
-                    .map_or_else(|| Cow::Owned("    ".repeat(list.depth)), Cow::Borrowed),
-            );
-        }
-        if let Some(slice) = self.source_text.get(range.clone()) {
-            let trimmed = slice.trim();
-            if self
-                .presentation
-                .as_ref()
-                .is_some_and(|p| p.table_delimiter)
-                || (trimmed.starts_with('|')
-                    && trimmed.ends_with('|')
-                    && trimmed.contains('-')
-                    && trimmed
-                        .chars()
-                        .all(|c| c == '|' || c == '-' || c == ':' || c == ' '))
-            {
-                return Some(Cow::Borrowed(""));
-            }
-            if trimmed == "---" || trimmed == "***" || trimmed == "___" {
-                return Some(Cow::Borrowed(" "));
-            }
-            if trimmed == "-->" || trimmed == "->" {
-                return Some(Cow::Borrowed("→"));
-            }
-            if trimmed == "<--" || trimmed == "<-" {
-                return Some(Cow::Borrowed("←"));
-            }
-            if trimmed == "<-->" || trimmed == "<->" {
-                return Some(Cow::Borrowed("↔"));
-            }
-            if (trimmed.starts_with("$$") && trimmed.ends_with("$$") && trimmed.len() >= 4)
-                || (trimmed.starts_with('$') && trimmed.ends_with('$') && trimmed.len() >= 2)
-            {
-                return Some(Cow::Owned(format_latex_math(trimmed)));
-            }
-        }
-        let list = self.list_at_marker(range)?;
-        match list.kind {
-            ListKind::Bullet => Some(Cow::Borrowed(match list.depth % 2 {
-                0 => "• ",
-                _ => "◦ ",
-            })),
-            ListKind::Task {
-                checked: false,
-                checkbox,
-            } => {
-                if self
-                    .source_text
-                    .as_bytes()
-                    .get(checkbox)
-                    .is_some_and(|&b| b == b'/' || b == b'-')
-                {
-                    Some(Cow::Borrowed("◐ "))
-                } else {
-                    Some(Cow::Borrowed("☐ "))
-                }
-            }
-            ListKind::Task { checked: true, .. } => Some(Cow::Borrowed("☑ ")),
-            ListKind::Ordered => None,
-        }
-    }
-
-    pub(super) fn list_at_marker(&self, range: &Range<usize>) -> Option<&ListMarker> {
-        let index = self
-            .lists
-            .binary_search_by_key(&range.start, |list| list.range.start)
-            .ok()?;
-        self.lists.get(index).filter(|list| list.range == *range)
-    }
-
-    fn visual_cell_graphemes(&self, cell_range: Range<usize>) -> usize {
-        use unicode_segmentation::UnicodeSegmentation;
-
-        let mut visual_graphemes = 0;
-        let mut last = cell_range.start;
-
-        for (marker_range, _) in &self.markers {
-            if marker_range.start < last || marker_range.start >= cell_range.end {
-                continue;
-            }
-            if marker_range.start > last {
-                let non_marker = &self.source_text[last..marker_range.start];
-                visual_graphemes += non_marker.graphemes(true).count();
-            }
-            if let Some(rep) = self.replacement(marker_range) {
-                visual_graphemes += rep.graphemes(true).count();
-            }
-            last = marker_range.end.min(cell_range.end);
-        }
-
-        if last < cell_range.end {
-            let non_marker = &self.source_text[last..cell_range.end];
-            visual_graphemes += non_marker.graphemes(true).count();
-        }
-
-        visual_graphemes
-    }
 }
 
-pub(super) fn ranges_intersect(a: &Range<usize>, b: &Range<usize>) -> bool {
+pub(in crate::editor::display) fn ranges_intersect(a: &Range<usize>, b: &Range<usize>) -> bool {
     a.start < b.end && a.end > b.start
 }
 
-pub(super) fn ranges_touch(a: &Range<usize>, b: &Range<usize>) -> bool {
+pub(in crate::editor::display) fn ranges_touch(a: &Range<usize>, b: &Range<usize>) -> bool {
     a.start <= b.end && a.end >= b.start
-}
-
-pub(super) fn format_latex_math(raw: &str) -> String {
-    let mut s = raw.trim();
-    if s.starts_with("$$") && s.ends_with("$$") && s.len() >= 4 {
-        s = &s[2..s.len() - 2];
-    } else if s.starts_with('$') && s.ends_with('$') && s.len() >= 2 {
-        s = &s[1..s.len() - 1];
-    }
-    let s = s.trim();
-
-    if !s.contains('\\') && !s.contains('^') && !s.contains('_') && !s.contains('{') {
-        return s.to_string();
-    }
-
-    let mut out = String::with_capacity(s.len());
-    let chars: Vec<char> = s.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\\' {
-            let mut end = i + 1;
-            while end < chars.len() && chars[end].is_alphabetic() {
-                end += 1;
-            }
-            if end > i + 1 {
-                let cmd: String = chars[i + 1..end].iter().collect();
-                let sym = match cmd.as_str() {
-                    "alpha" => Some("α"),
-                    "beta" => Some("β"),
-                    "gamma" => Some("γ"),
-                    "delta" => Some("δ"),
-                    "epsilon" | "varepsilon" => Some("ε"),
-                    "zeta" => Some("ζ"),
-                    "eta" => Some("η"),
-                    "theta" | "vartheta" => Some("θ"),
-                    "iota" => Some("ι"),
-                    "kappa" => Some("κ"),
-                    "lambda" => Some("λ"),
-                    "mu" => Some("μ"),
-                    "nu" => Some("ν"),
-                    "xi" => Some("ξ"),
-                    "pi" | "varpi" => Some("π"),
-                    "rho" | "varrho" => Some("ρ"),
-                    "sigma" | "varsigma" => Some("σ"),
-                    "tau" => Some("τ"),
-                    "upsilon" => Some("υ"),
-                    "phi" | "varphi" => Some("φ"),
-                    "chi" => Some("χ"),
-                    "psi" => Some("ψ"),
-                    "omega" => Some("ω"),
-                    "Gamma" => Some("Γ"),
-                    "Delta" => Some("Δ"),
-                    "Theta" => Some("Θ"),
-                    "Lambda" => Some("Λ"),
-                    "Xi" => Some("Ξ"),
-                    "Pi" => Some("Π"),
-                    "Sigma" => Some("Σ"),
-                    "Phi" => Some("Φ"),
-                    "Psi" => Some("Ψ"),
-                    "Omega" => Some("Ω"),
-                    "times" => Some("×"),
-                    "cdot" => Some("·"),
-                    "pm" => Some("±"),
-                    "mp" => Some("∓"),
-                    "div" => Some("÷"),
-                    "neq" | "ne" => Some("≠"),
-                    "leq" | "le" => Some("≤"),
-                    "geq" | "ge" => Some("≥"),
-                    "approx" => Some("≈"),
-                    "equiv" => Some("≡"),
-                    "infty" => Some("∞"),
-                    "in" => Some("∈"),
-                    "notin" => Some("∉"),
-                    "subset" => Some("⊂"),
-                    "subseteq" => Some("⊆"),
-                    "cup" => Some("∪"),
-                    "cap" => Some("∩"),
-                    "emptyset" => Some("∅"),
-                    "forall" => Some("∀"),
-                    "exists" => Some("∃"),
-                    "nabla" => Some("∇"),
-                    "partial" => Some("∂"),
-                    "sum" => Some("∑"),
-                    "prod" => Some("∏"),
-                    "int" => Some("∫"),
-                    "to" | "rightarrow" => Some("→"),
-                    "leftarrow" => Some("←"),
-                    "Rightarrow" => Some("⇒"),
-                    "Leftarrow" => Some("⇐"),
-                    "iff" | "Leftrightarrow" => Some("⇔"),
-                    "sqrt" => Some("√"),
-                    "quad" | "qquad" => Some("  "),
-                    _ => None,
-                };
-                if let Some(replacement) = sym {
-                    out.push_str(replacement);
-                    i = end;
-                    continue;
-                } else if cmd == "frac" {
-                    i = end;
-                    let mut num = String::new();
-                    let mut den = String::new();
-                    if i < chars.len() && chars[i] == '{' {
-                        i += 1;
-                        while i < chars.len() && chars[i] != '}' {
-                            num.push(chars[i]);
-                            i += 1;
-                        }
-                        if i < chars.len() && chars[i] == '}' {
-                            i += 1;
-                        }
-                    }
-                    if i < chars.len() && chars[i] == '{' {
-                        i += 1;
-                        while i < chars.len() && chars[i] != '}' {
-                            den.push(chars[i]);
-                            i += 1;
-                        }
-                        if i < chars.len() && chars[i] == '}' {
-                            i += 1;
-                        }
-                    }
-                    if !num.is_empty() || !den.is_empty() {
-                        out.push_str(&format!("{num}/{den}"));
-                        continue;
-                    }
-                }
-            }
-            out.push(c);
-            i += 1;
-        } else if c == '^' {
-            i += 1;
-            if i < chars.len() && chars[i] == '{' {
-                i += 1;
-                while i < chars.len() && chars[i] != '}' {
-                    out.push(to_superscript(chars[i]));
-                    i += 1;
-                }
-                if i < chars.len() && chars[i] == '}' {
-                    i += 1;
-                }
-            } else if i < chars.len() {
-                out.push(to_superscript(chars[i]));
-                i += 1;
-            }
-        } else if c == '_' {
-            i += 1;
-            if i < chars.len() && chars[i] == '{' {
-                i += 1;
-                while i < chars.len() && chars[i] != '}' {
-                    out.push(to_subscript(chars[i]));
-                    i += 1;
-                }
-                if i < chars.len() && chars[i] == '}' {
-                    i += 1;
-                }
-            } else if i < chars.len() {
-                out.push(to_subscript(chars[i]));
-                i += 1;
-            }
-        } else if c == '{' || c == '}' {
-            i += 1;
-        } else {
-            out.push(c);
-            i += 1;
-        }
-    }
-    out
-}
-
-fn to_superscript(c: char) -> char {
-    match c {
-        '0' => '⁰',
-        '1' => '¹',
-        '2' => '²',
-        '3' => '³',
-        '4' => '⁴',
-        '5' => '⁵',
-        '6' => '⁶',
-        '7' => '⁷',
-        '8' => '⁸',
-        '9' => '⁹',
-        '+' => '⁺',
-        '-' => '⁻',
-        '=' => '⁼',
-        '(' => '⁽',
-        ')' => '⁾',
-        'n' => 'ⁿ',
-        'i' => 'ⁱ',
-        'x' => 'ˣ',
-        _ => c,
-    }
-}
-
-fn to_subscript(c: char) -> char {
-    match c {
-        '0' => '₀',
-        '1' => '₁',
-        '2' => '₂',
-        '3' => '₃',
-        '4' => '₄',
-        '5' => '₅',
-        '6' => '₆',
-        '7' => '₇',
-        '8' => '₈',
-        '9' => '₉',
-        '+' => '₊',
-        '-' => '₋',
-        '=' => '₌',
-        '(' => '₍',
-        ')' => '₎',
-        'a' => 'ₐ',
-        'e' => 'ₑ',
-        'i' => 'ᵢ',
-        'o' => 'ₒ',
-        'u' => 'ᵤ',
-        'x' => 'ₓ',
-        'n' => 'ₙ',
-        _ => c,
-    }
 }

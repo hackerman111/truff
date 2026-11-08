@@ -1,5 +1,6 @@
 pub mod model;
 pub mod render;
+pub mod types;
 
 use crate::theme::Theme;
 use truff_core::vim::Key;
@@ -37,6 +38,10 @@ impl FloatingToc {
     pub fn close(&mut self) {
         self.is_open = false;
         self.pending_g = false;
+        self.model.search_active = false;
+        if !self.is_pinned {
+            self.model.clear_memory();
+        }
     }
 
     pub fn set_pinned(&mut self, pinned: bool) {

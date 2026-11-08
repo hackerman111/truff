@@ -402,10 +402,10 @@ fn test_visual_mode_character_and_line_highlighting_dimensions() {
     let (mut app, context) = scratch("# Heading\nregular text line\nЯ0g\n");
     frame(&mut app, &context, vec![]);
 
-    // The caret follows the shaped glyph height even when heading sizes are quantized.
+    // The caret follows the scaled height of the heading font (base 22px * 1.6 = ~35px).
     let heading_cursor = app.editor.cursor_rect().expect("heading cursor rect");
     assert!(
-        heading_cursor.height() >= 20.0 && heading_cursor.height() <= 24.0,
+        heading_cursor.height() >= 34.0 && heading_cursor.height() <= 37.0,
         "Heading highlight must follow glyph height rather than the full line height: got {}",
         heading_cursor.height()
     );
@@ -431,8 +431,8 @@ fn test_visual_mode_character_and_line_highlighting_dimensions() {
     frame(&mut app, &context, vec![Event::Text("j".into())]);
     let regular_cursor = app.editor.cursor_rect().expect("regular cursor");
     assert!(
-        regular_cursor.height() >= 14.0 && regular_cursor.height() <= 17.0,
-        "Regular line character highlight must match glyph height + padding (~14-16px), not full row height 26.0: got {}",
+        (regular_cursor.height() - 22.0).abs() < 0.1,
+        "Regular line cursor must match constant 22px base height: got {}",
         regular_cursor.height()
     );
 
@@ -440,8 +440,8 @@ fn test_visual_mode_character_and_line_highlighting_dimensions() {
     frame(&mut app, &context, vec![Event::Text("j".into())]);
     let ya_cursor = app.editor.cursor_rect().expect("ya cursor");
     assert!(
-        ya_cursor.height() >= 14.0 && ya_cursor.height() <= 17.0,
-        "Cyrillic character 'Я' highlight must be glyph height + padding (~14-16px), without bottom tail: got {}",
+        (ya_cursor.height() - 22.0).abs() < 0.1,
+        "Cyrillic character 'Я' cursor must match constant 22px base height: got {}",
         ya_cursor.height()
     );
     assert!(
@@ -454,8 +454,8 @@ fn test_visual_mode_character_and_line_highlighting_dimensions() {
     frame(&mut app, &context, vec![Event::Text("l".into())]);
     let zero_cursor = app.editor.cursor_rect().expect("zero cursor");
     assert!(
-        zero_cursor.height() >= 14.0 && zero_cursor.height() <= 17.0,
-        "Digit '0' highlight height must match cap-height + padding (~14-16px): got {}",
+        (zero_cursor.height() - 22.0).abs() < 0.1,
+        "Digit '0' cursor height must match constant 22px base height: got {}",
         zero_cursor.height()
     );
 
@@ -474,8 +474,8 @@ fn test_visual_mode_character_and_line_highlighting_dimensions() {
         .cursor_rect()
         .expect("cursor rect in visual line mode");
     assert!(
-        visual_line_cursor.height() >= 14.0 && visual_line_cursor.height() <= 17.0,
-        "VisualLine mode cursor rect height must match character bounds + padding (~14-16px): got {}",
+        (visual_line_cursor.height() - 22.0).abs() < 0.1,
+        "VisualLine mode cursor rect height must match constant 22px base height: got {}",
         visual_line_cursor.height()
     );
 }
@@ -718,7 +718,7 @@ fn test_unicode_grapheme_selection_and_heading_geometry() {
         .char_rect(0, h1_offset)
         .expect("char rect for H1 exists");
     assert!(
-        rect_h1.height() >= 20.0 && rect_h1.height() <= 24.0,
+        rect_h1.height() >= 34.0 && rect_h1.height() <= 37.0,
         "H1 cursor height must reflect heading size, got {}",
         rect_h1.height()
     );

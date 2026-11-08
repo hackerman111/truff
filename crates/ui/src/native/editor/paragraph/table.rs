@@ -1,13 +1,15 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use egui::{Color32, Galley, Painter, Pos2, Rect, Vec2};
+use egui::{Galley, Painter, Pos2, Rect, Vec2};
 use truff_core::text::BytePos;
 use truff_core::vim::Mode;
-use unicode_segmentation::UnicodeSegmentation;
 
 use super::ParagraphStyle;
 use super::paint::ParagraphView;
+use super::spans::{
+    char_rect_in_galley, for_each_row_char_span, paint_inline_decorations, visual_char_range,
+};
 use crate::editor::{Affinity, DisplayMap, VisualPos};
 use crate::native::editor::color;
 
@@ -179,61 +181,23 @@ impl TableRowLayout {
 
     pub(super) fn char_rect_at(&self, origin: Pos2, source_rel: usize) -> Rect {
         let line_h = crate::native::editor::LINE_HEIGHT;
-        let caret_w = 2.0;
+        let block_w = (line_h * 0.45).round().max(8.0);
 
         for cell in &self.cells {
             if source_rel >= cell.source_range.start && source_rel <= cell.source_range.end {
                 let cell_origin =
                     Pos2::new(origin.x + cell.col_x + CELL_PAD_X, origin.y + CELL_PAD_Y);
-                if source_rel <= cell.content_start {
-                    return Rect::from_min_size(cell_origin, Vec2::new(caret_w, line_h));
+                if source_rel < cell.content_start {
+                    return char_rect_in_galley(&cell.display, &cell.galley, cell_origin, 0, true);
                 }
-                if source_rel >= cell.content_end {
-                    let chars_count = cell.display.visual_text().chars().count();
-                    let pos = cell
-                        .galley
-                        .pos_from_cursor(egui::text::CCursor::new(chars_count));
-                    return Rect::from_min_size(
-                        cell_origin + pos.min.to_vec2(),
-                        Vec2::new(caret_w, line_h),
-                    );
-                }
-                let local_byte = source_rel - cell.content_start;
-                let vis_byte = cell
-                    .display
-                    .source_to_visual(BytePos::new(local_byte), Affinity::Right)
-                    .get();
-                let vis_text = cell.display.visual_text();
-                let cluster_char_len = if vis_byte < vis_text.len() {
-                    vis_text[vis_byte..]
-                        .graphemes(true)
-                        .next()
-                        .map_or(1, |g| g.chars().count())
-                } else {
-                    1
-                };
-                let chars_before = vis_text[..vis_byte.min(vis_text.len())].chars().count();
-                let layout_cursor = cell
-                    .galley
-                    .layout_from_cursor(egui::text::CCursor::new(chars_before));
-                if let Some(row) = cell.galley.rows.get(layout_cursor.row) {
-                    let col_start = layout_cursor.column;
-                    let col_end = egui::text::CharIndex(col_start.0 + cluster_char_len);
-                    let x_start = row.x_offset(col_start) + row.pos.x + cell_origin.x;
-                    let x_end = row.x_offset(col_end) + row.pos.x + cell_origin.x;
-                    let width = (x_end - x_start).max(row.size.y * 0.55).max(caret_w);
-                    let y = cell_origin.y + row.pos.y;
-                    return Rect::from_min_size(
-                        Pos2::new(x_start, y),
-                        Vec2::new(width, row.size.y),
-                    );
-                }
-                let pos = cell
-                    .galley
-                    .pos_from_cursor(egui::text::CCursor::new(chars_before));
-                return Rect::from_min_size(
-                    cell_origin + pos.min.to_vec2(),
-                    Vec2::new(caret_w, line_h),
+                let local_byte = (source_rel - cell.content_start)
+                    .min(cell.content_end.saturating_sub(cell.content_start));
+                return char_rect_in_galley(
+                    &cell.display,
+                    &cell.galley,
+                    cell_origin,
+                    local_byte,
+                    true,
                 );
             }
         }
@@ -251,10 +215,33 @@ impl TableRowLayout {
             .map(|(idx, _)| idx)
             .unwrap_or(0);
         let px = self.col_xs.get(best_col).copied().unwrap_or(0.0);
+        if let Some(cell) = self.cells.get(best_col) {
+            let sample = char_rect_in_galley(
+                &cell.display,
+                &cell.galley,
+                Pos2::new(origin.x + px, origin.y + CELL_PAD_Y),
+                0,
+                true,
+            );
+            return Rect::from_min_size(sample.min, Vec2::new(block_w, sample.height()));
+        }
         Rect::from_min_size(
             Pos2::new(origin.x + px, origin.y + CELL_PAD_Y),
-            Vec2::new(caret_w, line_h),
+            Vec2::new(block_w, super::spans::BASE_CURSOR_HEIGHT),
         )
+    }
+
+    pub(super) fn cell_galley_for_cursor(
+        &self,
+        origin: Pos2,
+        source_rel: usize,
+    ) -> Option<(Pos2, &Arc<Galley>)> {
+        let cell = self
+            .cells
+            .iter()
+            .find(|c| source_rel >= c.content_start && source_rel < c.content_end)?;
+        let cell_origin = Pos2::new(origin.x + cell.col_x + CELL_PAD_X, origin.y + CELL_PAD_Y);
+        Some((cell_origin, &cell.galley))
     }
 
     pub(super) fn cursor_from_pos(
@@ -359,22 +346,14 @@ impl TableRowLayout {
             }
         }
 
-        let code_bg = if view.theme.is_dark() {
-            Color32::from_rgba_unmultiplied(128, 128, 128, 50)
-        } else {
-            Color32::from_rgba_unmultiplied(100, 100, 100, 40)
-        };
-
         if let Some(selection) = view.selection
             && view.mode != Mode::VisualLine
             && selection.start < row_range.end
             && selection.end > row_range.start
         {
             let sel_color = color(view.theme.selection);
-            let sel_start = selection.start.max(row_range.start);
-            let sel_end = selection.end.min(row_range.end);
-            let rel_start = sel_start - row_range.start;
-            let rel_end = sel_end - row_range.start;
+            let rel_start = selection.start.max(row_range.start) - row_range.start;
+            let rel_end = selection.end.min(row_range.end) - row_range.start;
 
             for cell in &self.cells {
                 let cell_origin =
@@ -382,21 +361,10 @@ impl TableRowLayout {
                 let p_open = cell.source_range.start.saturating_sub(1);
                 let p_close = cell.source_range.end;
 
-                let (min_y, max_y) = if let (Some(first), Some(last)) =
-                    (cell.galley.rows.first(), cell.galley.rows.last())
-                {
-                    (
-                        cell_origin.y + first.pos.y,
-                        cell_origin.y + last.pos.y + last.size.y,
-                    )
-                } else {
-                    (
-                        cell_origin.y,
-                        cell_origin.y
-                            + (self.height - 2.0 * CELL_PAD_Y)
-                                .max(crate::native::editor::LINE_HEIGHT),
-                    )
-                };
+                let y_top = origin.y;
+                let y_bottom = origin.y + self.height;
+                let min_y = y_top;
+                let max_y = y_bottom;
 
                 if cell.content_start < cell.content_end {
                     if rel_start < cell.content_start && rel_end > p_open {
@@ -409,47 +377,44 @@ impl TableRowLayout {
 
                     let a = rel_start.max(cell.content_start);
                     let b = rel_end.min(cell.content_end);
-                    if a < b {
-                        let local_a = a - cell.content_start;
-                        let local_b = b - cell.content_start;
-                        let va = cell
-                            .display
-                            .source_to_visual(BytePos::new(local_a), Affinity::Right)
-                            .get();
-                        let vb = cell
-                            .display
-                            .source_to_visual(BytePos::new(local_b), Affinity::Left)
-                            .get();
-                        let vis_text = cell.display.visual_text();
-                        let start_chars = vis_text[..va.min(vis_text.len())].chars().count();
-                        let end_chars = vis_text[..vb.min(vis_text.len())].chars().count();
-                        if start_chars < end_chars {
-                            let mut row_char_start = 0;
-                            for row in &cell.galley.rows {
-                                let row_count = row.char_count_including_newline().0;
-                                let row_char_end = row_char_start + row_count;
-                                let s_start = start_chars.max(row_char_start);
-                                let s_end = end_chars.min(row_char_end);
-                                if s_start < s_end {
-                                    let col_start = s_start - row_char_start;
-                                    let col_end = s_end - row_char_start;
-                                    let x_start = row.x_offset(egui::text::CharIndex(col_start))
-                                        + row.pos.x
-                                        + cell_origin.x;
-                                    let x_end = row.x_offset(egui::text::CharIndex(col_end))
-                                        + row.pos.x
-                                        + cell_origin.x;
-                                    let r_min_y = cell_origin.y + row.pos.y;
-                                    let r_max_y = r_min_y + row.size.y;
-                                    let rect = Rect::from_min_max(
-                                        Pos2::new(x_start.min(x_end) - 1.0, r_min_y),
-                                        Pos2::new(x_start.max(x_end) + 1.0, r_max_y),
-                                    );
-                                    painter.rect_filled(rect, 0.0, sel_color);
-                                }
-                                row_char_start = row_char_end;
-                            }
-                        }
+                    if a < b
+                        && let Some(chars) = visual_char_range(
+                            &cell.display,
+                            (a - cell.content_start)..(b - cell.content_start),
+                        )
+                    {
+                        for_each_row_char_span(
+                            &cell.galley.rows,
+                            chars,
+                            cell_origin.x,
+                            |row, _, x_start, x_end| {
+                                let is_first = cell
+                                    .galley
+                                    .rows
+                                    .first()
+                                    .is_some_and(|r| std::ptr::eq(r, row));
+                                let is_last = cell
+                                    .galley
+                                    .rows
+                                    .last()
+                                    .is_some_and(|r| std::ptr::eq(r, row));
+                                let r_min_y = if is_first {
+                                    y_top
+                                } else {
+                                    cell_origin.y + row.pos.y
+                                };
+                                let r_max_y = if is_last {
+                                    y_bottom
+                                } else {
+                                    cell_origin.y + row.pos.y + row.size.y
+                                };
+                                let rect = Rect::from_min_max(
+                                    Pos2::new(x_start.min(x_end) - 1.0, r_min_y),
+                                    Pos2::new(x_start.max(x_end) + 1.0, r_max_y),
+                                );
+                                painter.rect_filled(rect, 0.0, sel_color);
+                            },
+                        );
                     }
 
                     if rel_start < p_close && rel_end > cell.content_end {
@@ -473,140 +438,20 @@ impl TableRowLayout {
             }
         }
 
+        let is_dark = view.theme.is_dark();
+        let text_fg = color(view.theme.text_primary);
         for cell in &self.cells {
             let cell_origin = Pos2::new(origin.x + cell.col_x + CELL_PAD_X, origin.y + CELL_PAD_Y);
-
-            for span in cell.display.styled_spans() {
-                if span.style == crate::editor::InlineStyle::Code {
-                    let v_start = cell
-                        .display
-                        .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
-                        .get();
-                    let v_end = cell
-                        .display
-                        .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
-                        .get();
-                    let vis_text = cell.display.visual_text();
-                    let start_chars = vis_text[..v_start.min(vis_text.len())].chars().count();
-                    let end_chars = vis_text[..v_end.min(vis_text.len())].chars().count();
-                    if start_chars < end_chars {
-                        let mut row_char_start = 0;
-                        for row in &cell.galley.rows {
-                            let row_count = row.char_count_including_newline().0;
-                            let row_char_end = row_char_start + row_count;
-                            let s_start = start_chars.max(row_char_start);
-                            let s_end = end_chars.min(row_char_end);
-                            if s_start < s_end {
-                                let col_start = s_start - row_char_start;
-                                let col_end = s_end - row_char_start;
-                                let x_start = row.x_offset(egui::text::CharIndex(col_start))
-                                    + row.pos.x
-                                    + cell_origin.x;
-                                let x_end = row.x_offset(egui::text::CharIndex(col_end))
-                                    + row.pos.x
-                                    + cell_origin.x;
-                                let min_y = cell_origin.y + row.pos.y;
-                                let max_y = min_y + row.size.y;
-                                let rect = Rect::from_min_max(
-                                    Pos2::new(x_start.min(x_end) - 3.5, min_y - 1.0),
-                                    Pos2::new(x_start.max(x_end) + 3.5, max_y + 1.0),
-                                );
-                                painter.rect_filled(rect, 4.0, code_bg);
-                            }
-                            row_char_start = row_char_end;
-                        }
-                    }
-                } else if span.style == crate::editor::InlineStyle::Link {
-                    let v_start = cell
-                        .display
-                        .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
-                        .get();
-                    let v_end = cell
-                        .display
-                        .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
-                        .get();
-                    let vis_text = cell.display.visual_text();
-                    let start_chars = vis_text[..v_start.min(vis_text.len())].chars().count();
-                    let end_chars = vis_text[..v_end.min(vis_text.len())].chars().count();
-                    if start_chars < end_chars {
-                        let link_color = Color32::from_rgba_unmultiplied(136, 192, 208, 220);
-                        let mut row_char_start = 0;
-                        for row in &cell.galley.rows {
-                            let row_count = row.char_count_including_newline().0;
-                            let row_char_end = row_char_start + row_count;
-                            let s_start = start_chars.max(row_char_start);
-                            let s_end = end_chars.min(row_char_end);
-                            if s_start < s_end {
-                                let col_start = s_start - row_char_start;
-                                let col_end = s_end - row_char_start;
-                                let x_start = row.x_offset(egui::text::CharIndex(col_start))
-                                    + row.pos.x
-                                    + cell_origin.x;
-                                let x_end = row.x_offset(egui::text::CharIndex(col_end))
-                                    + row.pos.x
-                                    + cell_origin.x;
-                                let y = row.pos.y + row.size.y + cell_origin.y - 1.0;
-                                painter.line_segment(
-                                    [Pos2::new(x_start, y), Pos2::new(x_end, y)],
-                                    egui::Stroke::new(1.0, link_color),
-                                );
-                            }
-                            row_char_start = row_char_end;
-                        }
-                    }
-                } else if let crate::editor::InlineStyle::Highlight(rgba) = span.style {
-                    let v_start = cell
-                        .display
-                        .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
-                        .get();
-                    let v_end = cell
-                        .display
-                        .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
-                        .get();
-                    let vis_text = cell.display.visual_text();
-                    let start_chars = vis_text[..v_start.min(vis_text.len())].chars().count();
-                    let end_chars = vis_text[..v_end.min(vis_text.len())].chars().count();
-                    if start_chars < end_chars {
-                        let hl_color = Color32::from_rgba_unmultiplied(
-                            rgba[0],
-                            rgba[1],
-                            rgba[2],
-                            (rgba[3] as u16 * 75 / 255) as u8,
-                        );
-                        let mut row_char_start = 0;
-                        for row in &cell.galley.rows {
-                            let row_count = row.char_count_including_newline().0;
-                            let row_char_end = row_char_start + row_count;
-                            let s_start = start_chars.max(row_char_start);
-                            let s_end = end_chars.min(row_char_end);
-                            if s_start < s_end {
-                                let col_start = s_start - row_char_start;
-                                let col_end = s_end - row_char_start;
-                                let x_start = row.x_offset(egui::text::CharIndex(col_start))
-                                    + row.pos.x
-                                    + cell_origin.x;
-                                let x_end = row.x_offset(egui::text::CharIndex(col_end))
-                                    + row.pos.x
-                                    + cell_origin.x;
-                                let min_y = cell_origin.y + row.pos.y;
-                                let max_y = min_y + row.size.y;
-                                let rect = Rect::from_min_max(
-                                    Pos2::new(x_start.min(x_end) - 1.0, min_y),
-                                    Pos2::new(x_start.max(x_end) + 1.0, max_y),
-                                );
-                                painter.rect_filled(rect, 2.0, hl_color);
-                            }
-                            row_char_start = row_char_end;
-                        }
-                    }
-                }
-            }
-
-            painter.galley(
+            paint_inline_decorations(
+                painter,
+                &cell.display,
+                &cell.galley.rows,
                 cell_origin,
-                cell.galley.clone(),
-                color(view.theme.text_primary),
+                cell_origin.y,
+                is_dark,
+                true,
             );
+            painter.galley(cell_origin, cell.galley.clone(), text_fg);
         }
     }
 }

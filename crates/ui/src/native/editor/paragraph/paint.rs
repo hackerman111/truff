@@ -1,151 +1,84 @@
+use std::ops::Range;
+use std::sync::Arc;
+
+use egui::{Color32, FontId, Galley, Painter, Pos2, Rect};
+use truff_core::{text::BytePos, vim::Mode};
+
 use super::super::color;
 use super::Paragraph;
+use super::spans::{
+    HIGHLIGHT_PAD_X, HIGHLIGHT_PAD_Y, char_rect_in_galley, for_each_row_char_span,
+    paint_inline_decorations, paragraph_vertical_bounds, row_vertical_bounds, visual_char_range,
+};
 use crate::editor::Affinity;
 use crate::overlays::FlashTarget;
 use crate::theme::Theme;
-use egui::{Color32, FontId, Painter, Pos2, Rect, epaint::text::PlacedRow};
-use std::ops::Range;
-use truff_core::{text::BytePos, vim::Mode};
 
 pub(in super::super) struct ParagraphView<'a> {
     pub(in super::super) theme: &'a Theme,
     pub(in super::super) selection: Option<&'a Range<usize>>,
     pub(in super::super) cursor: Option<usize>,
+    pub(in super::super) cursor_visible: bool,
+    pub(in super::super) pixels_per_point: f32,
     pub(in super::super) mode: Mode,
     pub(in super::super) preedit: Option<&'a str>,
     pub(in super::super) flash: &'a [FlashTarget],
     pub(in super::super) content_width: f32,
 }
-const HIGHLIGHT_PAD_Y: f32 = 2.0;
-const HIGHLIGHT_PAD_X: f32 = 1.0;
 
-use egui::epaint::text::Glyph;
-
-fn glyph_vertical_bounds(origin_y: f32, row: &PlacedRow, glyph: &Glyph) -> (f32, f32) {
-    let baseline_y = origin_y + row.pos.y + glyph.pos.y;
-    let cap_height = (glyph.font_face_ascent * 0.75).max(10.0);
-    (
-        baseline_y - cap_height - HIGHLIGHT_PAD_Y,
-        baseline_y + HIGHLIGHT_PAD_Y,
-    )
-}
-
-fn cluster_vertical_bounds(origin_y: f32, row: &PlacedRow, glyphs: &[Glyph]) -> (f32, f32) {
-    if let Some((first, rest)) = glyphs.split_first() {
-        let (mut min_y, mut max_y) = glyph_vertical_bounds(origin_y, row, first);
-        for g in rest {
-            let (top, bottom) = glyph_vertical_bounds(origin_y, row, g);
-            min_y = min_y.min(top);
-            max_y = max_y.max(bottom);
+fn paint_obsidian_cursor(
+    painter: &Painter,
+    mut caret: Rect,
+    boundary_pad_x: f32,
+    glyph_overlay: Option<(Pos2, &Arc<Galley>)>,
+    view: &ParagraphView<'_>,
+) -> Rect {
+    let cur = color(view.theme.cursor);
+    if view.mode == Mode::Insert {
+        const INSERT_CARET_WIDTH: f32 = 2.0;
+        let ppp = view.pixels_per_point.max(1.0);
+        let boundary_x = caret.min.x + boundary_pad_x;
+        let raw_left = boundary_x - INSERT_CARET_WIDTH * 0.5;
+        let snapped_left = (raw_left * ppp).round() / ppp;
+        let px_width = (INSERT_CARET_WIDTH * ppp).round().max(2.0) / ppp;
+        caret.min.x = snapped_left;
+        caret.max.x = snapped_left + px_width;
+        if view.cursor_visible {
+            let caret_fill = Color32::from_rgba_unmultiplied(cur.r(), cur.g(), cur.b(), 235);
+            painter.rect_filled(caret, 0.0, caret_fill);
         }
-        (min_y, max_y)
-    } else if let Some(last) = row.glyphs.last() {
-        glyph_vertical_bounds(origin_y, row, last)
-    } else {
-        let baseline_y = origin_y + row.pos.y + row.size.y * 0.6;
-        let cap_height = (row.size.y * 0.6).max(10.0);
-        (
-            baseline_y - cap_height - HIGHLIGHT_PAD_Y,
-            baseline_y + HIGHLIGHT_PAD_Y,
-        )
+        return caret;
     }
-}
 
-fn row_vertical_bounds(origin_y: f32, row: &PlacedRow) -> (f32, f32) {
-    if !row.glyphs.is_empty() {
-        cluster_vertical_bounds(origin_y, row, &row.glyphs)
-    } else {
-        let baseline_y = origin_y + row.pos.y + row.size.y * 0.6;
-        let cap_height = (row.size.y * 0.6).max(10.0);
-        (
-            baseline_y - cap_height - HIGHLIGHT_PAD_Y,
-            baseline_y + HIGHLIGHT_PAD_Y,
-        )
+    let block_fill = Color32::from_rgba_unmultiplied(cur.r(), cur.g(), cur.b(), 232);
+    painter.rect_filled(caret, 0.0, block_fill);
+    if let Some((galley_origin, galley)) = glyph_overlay
+        && !galley.is_empty()
+    {
+        let luma = 0.299 * (cur.r() as f32) + 0.587 * (cur.g() as f32) + 0.114 * (cur.b() as f32);
+        let cursor_fg = if luma >= 165.0 {
+            Color32::from_rgb(24, 26, 31)
+        } else {
+            Color32::from_rgb(236, 239, 244)
+        };
+        let clip = caret.intersect(painter.clip_rect());
+        if clip.is_positive() {
+            painter.with_clip_rect(clip).add(
+                egui::epaint::TextShape::new(galley_origin, galley.clone(), cursor_fg)
+                    .with_override_text_color(cursor_fg),
+            );
+        }
     }
-}
-
-fn paragraph_vertical_bounds(origin_y: f32, rows: &[PlacedRow]) -> (f32, f32) {
-    let mut min_y = f32::INFINITY;
-    let mut max_y = f32::NEG_INFINITY;
-    for row in rows {
-        let (r_top, r_bottom) = row_vertical_bounds(origin_y, row);
-        min_y = min_y.min(r_top);
-        max_y = max_y.max(r_bottom);
-    }
-    if min_y <= max_y {
-        (min_y, max_y)
-    } else {
-        (
-            origin_y - HIGHLIGHT_PAD_Y,
-            origin_y + super::super::LINE_HEIGHT + HIGHLIGHT_PAD_Y,
-        )
-    }
+    caret
 }
 
 impl Paragraph {
     pub(in crate::native::editor) fn char_rect_at(&self, origin: Pos2, source: usize) -> Rect {
+        let rel_source = source.saturating_sub(self.range.start);
         if let Some(table) = &self.table_row {
-            let rel_source = source.saturating_sub(self.range.start);
             return table.char_rect_at(origin, rel_source);
         }
-        use unicode_segmentation::UnicodeSegmentation;
-
-        let rel_source = source.saturating_sub(self.range.start);
-        let visual = self
-            .display
-            .source_to_visual(BytePos::new(rel_source), Affinity::Right)
-            .get();
-        let visual_text = self.display.visual_text();
-
-        let cluster_char_len = if visual < visual_text.len() {
-            visual_text[visual..]
-                .graphemes(true)
-                .next()
-                .map_or(1, |g| g.chars().count())
-        } else {
-            1
-        };
-
-        let chars_before = visual_text[..visual.min(visual_text.len())].chars().count();
-        let ccursor = egui::text::CCursor::new(chars_before);
-        let layout_cursor = self.galley.layout_from_cursor(ccursor);
-
-        if let Some(row) = self.galley.rows.get(layout_cursor.row) {
-            let col_start = layout_cursor.column;
-            let col_end = egui::text::CharIndex(col_start.0 + cluster_char_len);
-
-            let x_start = row.x_offset(col_start) + row.pos.x + origin.x;
-            let (min_y, max_y) = if col_start.0 < row.glyphs.len() {
-                let slice = &row.glyphs[col_start.0..col_end.0.min(row.glyphs.len())];
-                cluster_vertical_bounds(origin.y, row, slice)
-            } else if let Some(last) = row.glyphs.last() {
-                glyph_vertical_bounds(origin.y, row, last)
-            } else {
-                row_vertical_bounds(origin.y, row)
-            };
-
-            let width = if col_start.0 < row.glyphs.len() {
-                let x_end = row.x_offset(col_end) + row.pos.x + origin.x;
-                (x_end - x_start).max(row.glyphs[col_start.0].advance_width)
-            } else if let Some(glyph) = row.glyphs.last() {
-                glyph.advance_width
-            } else {
-                (row.size.y * 0.55).round().max(4.0)
-            };
-
-            Rect::from_min_max(
-                Pos2::new(x_start - HIGHLIGHT_PAD_X, min_y),
-                Pos2::new(x_start + width.max(2.0) + HIGHLIGHT_PAD_X, max_y),
-            )
-        } else {
-            let caret = self
-                .galley
-                .pos_from_cursor(ccursor)
-                .translate(origin.to_vec2());
-            let line_h = caret.height().max(super::super::LINE_HEIGHT);
-            let width = (line_h * 0.55).round().max(4.0);
-            Rect::from_min_size(caret.left_top(), egui::vec2(width, line_h))
-        }
+        char_rect_in_galley(&self.display, &self.galley, origin, rel_source, false)
     }
 
     fn paint_selection_range(
@@ -156,51 +89,24 @@ impl Paragraph {
         end_source: usize,
         color: Color32,
     ) {
-        let visual_start = self
-            .display
-            .source_to_visual(
-                BytePos::new(start_source.saturating_sub(self.range.start)),
-                Affinity::Right,
-            )
-            .get();
-        let visual_end = self
-            .display
-            .source_to_visual(
-                BytePos::new(end_source.saturating_sub(self.range.start)),
-                Affinity::Left,
-            )
-            .get();
-        let visual_text = self.display.visual_text();
-        let start_chars = visual_text[..visual_start.min(visual_text.len())]
-            .chars()
-            .count();
-        let end_chars = visual_text[..visual_end.min(visual_text.len())]
-            .chars()
-            .count();
-        if start_chars >= end_chars && !self.galley.rows.is_empty() {
+        let local_range = start_source.saturating_sub(self.range.start)
+            ..end_source.saturating_sub(self.range.start);
+        let Some(chars) = visual_char_range(&self.display, local_range) else {
             return;
-        }
-
-        let mut row_char_start = 0;
-        for row in &self.galley.rows {
-            let row_char_count = row.char_count_including_newline().0;
-            let row_char_end = row_char_start + row_char_count;
-            let sel_start = start_chars.max(row_char_start);
-            let sel_end = end_chars.min(row_char_end);
-            if sel_start < sel_end {
-                let col_start = sel_start - row_char_start;
-                let col_end = sel_end - row_char_start;
-                let x_start = row.x_offset(egui::text::CharIndex(col_start)) + row.pos.x + origin.x;
-                let x_end = row.x_offset(egui::text::CharIndex(col_end)) + row.pos.x + origin.x;
+        };
+        for_each_row_char_span(
+            &self.galley.rows,
+            chars,
+            origin.x,
+            |row, _, x_start, x_end| {
                 let (min_y, max_y) = row_vertical_bounds(origin.y, row);
                 let rect = Rect::from_min_max(
                     Pos2::new(x_start.min(x_end) - HIGHLIGHT_PAD_X, min_y),
                     Pos2::new(x_start.max(x_end) + HIGHLIGHT_PAD_X, max_y),
                 );
                 painter.rect_filled(rect, 0.0, color);
-            }
-            row_char_start = row_char_end;
-        }
+            },
+        );
     }
 
     pub(in super::super) fn paint(
@@ -222,24 +128,16 @@ impl Paragraph {
                 .cursor
                 .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
             {
-                let mut caret = self.char_rect_at(origin, cursor);
-                if view.mode == Mode::Insert {
-                    caret.min.x += HIGHLIGHT_PAD_X;
-                    caret.max.x = caret.min.x + 1.5;
-                }
-                painter.rect_filled(
-                    caret,
-                    0.0,
-                    color(view.theme.cursor).gamma_multiply(if view.mode == Mode::Insert {
-                        1.0
-                    } else {
-                        0.45
-                    }),
-                );
-                cursor_rect = Some(caret);
+                let rel_source = cursor.saturating_sub(self.range.start);
+                let raw_caret = self.char_rect_at(origin, cursor);
+                let overlay = table.cell_galley_for_cursor(origin, rel_source);
+                cursor_rect = Some(paint_obsidian_cursor(
+                    painter, raw_caret, 0.0, overlay, view,
+                ));
             }
             return cursor_rect;
         }
+
         let is_task = self.is_task();
         let text_pad_x = if is_task { super::TASK_PADDING_X } else { 0.0 };
         let text_origin = Pos2::new(origin.x + text_pad_x, origin.y);
@@ -251,13 +149,13 @@ impl Paragraph {
                     Affinity::Right,
                 )
                 .get();
-            let chars = self.display.visual_text()[..visual.min(self.display.visual_text().len())]
-                .chars()
-                .count();
+            let vis_text = self.display.visual_text();
+            let chars = vis_text[..visual.min(vis_text.len())].chars().count();
             self.galley
                 .pos_from_cursor(egui::text::CCursor::new(chars))
                 .translate(text_origin.to_vec2())
         };
+
         if let Some(selection) = view.selection {
             if view.mode == Mode::VisualLine {
                 let is_selected = (selection.start <= self.range.start
@@ -298,17 +196,22 @@ impl Paragraph {
         {
             let caret = self.char_rect_at(text_origin, cursor);
             let width = (self.galley.size().x + text_pad_x).max(view.content_width);
-            let line_rect = Rect::from_min_max(
-                Pos2::new(origin.x, caret.min.y - HIGHLIGHT_PAD_Y),
-                Pos2::new(origin.x + width, caret.max.y + HIGHLIGHT_PAD_Y),
-            );
-            let line_bg = if view.theme.is_dark() {
-                Color32::from_rgba_unmultiplied(180, 142, 173, 26) // Soft purple tint
+            let scale = (caret.height() / super::spans::BASE_CURSOR_HEIGHT).max(1.0);
+            let pad_y = if scale > 1.2 {
+                ((50.0 - caret.height()) * 0.5).max(HIGHLIGHT_PAD_Y)
             } else {
-                Color32::from_rgba_unmultiplied(180, 142, 173, 35)
+                HIGHLIGHT_PAD_Y
             };
+            let line_rect = Rect::from_min_max(
+                Pos2::new(origin.x, caret.min.y - pad_y),
+                Pos2::new(origin.x + width, caret.max.y + pad_y),
+            );
+            let cur = color(view.theme.cursor);
+            let line_alpha = if view.theme.is_dark() { 46 } else { 20 };
+            let line_bg = Color32::from_rgba_unmultiplied(cur.r(), cur.g(), cur.b(), line_alpha);
             painter.rect_filled(line_rect, 0.0, line_bg);
         }
+
         if let Some(list) = &self.presentation.list
             && let truff_core::markdown::presentation::ListKind::Task { checked, checkbox } =
                 list.kind
@@ -341,6 +244,7 @@ impl Paragraph {
                 egui::Stroke::new(3.0, status_color.gamma_multiply(0.85)),
             );
         }
+
         if self.presentation.code {
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
             let width = self.galley.size().x.max(view.content_width);
@@ -354,6 +258,7 @@ impl Paragraph {
                 color(view.theme.bg_panel).gamma_multiply(0.45),
             );
         }
+
         if self.display.source_text().trim_start().starts_with('>') {
             let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
             let width = (self.galley.size().x + 24.0).max(view.content_width);
@@ -372,57 +277,8 @@ impl Paragraph {
                 egui::Stroke::new(3.0, color(view.theme.accent).gamma_multiply(0.85)),
             );
         }
-        let table_pipes = self.display.table_pipes();
-        if !table_pipes.is_empty() && self.display.mode() != crate::editor::ProjectionMode::Source {
-            let (min_y, max_y) = paragraph_vertical_bounds(origin.y, &self.galley.rows);
-            let border_color = color(view.theme.border_subtle).gamma_multiply(1.3);
-            let border_stroke = egui::Stroke::new(1.0, border_color);
 
-            let mut pipe_xs: Vec<f32> = Vec::with_capacity(table_pipes.len());
-            if let Some(row) = self.galley.rows.first() {
-                for col_idx in self.display.table_pipe_visual_cols() {
-                    let x_start =
-                        row.x_offset(egui::text::CharIndex(col_idx)) + row.pos.x + text_origin.x;
-                    let x_end = row.x_offset(egui::text::CharIndex(col_idx + 1))
-                        + row.pos.x
-                        + text_origin.x;
-                    let px = if x_end > x_start {
-                        ((x_start + x_end) * 0.5).round()
-                    } else {
-                        (x_start + 4.0).round()
-                    };
-                    pipe_xs.push(px);
-                }
-            }
-
-            if let (Some(&first_x), Some(&last_x)) = (pipe_xs.first(), pipe_xs.last()) {
-                if self.presentation.table_header {
-                    let header_rect = Rect::from_min_max(
-                        Pos2::new(first_x, min_y - 1.0),
-                        Pos2::new(last_x, max_y + 1.0),
-                    );
-                    painter.rect_filled(
-                        header_rect,
-                        0.0,
-                        color(view.theme.bg_panel).gamma_multiply(0.5),
-                    );
-                    painter.hline(first_x..=last_x, (min_y - 1.0).round(), border_stroke);
-                    painter.hline(
-                        first_x..=last_x,
-                        (max_y + 1.0).round(),
-                        egui::Stroke::new(1.5, border_color),
-                    );
-                } else {
-                    painter.hline(first_x..=last_x, (max_y + 1.0).round(), border_stroke);
-                }
-
-                let y_top = (min_y - 1.0).round();
-                let y_bottom = (max_y + 1.0).round();
-                for &px in &pipe_xs {
-                    painter.vline(px, y_top..=y_bottom, border_stroke);
-                }
-            }
-        } else if self.presentation.table_delimiter && !self.display.has_hidden_content() {
+        if self.presentation.table_delimiter && !self.display.has_hidden_content() {
             let y = (origin.y + self.galley.size().y * 0.5).round();
             let width = self.galley.size().x;
             painter.hline(
@@ -431,152 +287,24 @@ impl Paragraph {
                 egui::Stroke::new(1.0, color(view.theme.border_subtle).gamma_multiply(1.2)),
             );
         }
-        let code_bg = if view.theme.is_dark() {
-            Color32::from_rgba_unmultiplied(128, 128, 128, 50)
-        } else {
-            Color32::from_rgba_unmultiplied(100, 100, 100, 40)
-        };
-        for span in self.display.styled_spans() {
-            if span.style == crate::editor::InlineStyle::Code {
-                let visual_start = self
-                    .display
-                    .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
-                    .get();
-                let visual_end = self
-                    .display
-                    .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
-                    .get();
-                let visual_text = self.display.visual_text();
-                let start_chars = visual_text[..visual_start.min(visual_text.len())]
-                    .chars()
-                    .count();
-                let end_chars = visual_text[..visual_end.min(visual_text.len())]
-                    .chars()
-                    .count();
-                if start_chars >= end_chars {
-                    continue;
-                }
-                let mut row_char_start = 0;
-                for row in &self.galley.rows {
-                    let row_char_count = row.char_count_including_newline().0;
-                    let row_char_end = row_char_start + row_char_count;
-                    let s_start = start_chars.max(row_char_start);
-                    let s_end = end_chars.min(row_char_end);
-                    if s_start < s_end {
-                        let col_start = s_start - row_char_start;
-                        let col_end = s_end - row_char_start;
-                        let x_start = row.x_offset(egui::text::CharIndex(col_start))
-                            + row.pos.x
-                            + text_origin.x;
-                        let x_end = row.x_offset(egui::text::CharIndex(col_end))
-                            + row.pos.x
-                            + text_origin.x;
-                        let (min_y, max_y) = row_vertical_bounds(origin.y, row);
-                        let pad_x = 3.5;
-                        let pad_y = 1.0;
-                        let rect = Rect::from_min_max(
-                            Pos2::new(x_start.min(x_end) - pad_x, min_y - pad_y),
-                            Pos2::new(x_start.max(x_end) + pad_x, max_y + pad_y),
-                        );
-                        painter.rect_filled(rect, 4.0, code_bg);
-                    }
-                    row_char_start = row_char_end;
-                }
-            } else if span.style == crate::editor::InlineStyle::Link {
-                let visual_start = self
-                    .display
-                    .source_to_visual(BytePos::new(span.content.start), Affinity::Right)
-                    .get();
-                let visual_end = self
-                    .display
-                    .source_to_visual(BytePos::new(span.content.end), Affinity::Left)
-                    .get();
-                let visual_text = self.display.visual_text();
-                let start_chars = visual_text[..visual_start.min(visual_text.len())]
-                    .chars()
-                    .count();
-                let end_chars = visual_text[..visual_end.min(visual_text.len())]
-                    .chars()
-                    .count();
-                if start_chars >= end_chars {
-                    continue;
-                }
-                let link_color = Color32::from_rgba_unmultiplied(136, 192, 208, 220);
-                let mut row_char_start = 0;
-                for row in &self.galley.rows {
-                    let row_char_count = row.char_count_including_newline().0;
-                    let row_char_end = row_char_start + row_char_count;
-                    let s_start = start_chars.max(row_char_start);
-                    let s_end = end_chars.min(row_char_end);
-                    if s_start < s_end {
-                        let col_start = s_start - row_char_start;
-                        let col_end = s_end - row_char_start;
-                        let x_start = row.x_offset(egui::text::CharIndex(col_start))
-                            + row.pos.x
-                            + text_origin.x;
-                        let x_end = row.x_offset(egui::text::CharIndex(col_end))
-                            + row.pos.x
-                            + text_origin.x;
-                        let line_y = if let Some(g) = row.glyphs.get(col_start) {
-                            (origin.y + row.pos.y + g.pos.y + 1.5).round()
-                        } else {
-                            let (_min_y, max_y) = row_vertical_bounds(origin.y, row);
-                            (max_y - HIGHLIGHT_PAD_Y + 1.0).round()
-                        };
-                        painter.hline(
-                            x_start.min(x_end)..=x_start.max(x_end),
-                            line_y,
-                            egui::Stroke::new(1.0, link_color),
-                        );
-                    }
-                    row_char_start = row_char_end;
-                }
-            }
-        }
-        if let Some(list) = &self.presentation.list
-            && list.depth > 0
-        {
+
+        paint_inline_decorations(
+            painter,
+            &self.display,
+            &self.galley.rows,
+            text_origin,
+            origin.y,
+            view.theme.is_dark(),
+            false,
+        );
+
+        if !self.guide_xs.is_empty() {
             let guide_color = if view.theme.is_dark() {
                 color(view.theme.text_muted).gamma_multiply(0.65)
             } else {
                 color(view.theme.text_muted).gamma_multiply(0.55)
             };
-            let font = self
-                .galley
-                .job
-                .sections
-                .first()
-                .map(|s| s.format.font_id.clone())
-                .unwrap_or_else(|| egui::FontId::new(15.0, egui::FontFamily::Proportional));
-
-            for level in 0..list.depth {
-                const STANDARD_PREFIXES: [&str; 6] = [
-                    "•",
-                    "    ◦",
-                    "        •",
-                    "            ◦",
-                    "                •",
-                    "                    ◦",
-                ];
-                let prefix = STANDARD_PREFIXES
-                    .get(level)
-                    .map(|&s| s.to_owned())
-                    .unwrap_or_else(|| {
-                        let bullet_chr = if level % 2 == 0 { "•" } else { "◦" };
-                        format!("{}{bullet_chr}", "    ".repeat(level))
-                    });
-                let prefix_galley = painter.layout_no_wrap(prefix, font.clone(), self.color);
-                let center_x = if let Some(row) = prefix_galley.rows.first()
-                    && let Some(g) = row.glyphs.iter().find(|g| !g.chr.is_whitespace())
-                {
-                    if !g.uv_rect.is_nothing() {
-                        g.pos.x + g.uv_rect.offset.x + g.uv_rect.size.x * 0.5
-                    } else {
-                        g.pos.x + g.size().x * 0.5
-                    }
-                } else {
-                    (level as f32) * 16.0 + 2.5
-                };
+            for &center_x in &self.guide_xs {
                 let guide_x = text_origin.x + center_x;
                 for (row_idx, row) in self.galley.rows.iter().enumerate() {
                     let has_text_collision = if row_idx == 0 {
@@ -602,7 +330,9 @@ impl Paragraph {
                 }
             }
         }
+
         painter.galley(text_origin, self.galley.clone(), self.color);
+
         if self.display.is_rule_hidden() {
             let y = (origin.y + self.galley.size().y * 0.5).round();
             let width = self.galley.size().x.max(view.content_width);
@@ -610,24 +340,20 @@ impl Paragraph {
                 egui::Stroke::new(2.0, color(view.theme.border_subtle).gamma_multiply(1.5));
             painter.hline(origin.x..=(origin.x + width), y, stroke);
         }
+
         if let Some(cursor) = view
             .cursor
             .filter(|cursor| self.range.contains(cursor) || *cursor == self.range.end)
         {
-            let mut caret = self.char_rect_at(text_origin, cursor);
-            if view.mode == Mode::Insert {
-                caret.min.x += HIGHLIGHT_PAD_X;
-                caret.max.x = caret.min.x + 1.5;
-            }
-            painter.rect_filled(
-                caret,
-                0.0,
-                color(view.theme.cursor).gamma_multiply(if view.mode == Mode::Insert {
-                    1.0
-                } else {
-                    0.45
-                }),
-            );
+            let raw_caret = self.char_rect_at(text_origin, cursor);
+            let rel_source = cursor.saturating_sub(self.range.start);
+            let visual = self
+                .display
+                .source_to_visual(BytePos::new(rel_source), Affinity::Right)
+                .get();
+            let overlay =
+                (visual < self.display.visual_text().len()).then_some((text_origin, &self.galley));
+            let caret = paint_obsidian_cursor(painter, raw_caret, HIGHLIGHT_PAD_X, overlay, view);
             cursor_rect = Some(caret);
             if let Some(text) = view.preedit {
                 let galley =
@@ -635,6 +361,7 @@ impl Paragraph {
                 painter.galley(caret.left_top(), galley, self.color);
             }
         }
+
         for target in view
             .flash
             .iter()
@@ -653,6 +380,7 @@ impl Paragraph {
             );
             painter.galley(position, badge, color(view.theme.flash_fg));
         }
+
         cursor_rect
     }
 }

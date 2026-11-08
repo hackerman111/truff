@@ -31,6 +31,7 @@ pub struct DisplayMap {
     visual_text: Option<Box<str>>,
     visual_revision: u64,
     colors: Vec<truff_core::markdown::style::ColorSpan>,
+    highlights: Vec<truff_core::markdown::style::ColorSpan>,
     styles: Vec<StyledSpan>,
     markers: Vec<(Range<usize>, Option<Range<usize>>)>,
     lists: Vec<truff_core::markdown::presentation::ListMarker>,
@@ -60,6 +61,11 @@ impl DisplayMap {
         } else {
             Vec::new()
         };
+        let highlights = if text.contains("<mark") {
+            truff_core::markdown::style::highlight_spans(&text)
+        } else {
+            Vec::new()
+        };
         let mut map = Self {
             source_text: text,
             mode,
@@ -69,6 +75,7 @@ impl DisplayMap {
             visual_text: None,
             visual_revision: 0,
             colors,
+            highlights,
             styles: Vec::new(),
             markers: Vec::new(),
             lists: Vec::new(),
@@ -151,6 +158,11 @@ impl DisplayMap {
             self.colors = truff_core::markdown::style::color_spans(text);
         } else {
             self.colors.clear();
+        }
+        if text.contains("<mark") {
+            self.highlights = truff_core::markdown::style::highlight_spans(text);
+        } else {
+            self.highlights.clear();
         }
         self.scan_markers();
         self.visual_revision = self.visual_revision.wrapping_add(1);

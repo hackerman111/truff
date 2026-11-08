@@ -1,4 +1,6 @@
 use super::NativeApp;
+
+mod hub_tasks;
 mod providers;
 
 impl NativeApp {
@@ -110,6 +112,25 @@ impl NativeApp {
             .set_focus(crate::focus::Focus::Navigator);
     }
 
+    fn apply_selection_style(
+        &mut self,
+        op: impl FnOnce(
+            &mut crate::app::Application,
+            crate::app::SelectionTarget,
+        ) -> Result<(), Box<dyn std::error::Error>>,
+    ) {
+        self.navigator.close();
+        self.application.shell.pop_focus();
+        let result = self
+            .navigator_selection
+            .take()
+            .ok_or_else(|| -> Box<dyn std::error::Error> { "Select text with v or V first".into() })
+            .and_then(|target| op(&mut self.application, target));
+        if let Err(error) = result {
+            self.application.status = error.to_string();
+        }
+    }
+
     pub fn handle_navigator_action(&mut self, action: crate::navigator::NavigatorAction) {
         use crate::navigator::NavigatorAction;
         match action {
@@ -155,60 +176,16 @@ impl NativeApp {
                 }
             }
             NavigatorAction::ApplyColor { hex } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                let result = self
-                    .navigator_selection
-                    .take()
-                    .ok_or_else(|| -> Box<dyn std::error::Error> {
-                        "Select text with v or V first".into()
-                    })
-                    .and_then(|target| self.application.color_target(target, hex));
-                if let Err(error) = result {
-                    self.application.status = error.to_string();
-                }
+                self.apply_selection_style(|app, target| app.color_target(target, hex));
             }
             NavigatorAction::ApplyHighlight { hex } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                let result = self
-                    .navigator_selection
-                    .take()
-                    .ok_or_else(|| -> Box<dyn std::error::Error> {
-                        "Select text with v or V first".into()
-                    })
-                    .and_then(|target| self.application.highlight_target(target, hex));
-                if let Err(error) = result {
-                    self.application.status = error.to_string();
-                }
+                self.apply_selection_style(|app, target| app.highlight_target(target, hex));
             }
             NavigatorAction::ApplyCallout { kind } => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                let result = self
-                    .navigator_selection
-                    .take()
-                    .ok_or_else(|| -> Box<dyn std::error::Error> {
-                        "Select text with v or V first".into()
-                    })
-                    .and_then(|target| self.application.callout_target(target, kind));
-                if let Err(error) = result {
-                    self.application.status = error.to_string();
-                }
+                self.apply_selection_style(|app, target| app.callout_target(target, kind));
             }
             NavigatorAction::RemoveStyle => {
-                self.navigator.close();
-                self.application.shell.pop_focus();
-                let result = self
-                    .navigator_selection
-                    .take()
-                    .ok_or_else(|| -> Box<dyn std::error::Error> {
-                        "Select text with v or V first".into()
-                    })
-                    .and_then(|target| self.application.remove_style_target(target));
-                if let Err(error) = result {
-                    self.application.status = error.to_string();
-                }
+                self.apply_selection_style(|app, target| app.remove_style_target(target));
             }
             NavigatorAction::CloseView { view_id } => {
                 if let Err(error) = self.application.close_view(view_id) {
@@ -232,7 +209,6 @@ impl NativeApp {
                 }
                 self.refresh_navigator();
             }
-
             NavigatorAction::Close => {
                 self.navigator.close();
                 self.application.shell.pop_focus();
@@ -365,219 +341,5 @@ impl NativeApp {
                 self.apply_hub_task_op(op);
             }
         }
-    }
-
-    fn vault_index_path(&self) -> Option<std::path::PathBuf> {
-        self.application
-            .vault_path()
-            .map(|root| root.join("index.md"))
-    }
-
-    fn project_index_path(&self) -> Option<std::path::PathBuf> {
-        if let Some(active) = self.application.active_path()
-            && let Some(parent) = active.parent()
-        {
-            return Some(parent.join("index.md"));
-        }
-        self.vault_index_path()
-    }
-
-    fn read_index_markdown(&self, path: &std::path::Path) -> String {
-        if let Some(buf_id) = self
-            .application
-            .shell
-            .workspace()
-            .buffers()
-            .get_by_path(path)
-            && let Some(buffer) = self
-                .application
-                .shell
-                .workspace()
-                .buffers()
-                .get_buffer(buf_id)
-        {
-            return buffer.as_str();
-        }
-        std::fs::read_to_string(path).unwrap_or_default()
-    }
-
-    pub(super) fn sync_hub_tasks(&mut self) {
-        use crate::navigator::tasks::{parse_fenced_file_tasks, parse_index_tasks};
-        let vault_tasks = self
-            .vault_index_path()
-            .map(|path| parse_index_tasks(&self.read_index_markdown(&path)))
-            .unwrap_or_default();
-        let file_tasks = self
-            .application
-            .shell
-            .editor_buffer()
-            .filter(|b| !b.is_empty())
-            .map(|buffer| buffer.as_str())
-            .or_else(|| {
-                self.application
-                    .active_path()
-                    .and_then(|p| std::fs::read_to_string(p).ok())
-            })
-            .map(|text| parse_fenced_file_tasks(&text))
-            .unwrap_or_default();
-        let project_tasks = self
-            .project_index_path()
-            .map(|path| parse_index_tasks(&self.read_index_markdown(&path)))
-            .unwrap_or_default();
-        let saved_cat = self.navigator.hub_tasks.active_category;
-        let saved_selected = self.navigator.hub_tasks.selected;
-        self.navigator
-            .hub_tasks
-            .set_lists(vault_tasks, file_tasks, project_tasks);
-        self.navigator.hub_tasks.active_category = saved_cat;
-        self.navigator.hub_tasks.selected = saved_selected;
-        self.navigator.hub_tasks.clamp_selection();
-    }
-
-    fn apply_hub_task_op(&mut self, op: crate::navigator::HubTaskOp) {
-        use crate::navigator::{
-            HubTaskCategory, HubTaskOp,
-            tasks::{apply_task_op_to_file_text, apply_task_op_to_index_text},
-        };
-        let category = match &op {
-            HubTaskOp::Add { category, .. }
-            | HubTaskOp::Edit { category, .. }
-            | HubTaskOp::SetStatus { category, .. }
-            | HubTaskOp::Delete { category, .. } => *category,
-        };
-        match category {
-            HubTaskCategory::File => {
-                let Some(current) = self.application.shell.editor_buffer().map(|b| b.as_str())
-                else {
-                    return;
-                };
-                let updated = apply_task_op_to_file_text(&current, &op);
-                let byte_len = self
-                    .application
-                    .shell
-                    .editor_buffer()
-                    .map_or(0, |b| b.byte_len());
-                if let Err(error) = self.application.shell.apply_transaction(
-                    truff_core::text::Transaction::replace(0..byte_len, updated.clone()),
-                ) {
-                    self.application.status = error.to_string();
-                } else {
-                    self.application
-                        .handle_shell_action(crate::shell::ShellAction::EditorEdit);
-                    if let Some(active_path) = self
-                        .application
-                        .active_path()
-                        .map(std::path::Path::to_path_buf)
-                    {
-                        if let Err(error) = std::fs::write(&active_path, &updated) {
-                            self.application.status = error.to_string();
-                        } else if let Some(buf_id) = self
-                            .application
-                            .shell
-                            .workspace()
-                            .buffers()
-                            .get_by_path(&active_path)
-                            && let Some(entry) = self
-                                .application
-                                .shell
-                                .workspace_mut()
-                                .buffers_mut()
-                                .get_mut(buf_id)
-                        {
-                            if let Some(buf) = entry.buffer_mut() {
-                                buf.set_savepoint();
-                            }
-                            entry.set_fingerprint(Some(truff_store::compute_fingerprint(
-                                updated.as_bytes(),
-                            )));
-                            entry.set_state(truff_core::workspace::BufferState::Clean);
-                        }
-                    }
-                }
-            }
-            HubTaskCategory::Vault | HubTaskCategory::Project => {
-                let target_path = if category == HubTaskCategory::Vault {
-                    self.vault_index_path()
-                } else {
-                    self.project_index_path()
-                };
-                if let Some(path) = target_path {
-                    let current = self.read_index_markdown(&path);
-                    let updated = apply_task_op_to_index_text(&current, &op);
-                    if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let wrote_ok = match std::fs::write(&path, &updated) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            self.application.status = error.to_string();
-                            false
-                        }
-                    };
-                    if self.application.active_path() == Some(path.as_path()) {
-                        let byte_len = self
-                            .application
-                            .shell
-                            .editor_buffer()
-                            .map_or(0, |b| b.byte_len());
-                        let _ = self.application.shell.apply_transaction(
-                            truff_core::text::Transaction::replace(0..byte_len, updated.clone()),
-                        );
-                        self.application
-                            .handle_shell_action(crate::shell::ShellAction::EditorEdit);
-                    } else if let Some(buf_id) = self
-                        .application
-                        .shell
-                        .workspace()
-                        .buffers()
-                        .get_by_path(&path)
-                        && let Some(buffer) = self
-                            .application
-                            .shell
-                            .workspace_mut()
-                            .buffers_mut()
-                            .get_buffer_mut(buf_id)
-                    {
-                        let byte_len = buffer.byte_len();
-                        let _ = buffer.apply(truff_core::text::Transaction::replace(
-                            0..byte_len,
-                            updated.clone(),
-                        ));
-                    }
-                    if wrote_ok
-                        && let Some(buf_id) = self
-                            .application
-                            .shell
-                            .workspace()
-                            .buffers()
-                            .get_by_path(&path)
-                        && let Some(entry) = self
-                            .application
-                            .shell
-                            .workspace_mut()
-                            .buffers_mut()
-                            .get_mut(buf_id)
-                    {
-                        if let Some(buf) = entry.buffer_mut() {
-                            buf.set_savepoint();
-                        }
-                        entry.set_fingerprint(Some(truff_store::compute_fingerprint(
-                            updated.as_bytes(),
-                        )));
-                        entry.set_state(truff_core::workspace::BufferState::Clean);
-                    }
-                } else {
-                    // No vault path open (e.g., headless scratch state): keep in-memory state
-                    return;
-                }
-            }
-        }
-        self.sync_hub_tasks();
-        if let crate::navigator::HubTaskOp::Add { category, .. } = op {
-            let cat = category.index();
-            self.navigator.hub_tasks.selected[cat] =
-                self.navigator.hub_tasks.lists[cat].len().saturating_sub(1);
-        }
-        self.refresh_navigator();
     }
 }
