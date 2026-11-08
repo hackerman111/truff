@@ -20,6 +20,9 @@ pub struct NavigatorState {
     pub actions_menu_selected: usize,
     pub last_filtered_query: String,
     pub hub_tasks: HubTasksState,
+    pub visual_anchor: Option<usize>,
+    pub marked_indices: std::collections::BTreeSet<usize>,
+    pub clipboard: Option<FileClipboard>,
     pub(crate) search_page: usize,
     pub(crate) search_total: usize,
     pub(crate) results_query: Option<String>,
@@ -52,6 +55,9 @@ impl NavigatorState {
             actions_menu_selected: 0,
             last_filtered_query: String::new(),
             hub_tasks: HubTasksState::default(),
+            visual_anchor: None,
+            marked_indices: std::collections::BTreeSet::new(),
+            clipboard: None,
             search_page: 0,
             search_total: 0,
             results_query: None,
@@ -99,6 +105,7 @@ impl NavigatorState {
         self.actions_menu_selected = 0;
         self.scroll = crate::rows::RowScroll::default();
         self.motion_parser.reset();
+        self.clear_selection();
         self.recompute_filter();
     }
 
@@ -109,6 +116,7 @@ impl NavigatorState {
         self.search_page = 0;
         self.search_total = 0;
         self.motion_parser.reset();
+        self.clear_selection();
         self.search_mode = false;
         self.jump_labels_active = false;
         self.actions_menu_open = false;
@@ -138,6 +146,73 @@ impl NavigatorState {
         self.filtered_indices
             .get(self.selected_index)
             .and_then(|&idx| self.items.get(idx))
+    }
+
+    /// Returns a reference to the item at `index`, if any.
+    pub fn item_at(&self, index: usize) -> Option<&NavigatorItem> {
+        self.filtered_indices
+            .get(index)
+            .and_then(|&idx| self.items.get(idx))
+    }
+
+    /// Checks if visual range selection mode is active.
+    pub fn in_visual_mode(&self) -> bool {
+        self.visual_anchor.is_some()
+    }
+
+    /// Checks if the item at `index` is currently selected (either marked or in visual range).
+    pub fn is_index_selected(&self, index: usize) -> bool {
+        if self.marked_indices.contains(&index) {
+            return true;
+        }
+        if let Some(anchor) = self.visual_anchor {
+            let start = anchor.min(self.selected_index);
+            let end = anchor.max(self.selected_index);
+            return index >= start && index <= end;
+        }
+        false
+    }
+
+    /// Clears both visual selection range and marked indices.
+    pub fn clear_selection(&mut self) {
+        self.visual_anchor = None;
+        self.marked_indices.clear();
+    }
+
+    /// Checks if more than one item is selected or marked.
+    pub fn has_multi_selection(&self) -> bool {
+        if self.marked_indices.len() > 1 {
+            return true;
+        }
+        if let Some(anchor) = self.visual_anchor {
+            if anchor != self.selected_index {
+                return true;
+            }
+        }
+        !self.marked_indices.is_empty() && self.visual_anchor.is_some()
+    }
+
+    /// Returns relative file/folder paths for all selected items, or the single item under cursor.
+    pub fn selected_file_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        let total = self.visible_count();
+        for i in 0..total {
+            if self.is_index_selected(i) {
+                if let Some(item) = self.item_at(i) {
+                    if let NavigatorItemPayload::File { path, .. } = &item.payload {
+                        paths.push(path.clone());
+                    }
+                }
+            }
+        }
+        if paths.is_empty() {
+            if let Some(item) = self.selected_item() {
+                if let NavigatorItemPayload::File { path, .. } = &item.payload {
+                    paths.push(path.clone());
+                }
+            }
+        }
+        paths
     }
 
     /// Recomputes filtered indices based on search query.

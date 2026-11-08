@@ -243,6 +243,20 @@ impl NavigatorAction {
     }
 }
 
+/// Clipboard operation kind for file management.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardOp {
+    Copy,
+    Move,
+}
+
+/// Clipboard payload holding files marked for copy or move.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileClipboard {
+    pub op: ClipboardOp,
+    pub paths: Vec<String>,
+}
+
 /// Quick action displayed in the bottom footer or context menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuickAction {

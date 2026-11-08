@@ -8,8 +8,8 @@ mod types;
 
 pub use actions::QuickActionSpec;
 pub use model::{
-    HubTask, HubTaskCategory, HubTaskEdit, HubTaskOp, HubTaskStatus, HubTasksState, NavKey,
-    NavigatorAction, NavigatorItem, NavigatorItemPayload, NavigatorMode, NavigatorState,
-    QuickAction,
+    ClipboardOp, FileClipboard, HubTask, HubTaskCategory, HubTaskEdit, HubTaskOp, HubTaskStatus,
+    HubTasksState, NavKey, NavigatorAction, NavigatorItem, NavigatorItemPayload, NavigatorMode,
+    NavigatorState, QuickAction,
 };
 pub use render::show;
