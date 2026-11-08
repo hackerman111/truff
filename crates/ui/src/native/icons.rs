@@ -25,6 +25,7 @@ pub enum Icon {
     Check,
     Kanban,
     InProgress,
+    Trash,
 }
 
 /// Renders a crisp 5.5 px diameter dirty indicator circle without font dependencies.
@@ -387,6 +388,82 @@ pub fn render_icon(painter: &Painter, icon: Icon, rect: Rect, color: Color32, st
             painter.rect_stroke(col2, 1.0, stroke, egui::StrokeKind::Inside);
             painter.rect_stroke(col3, 1.0, stroke, egui::StrokeKind::Inside);
         }
+        Icon::Trash => {
+            let lid_y = center.y - 4.5;
+            let hw = 5.0;
+            // Lid bar
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - hw, lid_y),
+                    Pos2::new(center.x + hw, lid_y),
+                ],
+                stroke,
+            );
+            // Handle on lid
+            let handle_w = 2.0;
+            let handle_h = 1.5;
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - handle_w, lid_y),
+                    Pos2::new(center.x - handle_w, lid_y - handle_h),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - handle_w, lid_y - handle_h),
+                    Pos2::new(center.x + handle_w, lid_y - handle_h),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + handle_w, lid_y - handle_h),
+                    Pos2::new(center.x + handle_w, lid_y),
+                ],
+                stroke,
+            );
+            // Can body (tapered bucket)
+            let top_x = 4.0;
+            let bot_x = 3.2;
+            let bot_y = center.y + 5.0;
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - top_x, lid_y + 0.5),
+                    Pos2::new(center.x - bot_x, bot_y),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - bot_x, bot_y),
+                    Pos2::new(center.x + bot_x, bot_y),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + bot_x, bot_y),
+                    Pos2::new(center.x + top_x, lid_y + 0.5),
+                ],
+                stroke,
+            );
+            // Vertical ribs
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 1.4, lid_y + 2.0),
+                    Pos2::new(center.x - 1.2, bot_y - 1.5),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + 1.4, lid_y + 2.0),
+                    Pos2::new(center.x + 1.2, bot_y - 1.5),
+                ],
+                stroke,
+            );
+        }
     }
 }
 
@@ -424,6 +501,7 @@ mod tests {
                     Icon::Check,
                     Icon::Kanban,
                     Icon::InProgress,
+                    Icon::Trash,
                 ];
                 for icon in icons {
                     render_icon(ui.painter(), icon, rect, color, 1.4);

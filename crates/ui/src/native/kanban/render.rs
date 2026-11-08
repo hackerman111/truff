@@ -3,7 +3,7 @@ use super::state::{KanbanBoardState, KanbanInputMode, KanbanIntent};
 use crate::native::editor::color;
 use crate::native::icons::{Icon, render_icon};
 use crate::native::widgets::{
-    icon_button, primary_button, secondary_button, secondary_button_with_icon,
+    compact_icon_button, icon_button, primary_button, secondary_button, secondary_button_with_icon,
 };
 use crate::theme::Theme;
 use egui::{
@@ -12,8 +12,8 @@ use egui::{
 };
 use truff_core::markdown::kanban::{
     CardInsertPos, KanbanBoard, KanbanCard, KanbanColumn, KanbanTaskStatus, plan_add_card,
-    plan_add_column, plan_attach_file_link, plan_cycle_card_status, plan_edit_card_title,
-    plan_rename_column,
+    plan_add_column, plan_attach_file_link, plan_cycle_card_status, plan_delete_card,
+    plan_delete_column, plan_edit_card_title, plan_rename_column,
 };
 use truff_core::text::Transaction;
 
@@ -328,79 +328,10 @@ fn render_header(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
 
-        // Vector Kanban Icon
-        let (icon_r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-        render_icon(
-            ui.painter(),
-            Icon::Kanban,
-            icon_r,
-            color(theme.accent_primary),
-            1.4,
-        );
-
-        // Title
-        let board_title = board.title.as_deref().unwrap_or("КАНБАН-ДОСКА");
-        ui.label(
-            RichText::new(board_title)
-                .size(15.0)
-                .strong()
-                .color(color(theme.text_primary)),
-        );
-
-        // Progress summary: N/M (X%)
-        let total = board.total_card_count();
-        let done = board.done_card_count();
-        let pct = if total > 0 {
-            (done as f32 / total as f32 * 100.0).round() as usize
-        } else {
-            0
-        };
-
-        ui.label(
-            RichText::new(format!("{done}/{total} ({pct}%)"))
-                .size(11.5)
-                .color(color(theme.text_muted)),
-        );
-
-        // Mini progress bar
-        let (bar_rect, _) = ui.allocate_exact_size(vec2(60.0, 4.0), Sense::hover());
-        ui.painter()
-            .rect_filled(bar_rect, CornerRadius::same(2), color(theme.bg_canvas));
-        if total > 0 && done > 0 {
-            let fill_w = (bar_rect.width() * (done as f32 / total as f32)).min(bar_rect.width());
-            let filled_rect = Rect::from_min_size(bar_rect.min, vec2(fill_w, bar_rect.height()));
-            ui.painter().rect_filled(
-                filled_rect,
-                CornerRadius::same(2),
-                color(theme.state_success),
-            );
-        }
-
-        ui.add_space(8.0);
-
-        // Filter search bar
-        let mut search_active = state.mode == KanbanInputMode::FilterSearch;
-        let search_id = if is_modal {
-            "kanban_modal_filter_search"
-        } else {
-            "kanban_central_filter_search"
-        };
-        let _ = crate::native::widgets::search_filter_bar(
-            ui,
-            search_id,
-            &mut state.search_query,
-            Some(&mut search_active),
-            "Фильтр (/)...",
-            theme,
-        );
-        if search_active && state.mode != KanbanInputMode::FilterSearch {
-            state.mode = KanbanInputMode::FilterSearch;
-        } else if !search_active && state.mode == KanbanInputMode::FilterSearch {
-            state.mode = KanbanInputMode::Normal;
-        }
-
-        // Action buttons aligned right
+        // 1. Right-hand controls first via right_to_left layout so they take exact space on the right
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+
             if is_modal && icon_button(ui, Icon::Close, "Закрыть (Esc)").clicked() {
                 intent = KanbanIntent::CloseOverlay;
             }
@@ -409,12 +340,94 @@ fn render_header(
                 intent = KanbanIntent::ToggleSourceView;
             }
 
-            if secondary_button_with_icon(ui, Icon::Plus, "+ Колонка").clicked() {
+            if secondary_button_with_icon(ui, Icon::Plus, "Колонка").clicked() {
                 state.mode = KanbanInputMode::ColumnInput {
                     rename_col_idx: None,
                     buffer: String::new(),
                 };
             }
+
+            // Fixed-width filter search bar (160 px wide)
+            let mut search_active = state.mode == KanbanInputMode::FilterSearch;
+            let search_id = if is_modal {
+                "kanban_modal_filter_search"
+            } else {
+                "kanban_central_filter_search"
+            };
+            ui.allocate_ui_with_layout(
+                vec2(160.0, 24.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    let _ = crate::native::widgets::search_filter_bar(
+                        ui,
+                        search_id,
+                        &mut state.search_query,
+                        Some(&mut search_active),
+                        "Фильтр (/)...",
+                        theme,
+                    );
+                },
+            );
+            if search_active && state.mode != KanbanInputMode::FilterSearch {
+                state.mode = KanbanInputMode::FilterSearch;
+            } else if !search_active && state.mode == KanbanInputMode::FilterSearch {
+                state.mode = KanbanInputMode::Normal;
+            }
+
+            // 2. Left-hand info (Title, Icon, Progress) inside remaining space
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+
+                // Vector Kanban Icon
+                let (icon_r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                render_icon(
+                    ui.painter(),
+                    Icon::Kanban,
+                    icon_r,
+                    color(theme.accent_primary),
+                    1.4,
+                );
+
+                // Title
+                let board_title = board.title.as_deref().unwrap_or("КАНБАН-ДОСКА");
+                ui.label(
+                    RichText::new(board_title)
+                        .size(15.0)
+                        .strong()
+                        .color(color(theme.text_primary)),
+                );
+
+                // Progress summary: N/M (X%)
+                let total = board.total_card_count();
+                let done = board.done_card_count();
+                let pct = if total > 0 {
+                    (done as f32 / total as f32 * 100.0).round() as usize
+                } else {
+                    0
+                };
+
+                ui.label(
+                    RichText::new(format!("{done}/{total} ({pct}%)"))
+                        .size(11.5)
+                        .color(color(theme.text_muted)),
+                );
+
+                // Mini progress bar
+                let (bar_rect, _) = ui.allocate_exact_size(vec2(60.0, 4.0), Sense::hover());
+                ui.painter()
+                    .rect_filled(bar_rect, CornerRadius::same(2), color(theme.bg_canvas));
+                if total > 0 && done > 0 {
+                    let fill_w =
+                        (bar_rect.width() * (done as f32 / total as f32)).min(bar_rect.width());
+                    let filled_rect =
+                        Rect::from_min_size(bar_rect.min, vec2(fill_w, bar_rect.height()));
+                    ui.painter().rect_filled(
+                        filled_rect,
+                        CornerRadius::same(2),
+                        color(theme.state_success),
+                    );
+                }
+            });
         });
     });
 
@@ -775,9 +788,19 @@ fn render_column_header(
                 );
             });
 
-        // Plus icon button to add a new card to this column
+        // Action buttons: Delete column (Trash) and Add card (Plus)
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if icon_button(ui, Icon::Plus, "Добавить карточку (o)").clicked() {
+            ui.spacing_mut().item_spacing.x = 2.0;
+
+            if compact_icon_button(ui, Icon::Trash, "Удалить колонку").clicked()
+                && let Some(tx) = plan_delete_column(text, board, col_idx)
+            {
+                state.clamp_selection(board);
+                intent = KanbanIntent::ApplyTx(tx);
+            }
+
+            if compact_icon_button(ui, Icon::Plus, "Добавить карточку (o)").clicked()
+            {
                 state.selected_col = col_idx;
                 state.mode = KanbanInputMode::CardInput {
                     col_idx,
@@ -875,14 +898,30 @@ fn render_card(
                 }
             }
 
-            // Title with strikethrough if Done
-            let mut title_rich = RichText::new(&card.clean_title).size(12.5);
-            if card.status == KanbanTaskStatus::Done {
-                title_rich = title_rich.color(color(theme.text_muted)).strikethrough();
-            } else {
-                title_rich = title_rich.color(color(theme.text_primary));
-            }
-            ui.label(title_rich);
+            // Right-aligned trash button to delete card
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if compact_icon_button(ui, Icon::Trash, "Удалить задачу (dd)").clicked()
+                {
+                    state.selected_col = col_idx;
+                    state.selected_card = card_idx;
+                    if let Some((tx, yanked)) = plan_delete_card(text, board, col_idx, card_idx) {
+                        state.yank_register = Some(yanked);
+                        state.clamp_selection(board);
+                        intent = KanbanIntent::ApplyTx(tx);
+                    }
+                }
+
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    // Title with strikethrough if Done
+                    let mut title_rich = RichText::new(&card.clean_title).size(12.5);
+                    if card.status == KanbanTaskStatus::Done {
+                        title_rich = title_rich.color(color(theme.text_muted)).strikethrough();
+                    } else {
+                        title_rich = title_rich.color(color(theme.text_primary));
+                    }
+                    ui.label(title_rich);
+                });
+            });
         });
 
         // Continuation body snippet

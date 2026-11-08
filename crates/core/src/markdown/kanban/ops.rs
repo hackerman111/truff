@@ -356,6 +356,15 @@ pub fn plan_delete_empty_column(
     Some(Transaction::delete(col.section_range.clone()).with_undo_group(UndoGroup::next()))
 }
 
+/// Plans deleting a column and all of its contents (heading, cards, body).
+pub fn plan_delete_column(_text: &str, board: &KanbanBoard, col_idx: usize) -> Option<Transaction> {
+    let col = board.columns.get(col_idx)?;
+    if col.section_range.is_empty() {
+        return None;
+    }
+    Some(Transaction::delete(col.section_range.clone()).with_undo_group(UndoGroup::next()))
+}
+
 /// Plans moving a column horizontally (left: -1, right: +1).
 pub fn plan_move_column(
     text: &str,

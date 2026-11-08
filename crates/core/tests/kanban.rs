@@ -1,9 +1,9 @@
 use truff_core::markdown::kanban::{
     CardInsertPos, KanbanBoard, KanbanTaskStatus, default_kanban_template, is_kanban_document,
     plan_add_card, plan_add_column, plan_attach_file_link, plan_cycle_card_status,
-    plan_delete_card, plan_delete_empty_column, plan_edit_card_title, plan_move_card_column,
-    plan_move_card_vertical, plan_move_column, plan_paste_card, plan_rename_column,
-    plan_set_card_status,
+    plan_delete_card, plan_delete_column, plan_delete_empty_column, plan_edit_card_title,
+    plan_move_card_column, plan_move_card_vertical, plan_move_column, plan_paste_card,
+    plan_rename_column, plan_set_card_status,
 };
 use truff_core::{Buffer, BufferId};
 
@@ -394,6 +394,48 @@ fn defensive_boundaries_and_data_loss_protection() {
     // 5. direction != 1 and != -1 is rejected
     assert!(plan_move_card_vertical(no_eof_nl, &b_eof, 0, 0, 2).is_none());
     assert!(plan_move_column(col_with_notes, &b_notes, 0, 2).is_none());
+}
+
+#[test]
+fn test_plan_delete_column_including_cards_and_undo() {
+    let initial = "\
+# Доска
+
+## План
+- [ ] Задача 1
+- [ ] Задача 2
+
+## В работе
+- [/] Задача 3
+
+## Готово
+- [x] Задача 4
+";
+    let mut buf = Buffer::from_text(BufferId::new(1), initial).unwrap();
+    let s = buf.as_str();
+    let board = KanbanBoard::parse(&s);
+
+    // Delete middle column ("В работе")
+    let tx = plan_delete_column(&s, &board, 1).expect("delete column 1");
+    buf.apply(tx).unwrap();
+    let b1 = KanbanBoard::parse(&buf.as_str());
+    assert_eq!(b1.columns.len(), 2);
+    assert_eq!(b1.columns[0].title, "План");
+    assert_eq!(b1.columns[1].title, "Готово");
+
+    // Delete column 0 ("План" with cards)
+    let s1 = buf.as_str();
+    let b1 = KanbanBoard::parse(&s1);
+    let tx = plan_delete_column(&s1, &b1, 0).expect("delete column 0");
+    buf.apply(tx).unwrap();
+    let b2 = KanbanBoard::parse(&buf.as_str());
+    assert_eq!(b2.columns.len(), 1);
+    assert_eq!(b2.columns[0].title, "Готово");
+
+    // Undo restores both columns
+    buf.undo().unwrap();
+    buf.undo().unwrap();
+    assert_eq!(buf.as_str(), initial);
 }
 
 fn reparsed_clean_title(board: &KanbanBoard, col: usize, card: usize) -> &str {

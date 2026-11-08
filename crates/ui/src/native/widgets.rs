@@ -1,6 +1,9 @@
-//! Standardized Zed-inspired interactive widgets (Ghost IconButtons, Primary/Secondary Buttons).
+//! Standardized Zed-inspired interactive widgets (Ghost IconButtons, Primary/Secondary Buttons,
+//! modal frames, search filter bars, and key pills).
 use super::icons::{Icon, render_icon};
-use egui::{CornerRadius, Response, RichText, Sense, Ui, vec2};
+use crate::components::color;
+use crate::theme::Theme;
+use egui::{CornerRadius, Response, RichText, Sense, Stroke, Ui, vec2};
 
 /// Ghost icon button with 28×28 px clickable area and 5 px corner radius.
 pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
@@ -26,6 +29,38 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
     };
 
     render_icon(ui.painter(), icon, rect, icon_color, 1.5);
+
+    if !tooltip.is_empty() {
+        resp.on_hover_text(tooltip)
+    } else {
+        resp
+    }
+}
+
+/// Compact ghost icon button (20×20 px, 3 px corner radius) for card actions and dense headers.
+pub fn compact_icon_button(ui: &mut Ui, icon: Icon, tooltip: &str) -> Response {
+    let size = vec2(20.0, 20.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+
+    let is_hovered = resp.hovered();
+    let is_pressed = resp.is_pointer_button_down_on();
+    let visuals = ui.visuals();
+
+    if is_pressed {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(3), visuals.widgets.active.bg_fill);
+    } else if is_hovered {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(3), visuals.widgets.hovered.bg_fill);
+    }
+
+    let icon_color = if is_hovered || is_pressed {
+        visuals.widgets.hovered.fg_stroke.color
+    } else {
+        visuals.widgets.inactive.fg_stroke.color
+    };
+
+    render_icon(ui.painter(), icon, rect, icon_color, 1.3);
 
     if !tooltip.is_empty() {
         resp.on_hover_text(tooltip)
@@ -138,4 +173,105 @@ pub fn secondary_button_with_icon(ui: &mut Ui, icon: Icon, text: &str) -> Respon
     );
     ui.painter().galley(text_pos, galley, fg);
     resp
+}
+
+/// Monospace keyboard-shortcut badge (`enabled = false` renders a dimmed muted border/text).
+pub fn key_pill(ui: &mut Ui, key_str: &str, theme: &Theme, enabled: bool) {
+    let fg = color(if enabled {
+        theme.accent
+    } else {
+        theme.text_muted
+    });
+    egui::Frame::new()
+        .fill(color(theme.bg_canvas))
+        .stroke(Stroke::new(1.0, fg))
+        .corner_radius(3.0)
+        .inner_margin(egui::Margin::symmetric(4, 1))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(key_str)
+                    .monospace()
+                    .strong()
+                    .small()
+                    .color(fg),
+            );
+        });
+}
+
+/// Search filter bar with leading search icon, optional keyboard focus sync, and clear button.
+/// Returns `true` whenever `query` changed (either via typing or clicking clear).
+pub fn search_filter_bar(
+    ui: &mut Ui,
+    id: &'static str,
+    query: &mut String,
+    search_active: Option<&mut bool>,
+    hint: &str,
+    theme: &Theme,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let (icon_rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+        render_icon(
+            ui.painter(),
+            Icon::Search,
+            icon_rect,
+            color(theme.text_muted),
+            1.2,
+        );
+
+        let resp = ui.add(
+            egui::TextEdit::singleline(query)
+                .id(egui::Id::new(id))
+                .hint_text(hint)
+                .desired_width((ui.available_width() - 24.0).max(40.0)),
+        );
+        if let Some(active) = search_active {
+            if resp.gained_focus() || resp.clicked() {
+                *active = true;
+            } else if *active && !resp.has_focus() {
+                resp.request_focus();
+            } else if !*active && resp.has_focus() {
+                resp.surrender_focus();
+            }
+        }
+        changed |= resp.changed();
+        if !query.is_empty() && icon_button(ui, Icon::Close, "Очистить").clicked() {
+            query.clear();
+            changed = true;
+        }
+    });
+    changed
+}
+
+/// Centered modal window frame shared by full-dashboard overlays (Folder Wiki, Note Stream).
+pub fn centered_modal_window(
+    ctx: &egui::Context,
+    id: &'static str,
+    width: f32,
+    height: f32,
+    theme: &Theme,
+    body: impl FnOnce(&mut Ui),
+) {
+    let frame = egui::Frame::new()
+        .fill(color(theme.bg_panel))
+        .stroke(Stroke::new(1.0, color(theme.border)))
+        .corner_radius(CornerRadius::same(theme.geometry.corner_radius as u8))
+        .shadow(egui::Shadow {
+            offset: [0, 8],
+            blur: 24,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(100),
+        })
+        .inner_margin(egui::Margin::symmetric(20, 16));
+
+    egui::Window::new(id)
+        .title_bar(false)
+        .frame(frame)
+        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
+        .fixed_size(vec2(width, height))
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.set_min_size(vec2(width - 40.0, height - 32.0));
+            body(ui);
+        });
 }
