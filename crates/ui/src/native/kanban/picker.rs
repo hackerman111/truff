@@ -94,7 +94,10 @@ impl FuzzyFilePicker {
                     .then_with(|| a.1.cmp(&b.1))
                     .then_with(|| a.2.cmp(b.2))
             });
-            self.filtered = matches.into_iter().map(|(_, _, path)| path.to_string()).collect();
+            self.filtered = matches
+                .into_iter()
+                .map(|(_, _, path)| path.to_string())
+                .collect();
         }
         if self.selected >= self.filtered.len() {
             self.selected = 0;

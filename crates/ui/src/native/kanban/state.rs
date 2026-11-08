@@ -297,10 +297,7 @@ impl KanbanBoardState {
 
         // If Esc is pressed and any count prefix or pending sequence is active, cancel it cleanly
         if key == Key::Esc
-            && (self.count_prefix.is_some()
-                || self.pending_g
-                || self.pending_d
-                || self.pending_y)
+            && (self.count_prefix.is_some() || self.pending_g || self.pending_d || self.pending_y)
         {
             self.count_prefix = None;
             self.pending_g = false;

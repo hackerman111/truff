@@ -23,6 +23,8 @@ pub enum Icon {
     Star,
     Warning,
     Check,
+    Kanban,
+    InProgress,
 }
 
 /// Renders a crisp 5.5 px diameter dirty indicator circle without font dependencies.
@@ -363,5 +365,71 @@ pub fn render_icon(painter: &Painter, icon: Icon, rect: Rect, color: Color32, st
                 stroke,
             );
         }
+        Icon::InProgress => {
+            let box_rect = Rect::from_center_size(center, vec2(10.0, 10.0));
+            painter.rect_stroke(box_rect, 2.0, stroke, egui::StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 2.5, center.y + 2.5),
+                    Pos2::new(center.x + 2.5, center.y - 2.5),
+                ],
+                stroke,
+            );
+        }
+        Icon::Kanban => {
+            let col1 =
+                Rect::from_min_size(Pos2::new(center.x - 6.0, center.y - 5.5), vec2(3.0, 9.0));
+            let col2 =
+                Rect::from_min_size(Pos2::new(center.x - 1.5, center.y - 5.5), vec2(3.0, 11.0));
+            let col3 =
+                Rect::from_min_size(Pos2::new(center.x + 3.0, center.y - 5.5), vec2(3.0, 7.0));
+            painter.rect_stroke(col1, 1.0, stroke, egui::StrokeKind::Inside);
+            painter.rect_stroke(col2, 1.0, stroke, egui::StrokeKind::Inside);
+            painter.rect_stroke(col3, 1.0, stroke, egui::StrokeKind::Inside);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_all_icons_render_without_panic() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let rect = Rect::from_min_size(Pos2::ZERO, vec2(16.0, 16.0));
+                let color = Color32::WHITE;
+                let icons = [
+                    Icon::File,
+                    Icon::Folder,
+                    Icon::FolderOpen,
+                    Icon::ChevronRight,
+                    Icon::ChevronDown,
+                    Icon::Plus,
+                    Icon::Close,
+                    Icon::Vault,
+                    Icon::MoreHorizontal,
+                    Icon::Gear,
+                    Icon::Search,
+                    Icon::Command,
+                    Icon::Hash,
+                    Icon::CheckSquare,
+                    Icon::Square,
+                    Icon::Link,
+                    Icon::Pin,
+                    Icon::Star,
+                    Icon::Warning,
+                    Icon::Check,
+                    Icon::Kanban,
+                    Icon::InProgress,
+                ];
+                for icon in icons {
+                    render_icon(ui.painter(), icon, rect, color, 1.4);
+                }
+            });
+        });
+        output.textures_delta.clear();
     }
 }
