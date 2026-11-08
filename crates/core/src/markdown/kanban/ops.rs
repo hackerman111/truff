@@ -275,7 +275,10 @@ pub fn plan_attach_file_link(
     let col = board.columns.get(col_idx)?;
     let card = col.cards.get(card_idx)?;
 
-    let clean_path = file_path.trim().strip_suffix(".md").unwrap_or(file_path.trim());
+    let clean_path = file_path
+        .trim()
+        .strip_suffix(".md")
+        .unwrap_or(file_path.trim());
     if clean_path.is_empty() || card.links.iter().any(|link| link.target == clean_path) {
         return None;
     }

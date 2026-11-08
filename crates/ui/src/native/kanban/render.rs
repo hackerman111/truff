@@ -2,7 +2,9 @@ use super::picker::{FuzzyFilePicker, InlineFileAutocomplete, LinkJumpPicker};
 use super::state::{KanbanBoardState, KanbanInputMode, KanbanIntent};
 use crate::native::editor::color;
 use crate::native::icons::{Icon, render_icon};
-use crate::native::widgets::{icon_button, secondary_button, secondary_button_with_icon};
+use crate::native::widgets::{
+    icon_button, primary_button, secondary_button, secondary_button_with_icon,
+};
 use crate::theme::Theme;
 use egui::{
     Align, Color32, CornerRadius, Frame, Id, Layout, Margin, Rect, RichText, ScrollArea, Sense,
@@ -78,59 +80,105 @@ fn render_board_surface_internal(
     theme: &Theme,
     is_modal: bool,
 ) -> KanbanIntent {
-    let mut intent = KanbanIntent::None;
+    ui.push_id(if is_modal { "modal" } else { "central" }, |ui| {
+        let mut intent = KanbanIntent::None;
 
-    // 1. Board Header
-    let header_intent = render_header(state, board, text, ui, theme, is_modal);
-    if header_intent != KanbanIntent::None {
-        intent = header_intent;
-    }
+        // 1. Board Header
+        let header_intent = render_header(state, board, text, ui, theme, is_modal);
+        if header_intent != KanbanIntent::None {
+            intent = header_intent;
+        }
 
-    ui.add_space(4.0);
-    ui.separator();
-    ui.add_space(8.0);
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(8.0);
 
-    // 2. Horizontally scrollable columns & cards
-    let query_lower = state.search_query.trim().to_lowercase();
-    ScrollArea::horizontal()
-        .id_salt("kanban_board_columns_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-
-                for (col_idx, col) in board.columns.iter().enumerate() {
-                    let col_intent = render_column(
-                        col_idx,
-                        col,
-                        state,
-                        board,
-                        text,
-                        vault_files,
-                        &query_lower,
-                        ui,
-                        theme,
-                    );
-                    if col_intent != KanbanIntent::None {
-                        intent = col_intent;
+        // 2. Columns or Welcoming Empty State
+        if board.columns.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.add_space(36.0);
+                let (icon_r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
+                render_icon(
+                    ui.painter(),
+                    Icon::Kanban,
+                    icon_r,
+                    color(theme.accent_primary),
+                    1.6,
+                );
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("На этой доске пока нет колонок")
+                        .size(15.0)
+                        .strong()
+                        .color(color(theme.text_primary)),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Создайте колонки для организации задач или добавьте стандартный набор (План, В работе, Готово).")
+                        .size(12.0)
+                        .color(color(theme.text_muted)),
+                );
+                ui.add_space(18.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if primary_button(ui, "✨ Создать стандартные колонки").clicked() {
+                        let default_text = truff_core::markdown::kanban::default_kanban_template("Канбан", "\n");
+                        let tx = truff_core::text::Transaction::replace(0..text.len(), default_text);
+                        intent = KanbanIntent::ApplyTx(tx);
                     }
-                }
-
-                // Inlined new column input or "+ Колонка" placeholder button
-                let add_col_intent = render_add_column_column(state, board, text, ui, theme);
-                if add_col_intent != KanbanIntent::None {
-                    intent = add_col_intent;
-                }
+                    if secondary_button_with_icon(ui, Icon::Plus, "Добавить свою колонку (A)").clicked() {
+                        state.mode = KanbanInputMode::ColumnInput {
+                            rename_col_idx: None,
+                            buffer: String::new(),
+                        };
+                    }
+                });
+                ui.add_space(36.0);
             });
-        });
+        } else {
+            let query_lower = state.search_query.trim().to_lowercase();
+            ScrollArea::horizontal()
+                .id_salt("kanban_board_columns_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
 
-    // 3. Floating Overlays (FilePicker, LinkJumpPicker)
-    let overlay_intent = render_floating_overlays(state, board, text, ui.ctx(), theme);
-    if overlay_intent != KanbanIntent::None {
-        intent = overlay_intent;
-    }
+                        for (col_idx, col) in board.columns.iter().enumerate() {
+                            let col_intent = render_column(
+                                col_idx,
+                                col,
+                                state,
+                                board,
+                                text,
+                                vault_files,
+                                &query_lower,
+                                ui,
+                                theme,
+                            );
+                            if col_intent != KanbanIntent::None {
+                                intent = col_intent;
+                            }
+                        }
 
-    intent
+                        // Inlined new column input or "+ Колонка" placeholder button
+                        let add_col_intent = render_add_column_column(state, board, text, ui, theme);
+                        if add_col_intent != KanbanIntent::None {
+                            intent = add_col_intent;
+                        }
+                    });
+                });
+        }
+
+        // 3. Floating Overlays (FilePicker, LinkJumpPicker)
+        let overlay_intent = render_floating_overlays(state, board, text, ui.ctx(), theme);
+        if overlay_intent != KanbanIntent::None {
+            intent = overlay_intent;
+        }
+
+        intent
+    })
+    .inner
 }
 
 /// Renders the modal overlay dialog (Mode A) centered over the screen with semi-transparent backdrop.
@@ -148,20 +196,29 @@ pub fn render_kanban_modal(
     let mut intent = KanbanIntent::None;
     let screen = ctx.content_rect();
 
-    // Semi-transparent backdrop
+    let width = (screen.width() * 0.86).clamp(680.0, 1400.0);
+    let height = (screen.height() * 0.82).clamp(460.0, 880.0);
+    let window_rect = Rect::from_center_size(screen.center(), vec2(width, height));
+
+    // Soft scrim backdrop
     let backdrop_layer = egui::LayerId::new(egui::Order::Middle, Id::new("kanban_modal_backdrop"));
     ctx.layer_painter(backdrop_layer).rect_filled(
         screen,
         0.0,
         if theme.is_dark() {
-            Color32::from_black_alpha(150)
+            Color32::from_black_alpha(45)
         } else {
-            Color32::from_black_alpha(80)
+            Color32::from_black_alpha(20)
         },
     );
 
-    let width = (screen.width() * 0.92).clamp(700.0, 1600.0);
-    let height = (screen.height() * 0.88).clamp(480.0, 1000.0);
+    // Clicking outside the floating modal window dismisses it
+    if ctx.input(|i| i.pointer.primary_clicked())
+        && let Some(click_pos) = ctx.input(|i| i.pointer.interact_pos())
+        && !window_rect.contains(click_pos)
+    {
+        intent = KanbanIntent::CloseOverlay;
+    }
 
     let frame = Frame::new()
         .fill(color(theme.bg_panel))
@@ -323,9 +380,14 @@ fn render_header(
 
         // Filter search bar
         let mut search_active = state.mode == KanbanInputMode::FilterSearch;
+        let search_id = if is_modal {
+            "kanban_modal_filter_search"
+        } else {
+            "kanban_central_filter_search"
+        };
         let _ = crate::native::widgets::search_filter_bar(
             ui,
-            "kanban_board_filter_search",
+            search_id,
             &mut state.search_query,
             Some(&mut search_active),
             "Фильтр (/)...",

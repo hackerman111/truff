@@ -127,12 +127,37 @@ impl KanbanController {
             .buffers()
             .get_by_path(&abs_path)
         {
+            if let Some(buf) = application
+                .shell
+                .workspace_mut()
+                .buffers_mut()
+                .get_buffer_mut(buf_id)
+                && buf.as_str().trim().is_empty()
+            {
+                let default_text =
+                    truff_core::markdown::kanban::default_kanban_template("Канбан", "\n");
+                let tx =
+                    truff_core::text::Transaction::replace(0..buf.byte_len(), default_text.clone());
+                let _ = buf.apply(tx);
+                let _ = std::fs::write(&abs_path, &default_text);
+            }
             return Some(buf_id);
         }
         let initial_text = if abs_path.exists() {
-            std::fs::read_to_string(&abs_path).unwrap_or_default()
+            let s = std::fs::read_to_string(&abs_path).unwrap_or_default();
+            if s.trim().is_empty() {
+                let default_text =
+                    truff_core::markdown::kanban::default_kanban_template("Канбан", "\n");
+                let _ = std::fs::write(&abs_path, &default_text);
+                default_text
+            } else {
+                s
+            }
         } else {
-            String::new()
+            let default_text =
+                truff_core::markdown::kanban::default_kanban_template("Канбан", "\n");
+            let _ = std::fs::write(&abs_path, &default_text);
+            default_text
         };
         application
             .shell
