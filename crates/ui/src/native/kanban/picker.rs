@@ -19,34 +19,33 @@ fn is_subsequence(needle: &str, haystack: &str) -> bool {
 
 /// Matches and ranks files: exact stem (0) > stem prefix (1) > path prefix (2) >
 /// stem substring (3) > path substring (4) > stem fuzzy (5) > path fuzzy (6).
-fn rank_match(query: &str, path: &str) -> Option<(u8, usize, String)> {
-    if query.is_empty() {
-        return Some((0, path.len(), path.to_string()));
+fn rank_match<'a>(query_lower: &str, path: &'a str) -> Option<(u8, usize, &'a str)> {
+    if query_lower.is_empty() {
+        return Some((0, path.len(), path));
     }
-    let query_lower = query.to_lowercase();
     let stem = file_stem(path);
     let stem_lower = stem.to_lowercase();
     let path_lower = path.to_lowercase();
 
     let tier = if stem_lower == query_lower {
         0
-    } else if stem_lower.starts_with(&query_lower) {
+    } else if stem_lower.starts_with(query_lower) {
         1
-    } else if path_lower.starts_with(&query_lower) {
+    } else if path_lower.starts_with(query_lower) {
         2
-    } else if stem_lower.contains(&query_lower) {
+    } else if stem_lower.contains(query_lower) {
         3
-    } else if path_lower.contains(&query_lower) {
+    } else if path_lower.contains(query_lower) {
         4
-    } else if is_subsequence(&query_lower, &stem_lower) {
+    } else if is_subsequence(query_lower, &stem_lower) {
         5
-    } else if is_subsequence(&query_lower, &path_lower) {
+    } else if is_subsequence(query_lower, &path_lower) {
         6
     } else {
         return None;
     };
 
-    Some((tier, path.len(), path.to_string()))
+    Some((tier, path.len(), path))
 }
 
 /// Action resulting from handling a key event in `FuzzyFilePicker`.
@@ -61,7 +60,6 @@ pub enum PickerAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuzzyFilePicker {
     pub query: String,
-    pub active: bool,
     pub selected: usize,
     pub filtered: Vec<String>,
     pub all_files: Vec<String>,
@@ -71,7 +69,6 @@ impl FuzzyFilePicker {
     pub fn new(vault_files: &[String]) -> Self {
         let mut picker = Self {
             query: String::new(),
-            active: true,
             selected: 0,
             filtered: Vec::new(),
             all_files: vault_files.to_vec(),
@@ -82,20 +79,22 @@ impl FuzzyFilePicker {
 
     /// Recomputes filtered files based on current query using tiered ranking.
     pub fn filter(&mut self) {
-        if self.query.trim().is_empty() {
+        let q = self.query.trim();
+        if q.is_empty() {
             self.filtered = self.all_files.clone();
         } else {
-            let mut matches: Vec<(u8, usize, String)> = self
+            let query_lower = q.to_lowercase();
+            let mut matches: Vec<(u8, usize, &str)> = self
                 .all_files
                 .iter()
-                .filter_map(|file| rank_match(&self.query, file))
+                .filter_map(|file| rank_match(&query_lower, file))
                 .collect();
             matches.sort_by(|a, b| {
                 a.0.cmp(&b.0)
                     .then_with(|| a.1.cmp(&b.1))
-                    .then_with(|| a.2.cmp(&b.2))
+                    .then_with(|| a.2.cmp(b.2))
             });
-            self.filtered = matches.into_iter().map(|(_, _, path)| path).collect();
+            self.filtered = matches.into_iter().map(|(_, _, path)| path.to_string()).collect();
         }
         if self.selected >= self.filtered.len() {
             self.selected = 0;
@@ -162,7 +161,6 @@ impl FuzzyFilePicker {
 /// Inline autocomplete state for `[[` triggers while editing Kanban cards.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineFileAutocomplete {
-    pub active: bool,
     pub trigger_pos: usize,
     pub query: String,
     pub selected: usize,
@@ -178,7 +176,6 @@ impl InlineFileAutocomplete {
             return None;
         }
         let mut ac = Self {
-            active: true,
             trigger_pos: pos,
             query: after.to_string(),
             selected: 0,
@@ -189,19 +186,25 @@ impl InlineFileAutocomplete {
     }
 
     pub fn refresh(&mut self, vault_files: &[String]) {
-        if self.query.trim().is_empty() {
-            self.candidates = vault_files.to_vec();
+        let q = self.query.trim();
+        if q.is_empty() {
+            self.candidates = vault_files.iter().take(8).cloned().collect();
         } else {
-            let mut matches: Vec<(u8, usize, String)> = vault_files
+            let query_lower = q.to_lowercase();
+            let mut matches: Vec<(u8, usize, &str)> = vault_files
                 .iter()
-                .filter_map(|file| rank_match(&self.query, file))
+                .filter_map(|file| rank_match(&query_lower, file))
                 .collect();
             matches.sort_by(|a, b| {
                 a.0.cmp(&b.0)
                     .then_with(|| a.1.cmp(&b.1))
-                    .then_with(|| a.2.cmp(&b.2))
+                    .then_with(|| a.2.cmp(b.2))
             });
-            self.candidates = matches.into_iter().map(|(_, _, path)| path).collect();
+            self.candidates = matches
+                .into_iter()
+                .take(8)
+                .map(|(_, _, path)| path.to_string())
+                .collect();
         }
         if self.selected >= self.candidates.len() {
             self.selected = 0;

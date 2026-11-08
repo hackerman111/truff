@@ -93,6 +93,8 @@ impl KanbanBoardState {
         board: &KanbanBoard,
         vault_files: &[String],
     ) -> KanbanIntent {
+        self.clamp_selection(board);
+
         match &mut self.mode {
             KanbanInputMode::FilePicker(picker) => match key {
                 Key::Char(c) => {
@@ -293,6 +295,20 @@ impl KanbanBoardState {
             other => other,
         };
 
+        // If Esc is pressed and any count prefix or pending sequence is active, cancel it cleanly
+        if key == Key::Esc
+            && (self.count_prefix.is_some()
+                || self.pending_g
+                || self.pending_d
+                || self.pending_y)
+        {
+            self.count_prefix = None;
+            self.pending_g = false;
+            self.pending_d = false;
+            self.pending_y = false;
+            return KanbanIntent::None;
+        }
+
         // Two-key sequence handling for 'g'
         if self.pending_g {
             self.pending_g = false;
@@ -320,7 +336,12 @@ impl KanbanBoardState {
                     plan_delete_card(text, board, self.selected_col, self.selected_card)
             {
                 self.yank_register = Some(raw_card);
-                self.clamp_selection(board);
+                if self.selected_card > 0
+                    && let Some(col) = board.columns.get(self.selected_col)
+                    && self.selected_card + 1 >= col.cards.len()
+                {
+                    self.selected_card -= 1;
+                }
                 return KanbanIntent::ApplyTx(tx);
             }
             return KanbanIntent::None;
@@ -670,7 +691,9 @@ impl KanbanBoardState {
             }
             Key::Char('D') => {
                 if let Some(tx) = plan_delete_empty_column(text, board, self.selected_col) {
-                    self.clamp_selection(board);
+                    if self.selected_col > 0 && self.selected_col + 1 >= board.columns.len() {
+                        self.selected_col -= 1;
+                    }
                     KanbanIntent::ApplyTx(tx)
                 } else {
                     KanbanIntent::Status("Cannot delete non-empty column".to_string())
@@ -957,12 +980,7 @@ mod tests {
 
         // f -> opens FilePicker
         state.feed_key(Key::Char('f'), SAMPLE_BOARD, &board, &files);
-        match &state.mode {
-            KanbanInputMode::FilePicker(picker) => {
-                assert!(picker.active);
-            }
-            _ => panic!("Expected FilePicker mode"),
-        }
+        assert!(matches!(state.mode, KanbanInputMode::FilePicker(_)));
 
         // Type query "arch"
         state.feed_key(Key::Char('a'), SAMPLE_BOARD, &board, &files);
@@ -1102,15 +1120,56 @@ mod tests {
         let intent = state.feed_key(Key::Char('<'), SAMPLE_BOARD, &board, &files);
         assert!(matches!(intent, KanbanIntent::ApplyTx(_)));
 
-        // D on empty column (col 3: Пустая) -> deletes column
+        // D on empty column (col 3: Пустая) -> deletes column and clamps selected_col
         state.selected_col = 3;
         let intent = state.feed_key(Key::Char('D'), SAMPLE_BOARD, &board, &files);
         assert!(matches!(intent, KanbanIntent::ApplyTx(_)));
+        assert_eq!(state.selected_col, 2);
 
         // D on non-empty column (col 0) -> rejected with Status message
         state.selected_col = 0;
         let intent = state.feed_key(Key::Char('D'), SAMPLE_BOARD, &board, &files);
         assert!(matches!(intent, KanbanIntent::Status(_)));
+    }
+
+    #[test]
+    fn test_dd_last_card_clamping() {
+        let board = KanbanBoard::parse(SAMPLE_BOARD);
+        let mut state = KanbanBoardState::new();
+        let files: Vec<String> = vec![];
+
+        // Col 1 has 2 cards (idx 0 and 1). Select last card (idx 1).
+        state.selected_col = 1;
+        state.selected_card = 1;
+        state.feed_key(Key::Char('d'), SAMPLE_BOARD, &board, &files);
+        let intent = state.feed_key(Key::Char('d'), SAMPLE_BOARD, &board, &files);
+        assert!(matches!(intent, KanbanIntent::ApplyTx(_)));
+        assert_eq!(state.selected_card, 0);
+    }
+
+    #[test]
+    fn test_esc_cancels_count_and_pending() {
+        let board = KanbanBoard::parse(SAMPLE_BOARD);
+        let mut state = KanbanBoardState::new();
+        let files: Vec<String> = vec![];
+
+        // Count prefix + Esc -> cancels count, does not close overlay
+        state.feed_key(Key::Char('3'), SAMPLE_BOARD, &board, &files);
+        assert_eq!(state.count_prefix, Some(3));
+        let intent = state.feed_key(Key::Esc, SAMPLE_BOARD, &board, &files);
+        assert_eq!(intent, KanbanIntent::None);
+        assert_eq!(state.count_prefix, None);
+
+        // Pending 'g' + Esc -> cancels pending, does not close overlay
+        state.feed_key(Key::Char('g'), SAMPLE_BOARD, &board, &files);
+        assert!(state.pending_g);
+        let intent = state.feed_key(Key::Esc, SAMPLE_BOARD, &board, &files);
+        assert_eq!(intent, KanbanIntent::None);
+        assert!(!state.pending_g);
+
+        // Normal mode with no prefix + Esc -> CloseOverlay
+        let intent = state.feed_key(Key::Esc, SAMPLE_BOARD, &board, &files);
+        assert_eq!(intent, KanbanIntent::CloseOverlay);
     }
 
     #[test]
