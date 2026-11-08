@@ -12,6 +12,7 @@ pub enum FileOpKind {
     CreateFolder { path: PathBuf },
     Rename { from: PathBuf, to: PathBuf },
     Move { from: PathBuf, to: PathBuf },
+    Copy { from: PathBuf, to: PathBuf },
     Trash { path: PathBuf },
 }
 
@@ -62,6 +63,24 @@ impl FileOpPlan {
 
         Ok(Self {
             kind: FileOpKind::Move { from, to },
+            rewrites: Vec::new(),
+            id: None,
+        })
+    }
+
+    /// Constructs a copy operation plan.
+    pub fn copy_path(
+        vault: &VaultPaths,
+        from: impl Into<PathBuf>,
+        to: impl Into<PathBuf>,
+    ) -> Result<Self, FileOpError> {
+        let from = from.into();
+        let to = to.into();
+        let _ = vault.resolve_path(&from)?;
+        let _ = vault.resolve_path(&to)?;
+
+        Ok(Self {
+            kind: FileOpKind::Copy { from, to },
             rewrites: Vec::new(),
             id: None,
         })
@@ -157,6 +176,21 @@ impl FileOpPlan {
 
                 // Determine affected occurrences via index
                 self.compute_rewrites(vault, &from_path, &to_path, dirty_buffers, db)?;
+            }
+            FileOpKind::Copy { from, to } => {
+                let from_path = from.clone();
+                let to_path = to.clone();
+                let abs_from = vault.resolve_path(&from_path)?;
+                let abs_to = vault.resolve_path(&to_path)?;
+                check_symlink(&abs_from)?;
+                check_symlink(&abs_to)?;
+
+                if !abs_from.exists() {
+                    return Err(FileOpError::SourceNotFound(from_path));
+                }
+                if abs_to.exists() {
+                    return Err(FileOpError::DestinationAlreadyExists(to_path));
+                }
             }
         }
         Ok(())

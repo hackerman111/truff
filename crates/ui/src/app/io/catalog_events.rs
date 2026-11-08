@@ -76,6 +76,7 @@ impl Application {
                     }
                 }
                 self.status = format!("Renamed {from} → {to}");
+                self.advance_file_operations()?;
             }
             CatalogEvent::Trashed(path) => {
                 self.file_operation_pending = false;
@@ -97,13 +98,21 @@ impl Application {
                     }
                 }
                 self.status = format!("Moved {path} to .truff/trash");
+                self.advance_file_operations()?;
             }
             CatalogEvent::Created(path) => {
                 self.file_operation_pending = false;
                 self.open_note(&path)?;
+                self.advance_file_operations()?;
+            }
+            CatalogEvent::Copied { from, to } => {
+                self.file_operation_pending = false;
+                self.status = format!("Copied {from} → {to}");
+                self.advance_file_operations()?;
             }
             CatalogEvent::Error(error) => {
                 self.file_operation_pending = false;
+                self.pending_file_operations.clear();
                 self.status = error;
             }
         }

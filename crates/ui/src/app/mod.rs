@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use truff_core::commands::Action;
 use truff_core::text::BufferId;
 use truff_core::workspace::ViewId;
-use truff_store::catalog::CatalogWorker;
+use truff_store::catalog::{CatalogJob, CatalogWorker};
 use truff_store::index::BacklinkOccurrence;
 use truff_store::session::SessionViewEntry;
 use truff_store::{Store, VaultPaths};
@@ -56,6 +56,7 @@ pub struct Application {
     pending_location: Option<(BufferId, navigation::Location)>,
     initial_note_pending: bool,
     file_operation_pending: bool,
+    pending_file_operations: VecDeque<CatalogJob>,
     catalog_indexing: bool,
     pending_catalog: usize,
     pending_recovery: HashSet<truff_core::workspace::SnapshotKey>,
@@ -108,6 +109,7 @@ impl Application {
             pending_location: None,
             initial_note_pending: false,
             file_operation_pending: false,
+            pending_file_operations: VecDeque::new(),
             catalog_indexing: false,
             pending_catalog: 0,
             pending_recovery: HashSet::new(),

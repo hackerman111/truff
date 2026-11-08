@@ -788,3 +788,46 @@ fn session_pin_and_unpin_with_p_does_not_hide_preview_in_files() {
         "preview must remain visible in files panel"
     );
 }
+
+#[test]
+fn navigator_multi_select_and_paste_workflow() {
+    let ctx = egui::Context::default();
+    let application = Application::new();
+    let mut app = NativeApp::new(application, &ctx);
+    app.open_navigator(NavigatorMode::Files);
+
+    // Set items manually for testing navigator paste workflow
+    app.navigator.items = vec![
+        truff_ui::navigator::NavigatorItem::new_file(1, "doc1.md", "doc1.md".into(), false, 0),
+        truff_ui::navigator::NavigatorItem::new_file(2, "doc2.md", "doc2.md".into(), false, 0),
+        truff_ui::navigator::NavigatorItem::new_file(3, "archive", "archive".into(), true, 0),
+    ];
+    app.navigator.recompute_filter();
+
+    // Select with Visual mode 'v' + 'j'
+    app.navigator.handle_key_event(NavKey::Char('v'), false);
+    app.navigator.handle_key_event(NavKey::Char('j'), false);
+    assert_eq!(app.navigator.selected_file_paths(), vec!["doc1.md", "doc2.md"]);
+
+    // Yank files with 'y'
+    let action = app.navigator.handle_key_event(NavKey::Char('y'), false);
+    assert_eq!(action, NavigatorAction::None);
+    assert_eq!(
+        app.navigator.clipboard.as_ref().unwrap().op,
+        truff_ui::navigator::ClipboardOp::Copy
+    );
+
+    // Move cursor to "archive" (index 2)
+    app.navigator.selected_index = 2;
+
+    // Paste with 'p'
+    let action = app.navigator.handle_key_event(NavKey::Char('p'), false);
+    match action {
+        NavigatorAction::PasteFiles { target_dir, op, paths } => {
+            assert_eq!(target_dir, "archive");
+            assert_eq!(op, truff_ui::navigator::ClipboardOp::Copy);
+            assert_eq!(paths, vec!["doc1.md", "doc2.md"]);
+        }
+        other => panic!("expected PasteFiles, got {:?}", other),
+    }
+}

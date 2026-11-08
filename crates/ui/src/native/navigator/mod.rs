@@ -246,10 +246,16 @@ impl NativeApp {
             }
             NavigatorAction::DeleteFiles { paths: _ } => {}
             NavigatorAction::PasteFiles {
-                target_dir: _,
-                op: _,
-                paths: _,
-            } => {}
+                target_dir,
+                op,
+                paths,
+            } => {
+                if let Err(error) = self.application.paste_files(&target_dir, op, &paths) {
+                    self.application.status = error.to_string();
+                } else if op == crate::navigator::ClipboardOp::Move {
+                    self.navigator.clipboard = None;
+                }
+            }
             NavigatorAction::SwitchBuffer { buffer_id } => {
                 self.navigator.close();
                 self.application.shell.pop_focus();

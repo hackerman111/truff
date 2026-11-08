@@ -27,6 +27,10 @@ pub enum CatalogJob {
     Create {
         path: String,
     },
+    Copy {
+        from: String,
+        to: String,
+    },
 }
 
 #[derive(Debug)]
@@ -49,5 +53,9 @@ pub enum CatalogEvent {
     },
     Trashed(String),
     Created(String),
+    Copied {
+        from: String,
+        to: String,
+    },
     Error(String),
 }

@@ -92,6 +92,15 @@ pub(super) fn execute(
             plan.apply(paths, db.connection_mut())?;
             Ok(CatalogEvent::Created(path))
         }
+        CatalogJob::Copy { from, to } => {
+            let from = relative_path(paths, &from)?;
+            let to = relative_path(paths, &to)?;
+            let mut plan = FileOpPlan::copy_path(paths, &from, &to)?;
+            plan.validate(paths, &[], db)?;
+            plan.stage(paths, db.connection_mut())?;
+            plan.apply(paths, db.connection_mut())?;
+            Ok(CatalogEvent::Copied { from, to })
+        }
     }
 }
 

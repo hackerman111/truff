@@ -111,6 +111,124 @@ impl Application {
         })
     }
 
+    pub(crate) fn enqueue_file_operations(&mut self, mut jobs: Vec<CatalogJob>) -> AppResult<()> {
+        if jobs.is_empty() {
+            return Ok(());
+        }
+        if self.file_operation_pending() {
+            for job in jobs {
+                self.pending_file_operations.push_back(job);
+            }
+            return Ok(());
+        }
+        let first = jobs.remove(0);
+        for job in jobs {
+            self.pending_file_operations.push_back(job);
+        }
+        self.start_file_operation(first)
+    }
+
+    pub(crate) fn advance_file_operations(&mut self) -> AppResult<()> {
+        if let Some(next) = self.pending_file_operations.pop_front() {
+            self.start_file_operation(next)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn trash_files(&mut self, paths: &[String]) -> AppResult<()> {
+        let dirty = self.dirty_paths();
+        let jobs: Vec<_> = paths
+            .iter()
+            .map(|p| CatalogJob::Trash {
+                path: p.clone(),
+                dirty: dirty.clone(),
+            })
+            .collect();
+        self.enqueue_file_operations(jobs)
+    }
+
+    pub(crate) fn paste_files(
+        &mut self,
+        target_dir: &str,
+        op: crate::navigator::ClipboardOp,
+        paths: &[String],
+    ) -> AppResult<()> {
+        let vault_paths = self.paths.as_ref().ok_or("Open a vault first")?;
+        let dirty = self.dirty_paths();
+        let mut jobs = Vec::new();
+
+        for src in paths {
+            let src_path = Path::new(src);
+            let file_name = src_path
+                .file_name()
+                .ok_or_else(|| format!("Invalid file path: {src}"))?;
+
+            let mut dest_rel = if target_dir.is_empty() {
+                PathBuf::from(file_name)
+            } else {
+                Path::new(target_dir).join(file_name)
+            };
+
+            // Prevent cyclic move: cannot move a directory into itself or its child
+            if op == crate::navigator::ClipboardOp::Move
+                && (src == dest_rel.to_str().unwrap_or("") || dest_rel.starts_with(src_path))
+            {
+                return Err(format!("Cannot move '{src}' into itself or its subfolder").into());
+            }
+
+            // For copy, if destination exists, auto-append copy suffix
+            if op == crate::navigator::ClipboardOp::Copy {
+                let mut counter = 1;
+                while vault_paths
+                    .resolve_path(&dest_rel)
+                    .map_or(false, |p| p.exists())
+                {
+                    let stem = src_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("file");
+                    let ext = src_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                    let new_name = if ext.is_empty() {
+                        if counter == 1 {
+                            format!("{stem} (copy)")
+                        } else {
+                            format!("{stem} (copy {counter})")
+                        }
+                    } else if counter == 1 {
+                        format!("{stem} (copy).{ext}")
+                    } else {
+                        format!("{stem} (copy {counter}).{ext}")
+                    };
+                    dest_rel = if target_dir.is_empty() {
+                        PathBuf::from(new_name)
+                    } else {
+                        Path::new(target_dir).join(new_name)
+                    };
+                    counter += 1;
+                }
+            }
+
+            let dest_str = dest_rel.to_string_lossy().into_owned();
+            match op {
+                crate::navigator::ClipboardOp::Move => {
+                    jobs.push(CatalogJob::Rename {
+                        from: src.clone(),
+                        to: dest_str,
+                        dirty: dirty.clone(),
+                    });
+                }
+                crate::navigator::ClipboardOp::Copy => {
+                    jobs.push(CatalogJob::Copy {
+                        from: src.clone(),
+                        to: dest_str,
+                    });
+                }
+            }
+        }
+
+        self.enqueue_file_operations(jobs)
+    }
+
     pub(crate) fn is_folder_operation_target(&self, path: &str) -> bool {
         let Some(paths) = &self.paths else {
             return false;

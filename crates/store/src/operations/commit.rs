@@ -19,6 +19,7 @@ impl FileOpPlan {
             FileOpKind::CreateFolder { .. } => "create_folder",
             FileOpKind::Rename { .. } => "rename",
             FileOpKind::Move { .. } => "move",
+            FileOpKind::Copy { .. } => "copy",
             FileOpKind::Trash { .. } => "trash",
         };
 
@@ -60,6 +61,14 @@ impl FileOpPlan {
                     fs::create_dir_all(parent)?;
                 }
                 fs::rename(&abs_src, &trash_dest)?;
+            }
+            FileOpKind::Copy { from, to } => {
+                let abs_from = vault.resolve_path(from)?;
+                let abs_to = vault.resolve_path(to)?;
+                if let Some(parent) = abs_to.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::copy(&abs_from, &abs_to)?;
             }
             FileOpKind::Rename { from, to } | FileOpKind::Move { from, to } => {
                 let abs_from = vault.resolve_path(from)?;

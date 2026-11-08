@@ -57,6 +57,18 @@ pub fn recover_pending_operations(
                     let _ = fs::rename(&abs_from, &abs_to);
                 }
             }
+            FileOpKind::Copy { from, to } => {
+                if let Ok(abs_from) = vault.resolve_path(from)
+                    && let Ok(abs_to) = vault.resolve_path(to)
+                    && abs_from.exists()
+                    && !abs_to.exists()
+                {
+                    if let Some(parent) = abs_to.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::copy(&abs_from, &abs_to);
+                }
+            }
             FileOpKind::CreateFile { path, content } => {
                 if let Ok(abs) = vault.resolve_path(path)
                     && !abs.exists()
