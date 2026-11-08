@@ -264,7 +264,7 @@ fn render_items_list(
     let mut action = None;
     let total_count = model.visible_indices.len();
     let selected = model.selected_index;
-    let row_height = 24.0;
+    let row_height = 30.0;
 
     let mut clicked_idx = None;
     let mut toggle_collapse_idx = None;
@@ -294,7 +294,7 @@ fn render_items_list(
             let frame = egui::Frame::new()
                 .fill(bg_color)
                 .corner_radius(egui::CornerRadius::same(theme.geometry.corner_radius as u8))
-                .inner_margin(egui::Margin::symmetric(4, 2));
+                .inner_margin(egui::Margin::symmetric(6, 4));
 
             let frame_resp = frame.show(ui, |ui| {
                 ui.set_min_height(row_height - 2.0);
