@@ -324,15 +324,27 @@ fn test_typography_hierarchy_scale() {
 
     let (f_h1, lh_h1) = resolve_font_and_line_height("# Heading 1", &default_typo);
     assert_eq!(f_h1, FontId::new(24.0, FontFamily::Proportional));
-    assert_eq!(lh_h1, 31.0);
+    assert_eq!(lh_h1, 48.0);
 
     let (f_h2, lh_h2) = resolve_font_and_line_height("## Heading 2", &default_typo);
     assert_eq!(f_h2, FontId::new(20.0, FontFamily::Proportional));
-    assert_eq!(lh_h2, 27.0);
+    assert_eq!(lh_h2, 38.0);
 
     let (f_h3, lh_h3) = resolve_font_and_line_height("### Heading 3", &default_typo);
     assert_eq!(f_h3, FontId::new(17.0, FontFamily::Proportional));
-    assert_eq!(lh_h3, 24.0);
+    assert_eq!(lh_h3, 31.0);
+
+    let (f_h4, lh_h4) = resolve_font_and_line_height("#### Heading 4", &default_typo);
+    assert_eq!(f_h4, FontId::new(17.0, FontFamily::Proportional));
+    assert_eq!(lh_h4, 27.0);
+
+    let (f_h5, lh_h5) = resolve_font_and_line_height("##### Heading 5", &default_typo);
+    assert_eq!(f_h5, FontId::new(15.0, FontFamily::Proportional));
+    assert_eq!(lh_h5, 23.0);
+
+    let (f_h6, lh_h6) = resolve_font_and_line_height("###### Heading 6", &default_typo);
+    assert_eq!(f_h6, FontId::new(15.0, FontFamily::Proportional));
+    assert_eq!(lh_h6, 21.0);
 
     let (f_code, lh_code) = resolve_font_and_line_height("```rust", &default_typo);
     assert_eq!(f_code, FontId::new(15.0, FontFamily::Monospace));
@@ -350,7 +362,7 @@ fn test_typography_hierarchy_scale() {
 
     let (f_h1_scaled, lh_h1_scaled) = resolve_font_and_line_height("# Heading 1", &scaled_typo);
     assert_eq!(f_h1_scaled, FontId::new(32.0, FontFamily::Proportional));
-    assert_eq!(lh_h1_scaled, 42.0);
+    assert_eq!(lh_h1_scaled, 64.0);
 
     let (f_body_scaled, lh_body_scaled) =
         resolve_font_and_line_height("Regular markdown text", &scaled_typo);

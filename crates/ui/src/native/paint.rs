@@ -11,19 +11,26 @@ pub fn resolve_font_and_line_height(source: &str, typography: &TypographyConfig)
         _ => egui::FontFamily::Monospace,
     };
     let base = typography.base_font_size;
+    let scale = (base / 15.0).max(0.5);
     let source_trim = source.trim_start();
     if source_trim.starts_with("# ") {
         let size = (base * 1.6).round();
-        (FontId::new(size, family), (size * 1.3).round())
+        (FontId::new(size, family), (size + 24.0 * scale).round())
     } else if source_trim.starts_with("## ") {
         let size = (base * 1.35).round();
-        (FontId::new(size, family), (size * 1.35).round())
-    } else if source_trim.starts_with("### ") || source_trim.starts_with("#### ") {
+        (FontId::new(size, family), (size + 18.0 * scale).round())
+    } else if source_trim.starts_with("### ") {
         let size = (base * 1.15).round();
-        (FontId::new(size, family), (size * 1.4).round())
-    } else if source_trim.starts_with("##### ") || source_trim.starts_with("###### ") {
+        (FontId::new(size, family), (size + 13.5 * scale).round())
+    } else if source_trim.starts_with("#### ") {
+        let size = (base * 1.1).round();
+        (FontId::new(size, family), (size + 10.0 * scale).round())
+    } else if source_trim.starts_with("##### ") {
         let size = base;
-        (FontId::new(size, family), (size * 1.4).round())
+        (FontId::new(size, family), (size + 7.5 * scale).round())
+    } else if source_trim.starts_with("###### ") {
+        let size = base;
+        (FontId::new(size, family), (size + 5.5 * scale).round())
     } else if source_trim.starts_with("```") || source_trim.starts_with("    ") {
         let size = base;
         (
