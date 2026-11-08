@@ -66,6 +66,24 @@ impl Application {
         if trimmed.starts_with('#') && self.jump_to_heading(trimmed) {
             return;
         }
+        let (note_part, heading_part) = trimmed
+            .split_once('#')
+            .map(|(n, h)| (n.trim(), Some(h.trim())))
+            .unwrap_or((trimmed, None));
+        let path_with_md = if note_part.ends_with(".md") {
+            note_part.to_string()
+        } else {
+            format!("{note_part}.md")
+        };
+        if let Some(paths) = &self.paths {
+            let direct = paths.root().join(&path_with_md);
+            if direct.exists() && self.open_note(&path_with_md).is_ok() {
+                if let Some(heading) = heading_part {
+                    self.jump_to_heading(heading);
+                }
+                return;
+            }
+        }
         if let Err(e) = self.execute_command(&format!("follow {trimmed}")) {
             let (note_part, heading_part) = trimmed
                 .split_once('#')

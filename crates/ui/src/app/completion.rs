@@ -41,7 +41,9 @@ impl Application {
                 }
             }
             match name {
-                "open"
+                "kanban"
+                | "board"
+                | "open"
                 | "e"
                 | "new"
                 | "rename"
@@ -83,6 +85,8 @@ impl Application {
             }
         } else if !text.trim().is_empty() {
             let ui_cmds = [
+                ("kanban", "Канбан-доска (Kanban Board)"),
+                ("board", "Канбан-доска (Kanban Board)"),
                 ("toc", "Оглавление документа / хранилища (Floating TOC)"),
                 ("wiki", "Вики-панель и дашборд папки (Folder Wiki)"),
                 ("stream", "Лента заметок с фильтрами (Note Stream)"),
@@ -111,6 +115,26 @@ impl Application {
             input.suggestions = suggestions;
             input.selected = None;
             input.completed_text = Some(text);
+        }
+    }
+
+    /// Synchronizes inline `[[` / `[` link completion candidates with the active Insert-mode caret.
+    pub fn sync_link_completion(&mut self) {
+        if self.shell.mode() != truff_core::vim::Mode::Insert {
+            self.link_completion.dismiss();
+            return;
+        }
+        let trigger = self
+            .shell
+            .editor_buffer()
+            .zip(self.shell.editor_view())
+            .and_then(|(buffer, view)| {
+                crate::overlays::LinkCompletionOverlay::detect_trigger(buffer, view.head().get())
+            });
+        if let Some((trigger_byte, query)) = trigger {
+            self.refresh_link_completions(trigger_byte, &query);
+        } else {
+            self.link_completion.dismiss();
         }
     }
 

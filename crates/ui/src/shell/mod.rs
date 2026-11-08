@@ -38,6 +38,7 @@ pub enum ShellAction {
     OpenTextActionMenu,
     ScrollCursor(truff_core::vim::ScrollPosition),
     Fold(truff_core::vim::FoldCommand),
+    OpenKanban,
 }
 
 #[derive(Debug)]

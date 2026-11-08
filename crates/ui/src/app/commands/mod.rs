@@ -189,6 +189,18 @@ impl Application {
                 self.status = "Лента заметок (Note Stream)".into();
                 Ok(())
             }
+            "kanban" | "board" => {
+                if argument.is_empty()
+                    && let Some(view_id) = self.shell.workspace().active_view()
+                    && self.kanban_source_views.remove(&view_id)
+                {
+                    self.status = "Канбан-доска".into();
+                    return Ok(());
+                }
+                self.kanban_requested = Some(argument.to_owned());
+                self.status = "Канбан-доска".into();
+                Ok(())
+            }
             _ => Err(format!("Unknown command: {command}").into()),
         }
     }

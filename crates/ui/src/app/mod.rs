@@ -41,6 +41,8 @@ pub struct Application {
     pub toc_requested: Option<String>,
     pub wiki_requested: Option<String>,
     pub stream_requested: Option<String>,
+    pub kanban_requested: Option<String>,
+    pub kanban_source_views: HashSet<ViewId>,
     pub link_completion: crate::overlays::LinkCompletionOverlay,
     store: Option<Store>,
     catalog: Option<CatalogWorker>,
@@ -91,6 +93,8 @@ impl Application {
             toc_requested: None,
             wiki_requested: None,
             stream_requested: None,
+            kanban_requested: None,
+            kanban_source_views: HashSet::new(),
             link_completion: crate::overlays::LinkCompletionOverlay::default(),
             store: None,
             catalog: None,
@@ -135,6 +139,14 @@ impl Application {
             .retain(|id, _| self.shell.workspace().get_view(*id).is_some());
         if let Some(id) = self.shell.workspace().active_view() {
             self.view_projections.insert(id, mode);
+        }
+    }
+    pub fn is_kanban_source_view(&self, view_id: ViewId) -> bool {
+        self.kanban_source_views.contains(&view_id)
+    }
+    pub fn toggle_kanban_source_view(&mut self, view_id: ViewId) {
+        if !self.kanban_source_views.remove(&view_id) {
+            self.kanban_source_views.insert(view_id);
         }
     }
     pub(crate) fn recent_notes(&self) -> impl Iterator<Item = &str> {
@@ -266,6 +278,10 @@ impl Application {
             }
             ShellAction::SidebarSelectFile(path) => self.open_note(&path),
             ShellAction::SidebarDeleteFile(path) => self.trash(&path),
+            ShellAction::OpenKanban => {
+                self.kanban_requested = Some(String::new());
+                Ok(())
+            }
             ShellAction::Error(error) => Err(error.into()),
             _ => Ok(()),
         };

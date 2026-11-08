@@ -8,6 +8,7 @@ use truff_core::text::Buffer;
 pub(super) fn show(
     application: &mut Application,
     editor: &mut EditorWidget,
+    kanban: &mut super::kanban::controller::KanbanController,
     recent: &mut super::recent::RecentVaults,
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -23,6 +24,10 @@ pub(super) fn show(
 
         if is_welcome_screen {
             open_vault = show_welcome_screen(application, recent, ui, theme);
+        } else if let Some(view_id) = application.shell.workspace().active_view()
+            && kanban.show_central(view_id, application, ui, theme)
+        {
+            // Central Kanban board view rendered
         } else {
             let shell = &application.shell;
             let note_title = shell.editor_view().and_then(|view| {
@@ -152,9 +157,7 @@ fn show_welcome_screen(
 
         ui.add_space(32.0);
 
-        let existing_vaults = recent.paths();
-
-        if !existing_vaults.is_empty() {
+        if !recent.paths().is_empty() {
             ui.label(
                 egui::RichText::new("НЕДАВНИЕ ХРАНИЛИЩА")
                     .size(11.0)
@@ -170,7 +173,6 @@ fn show_welcome_screen(
                 .inner_margin(egui::Margin::symmetric(14, 8));
 
             let card_width = (ui.available_width() - 32.0).min(480.0);
-            let mut remove_path = None;
 
             ui.allocate_ui_with_layout(
                 egui::vec2(card_width, 0.0),
@@ -178,67 +180,10 @@ fn show_welcome_screen(
                 |ui| {
                     card_frame.show(ui, |ui| {
                         ui.set_width(card_width - 28.0);
-                        for path in existing_vaults {
-                            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("vault");
-                            let path_str = path.display().to_string();
-
-                            ui.horizontal(|ui| {
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(16.0, 16.0),
-                                    egui::Sense::hover(),
-                                );
-                                icons::render_icon(
-                                    ui.painter(),
-                                    icons::Icon::Folder,
-                                    rect,
-                                    color(theme.accent),
-                                    1.2,
-                                );
-
-                                let resp = ui
-                                    .selectable_label(
-                                        false,
-                                        egui::RichText::new(name)
-                                            .strong()
-                                            .color(color(theme.text_primary)),
-                                    )
-                                    .on_hover_text(&path_str);
-                                if resp.clicked()
-                                    && let Err(e) = application.open_vault(path)
-                                {
-                                    application.status = e.to_string();
-                                }
-
-                                ui.label(
-                                    egui::RichText::new(&path_str)
-                                        .size(11.0)
-                                        .color(color(theme.text_muted)),
-                                );
-
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if widgets::icon_button(
-                                            ui,
-                                            icons::Icon::Close,
-                                            "Удалить из недавних",
-                                        )
-                                        .clicked()
-                                        {
-                                            remove_path = Some(path.clone());
-                                        }
-                                    },
-                                );
-                            });
-                            ui.add_space(2.0);
-                        }
+                        recent.show_rows(application, ui, theme, true);
                     });
                 },
             );
-
-            if let Some(to_remove) = remove_path {
-                recent.remove(&to_remove);
-            }
         }
     });
 

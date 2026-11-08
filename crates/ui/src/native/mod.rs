@@ -104,6 +104,7 @@ pub struct NativeApp {
     pub toc: toc::FloatingToc,
     pub wiki: wiki::FolderWiki,
     pub stream: stream::NoteStream,
+    pub kanban: kanban::controller::KanbanController,
     hints_tick: Instant,
     last_typography: crate::app::global_config::TypographyConfig,
     last_theme: Option<crate::theme::Theme>,
@@ -132,6 +133,7 @@ impl NativeApp {
             toc: toc::FloatingToc::new(),
             wiki: wiki::FolderWiki::new(),
             stream: stream::NoteStream::new(),
+            kanban: kanban::controller::KanbanController::new(),
             last_typography,
             last_theme: None,
             recent_vaults: recent::RecentVaults::default(),
@@ -143,6 +145,9 @@ impl NativeApp {
             field_keys: Vec::new(),
             field_event_tail: Vec::new(),
         }
+    }
+    pub fn is_central_kanban_active(&self) -> bool {
+        self.kanban.is_central_active(&self.application)
     }
     pub fn show(&mut self, ui: &mut egui::Ui) {
         let context = ui.ctx().clone();
@@ -238,6 +243,9 @@ impl NativeApp {
             }
             self.stream.open(&self.application);
         }
+        if let Some(board_arg) = self.application.kanban_requested.take() {
+            self.kanban.open_overlay(&board_arg, &mut self.application);
+        }
         for change in self.application.shell.take_buffer_changes() {
             self.application.notify_buffer_change_for_facts(&change);
             if let Some(buffer) = self
@@ -268,6 +276,7 @@ impl NativeApp {
             || self.navigator.is_open()
             || self.wiki.is_open()
             || self.stream.is_open()
+            || self.kanban.is_overlay_open()
             || (self.toc.is_open && !self.toc.is_pinned)
             || (self.application.shell.which_key().is_visible()
                 && self.application.shell.which_key().mode()
@@ -276,6 +285,7 @@ impl NativeApp {
         let open_vault = content::show(
             &mut self.application,
             &mut self.editor,
+            &mut self.kanban,
             &mut self.recent_vaults,
             ui,
             &theme,
@@ -301,6 +311,8 @@ impl NativeApp {
         let stream_act = self.stream.show(&context, &theme);
         self.handle_stream_action(stream_act);
         self.dialogs.show(&mut self.application, &context, &theme);
+        self.kanban
+            .show_overlay(&mut self.application, &context, &theme);
         hints::show(&mut self.application.shell, &context);
         text_action::show(self, &context);
         self.flush_field_keys(&context);

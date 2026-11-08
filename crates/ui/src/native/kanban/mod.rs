@@ -1,6 +1,9 @@
+pub mod controller;
 pub mod picker;
 pub mod render;
 pub mod state;
+
+pub use controller::KanbanController;
 
 pub use picker::{FuzzyFilePicker, InlineFileAutocomplete, LinkJumpPicker};
 pub use render::{
