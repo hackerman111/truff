@@ -311,15 +311,14 @@ impl KanbanBoardState {
             self.pending_g = false;
             self.count_prefix = None;
             return match key {
-                Key::Char('g') => {
+                Key::Char('g') | Key::Char('п') | Key::Char('П') => {
                     self.selected_card = 0;
                     KanbanIntent::None
                 }
-                Key::Char('s') => {
-                    self.source_override = !self.source_override;
+                Key::Char('s') | Key::Char('ы') | Key::Char('Ы') => {
                     KanbanIntent::ToggleSourceView
                 }
-                Key::Char('f') => self.handle_link_jump(board),
+                Key::Char('f') | Key::Char('а') | Key::Char('А') => self.handle_link_jump(board),
                 _ => KanbanIntent::None,
             };
         }
@@ -328,7 +327,7 @@ impl KanbanBoardState {
         if self.pending_d {
             self.pending_d = false;
             self.count_prefix = None;
-            if key == Key::Char('d')
+            if matches!(key, Key::Char('d') | Key::Char('в') | Key::Char('В'))
                 && let Some((tx, raw_card)) =
                     plan_delete_card(text, board, self.selected_col, self.selected_card)
             {
@@ -340,6 +339,21 @@ impl KanbanBoardState {
                     self.selected_card -= 1;
                 }
                 return KanbanIntent::ApplyTx(tx);
+            }
+            return KanbanIntent::None;
+        }
+
+        // Two-key sequence handling for 'y'
+        if self.pending_y {
+            self.pending_y = false;
+            self.count_prefix = None;
+            if matches!(key, Key::Char('y') | Key::Char('н') | Key::Char('Н'))
+                && let Some(col) = board.columns.get(self.selected_col)
+                && let Some(card) = col.cards.get(self.selected_card)
+                && let Some(raw) = text.get(card.full_range.clone())
+            {
+                self.yank_register = Some(raw.to_string());
+                return KanbanIntent::Status("Карточка скопирована (yy)".to_string());
             }
             return KanbanIntent::None;
         }
@@ -413,15 +427,15 @@ impl KanbanBoardState {
                 self.selected_card = max_card;
                 KanbanIntent::None
             }
-            Key::Char('g') => {
+            Key::Char('g') | Key::Char('п') | Key::Char('П') => {
                 self.pending_g = true;
                 KanbanIntent::None
             }
-            Key::Char('d') => {
+            Key::Char('d') | Key::Char('в') | Key::Char('В') => {
                 self.pending_d = true;
                 KanbanIntent::None
             }
-            Key::Char('y') => {
+            Key::Char('y') | Key::Char('н') | Key::Char('Н') => {
                 self.pending_y = true;
                 KanbanIntent::None
             }
@@ -483,7 +497,7 @@ impl KanbanBoardState {
             }
 
             // Card status toggling
-            Key::Char(' ') | Key::Char('x') => {
+            Key::Char(' ') => {
                 if let Some(tx) =
                     plan_cycle_card_status(text, board, self.selected_col, self.selected_card)
                 {
@@ -492,7 +506,7 @@ impl KanbanBoardState {
                     KanbanIntent::None
                 }
             }
-            Key::Char('X') => {
+            Key::Char('x') | Key::Char('X') => {
                 if let Some(col) = board.columns.get(self.selected_col)
                     && let Some(card) = col.cards.get(self.selected_card)
                 {

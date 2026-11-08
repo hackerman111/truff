@@ -3,7 +3,7 @@ use super::state::{KanbanBoardState, KanbanInputMode, KanbanIntent};
 use crate::native::editor::color;
 use crate::native::icons::{Icon, render_icon};
 use crate::native::widgets::{
-    compact_icon_button, icon_button, primary_button, secondary_button, secondary_button_with_icon,
+    compact_icon_button, icon_button, primary_button, secondary_button_with_icon,
 };
 use crate::theme::Theme;
 use egui::{
@@ -93,8 +93,13 @@ fn render_board_surface_internal(
         ui.separator();
         ui.add_space(8.0);
 
-        // 2. Columns or Welcoming Empty State
-        if board.columns.is_empty() {
+        // 2. Source view or Columns or Welcoming Empty State
+        if state.source_override {
+            let src_intent = render_source_code_surface(text, state, ui, theme);
+            if src_intent != KanbanIntent::None {
+                intent = src_intent;
+            }
+        } else if board.columns.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(36.0);
                 let (icon_r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
@@ -179,6 +184,59 @@ fn render_board_surface_internal(
         intent
     })
     .inner
+}
+
+/// Renders the raw Markdown source code view when `source_override` is enabled.
+fn render_source_code_surface(
+    text: &str,
+    _state: &mut KanbanBoardState,
+    ui: &mut Ui,
+    theme: &Theme,
+) -> KanbanIntent {
+    let intent = KanbanIntent::None;
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let (icon_r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+        render_icon(
+            ui.painter(),
+            Icon::File,
+            icon_r,
+            color(theme.accent_primary),
+            1.2,
+        );
+        ui.label(
+            RichText::new("Режим исходного текста Markdown (gs или кнопка «Доска» для возврата)")
+                .size(12.0)
+                .color(color(theme.text_muted)),
+        );
+    });
+    ui.add_space(6.0);
+
+    ScrollArea::vertical()
+        .id_salt("kanban_source_view_scroll")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            Frame::new()
+                .fill(color(theme.bg_canvas))
+                .stroke(Stroke::new(1.0, color(theme.border_subtle)))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(text)
+                                .monospace()
+                                .size(12.5)
+                                .color(color(theme.text_primary)),
+                        )
+                        .selectable(true),
+                    );
+                });
+        });
+
+    intent
 }
 
 /// Renders the modal overlay dialog (Mode A) centered over the screen with semi-transparent backdrop.
@@ -336,7 +394,12 @@ fn render_header(
                 intent = KanbanIntent::CloseOverlay;
             }
 
-            if secondary_button(ui, "Исходник (gs)").clicked() {
+            let (source_label, source_icon) = if state.source_override {
+                ("Доска (gs)", Icon::Kanban)
+            } else {
+                ("Исходник (gs)", Icon::File)
+            };
+            if secondary_button_with_icon(ui, source_icon, source_label).clicked() {
                 intent = KanbanIntent::ToggleSourceView;
             }
 

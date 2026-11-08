@@ -242,6 +242,80 @@ fn central_panel_renders_kanban_file_and_toggles_source_with_gs() {
         app.is_central_kanban_active(),
         ":kanban command must clear source override and restore Board view"
     );
+
+    // 6. Test Cyrillic пы (gs equivalent) to toggle to Source view
+    app.key(Key::Char('п'));
+    app.key(Key::Char('ы'));
+    frame(&mut app, &ctx, vec![]);
+    assert!(
+        !app.is_central_kanban_active(),
+        "Cyrillic пы must toggle to Source view"
+    );
+
+    // 7. Test Cyrillic пы to toggle back to Board view
+    app.key(Key::Char('п'));
+    app.key(Key::Char('ы'));
+    frame(&mut app, &ctx, vec![]);
+    assert!(
+        app.is_central_kanban_active(),
+        "Cyrillic пы must toggle back to Board view"
+    );
+}
+
+#[test]
+fn modal_overlay_gs_and_cyrillic_toggles_source_view() {
+    let vault = std::env::temp_dir().join(format!(
+        "truff-test-kanban-overlay-gs-{}-{}",
+        std::process::id(),
+        BufferId::next()
+    ));
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(
+        vault.join("kanban.md"),
+        "# Доска\n\n## План\n- [ ] Задача 1\n",
+    )
+    .unwrap();
+    std::fs::write(vault.join("note.md"), "# Note\nText\n").unwrap();
+
+    let mut application = Application::new();
+    application.open_vault(&vault).unwrap();
+    idle(&mut application);
+    application.open_note("note.md").unwrap();
+
+    let ctx = egui::Context::default();
+    let mut app = NativeApp::new(application, &ctx);
+    frame(&mut app, &ctx, vec![]);
+
+    // Open overlay with Space b
+    app.key(Key::Char(' '));
+    app.key(Key::Char('b'));
+    frame(&mut app, &ctx, vec![]);
+    assert!(app.kanban.is_open());
+    assert!(!app.kanban.overlay_state.source_override);
+
+    // gs toggles to source view inside modal
+    app.key(Key::Char('g'));
+    app.key(Key::Char('s'));
+    frame(&mut app, &ctx, vec![]);
+    assert!(app.kanban.overlay_state.source_override);
+
+    // gs toggles back to board view inside modal
+    app.key(Key::Char('g'));
+    app.key(Key::Char('s'));
+    frame(&mut app, &ctx, vec![]);
+    assert!(!app.kanban.overlay_state.source_override);
+
+    // Cyrillic пы toggles to source view
+    app.key(Key::Char('п'));
+    app.key(Key::Char('ы'));
+    frame(&mut app, &ctx, vec![]);
+    assert!(app.kanban.overlay_state.source_override);
+
+    // Cyrillic пы toggles back
+    app.key(Key::Char('п'));
+    app.key(Key::Char('ы'));
+    frame(&mut app, &ctx, vec![]);
+    assert!(!app.kanban.overlay_state.source_override);
 }
 
 #[test]

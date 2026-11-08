@@ -69,13 +69,20 @@ impl NativeApp {
         {
             if self.kanban.source_pending_g {
                 self.kanban.source_pending_g = false;
-                if key == Key::Char('s') {
+                if matches!(key, Key::Char('s') | Key::Char('ы') | Key::Char('Ы')) {
                     self.application.shell.reset_editor_input();
                     self.application.toggle_kanban_source_view(view_id);
+                    if let Some(state) = self.kanban.central_states.get_mut(&view_id) {
+                        state.source_override = false;
+                    }
                     return;
+                } else {
+                    let action = self.application.shell.feed_key(Key::Char('g'));
+                    self.action(action);
                 }
-            } else if key == Key::Char('g') {
+            } else if matches!(key, Key::Char('g') | Key::Char('п') | Key::Char('П')) {
                 self.kanban.source_pending_g = true;
+                return;
             }
         }
         if self.is_central_kanban_active()

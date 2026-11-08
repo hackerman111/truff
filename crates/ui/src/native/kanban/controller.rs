@@ -403,7 +403,10 @@ impl KanbanController {
             KanbanIntent::Status(msg) => {
                 application.status = msg;
             }
-            KanbanIntent::ToggleSourceView | KanbanIntent::None => {}
+            KanbanIntent::ToggleSourceView => {
+                self.overlay_state.source_override = !self.overlay_state.source_override;
+            }
+            KanbanIntent::None => {}
         }
     }
 
