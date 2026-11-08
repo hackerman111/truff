@@ -240,11 +240,15 @@ impl NativeApp {
             NavigatorAction::RenameFile { path } => {
                 self.dialogs.operation.rename(path);
             }
-            NavigatorAction::BatchRenameFiles { paths: _ } => {}
+            NavigatorAction::BatchRenameFiles { paths } => {
+                self.dialogs.operation.batch_rename(paths);
+            }
             NavigatorAction::DeleteFile { path } => {
                 self.dialogs.operation.trash(path);
             }
-            NavigatorAction::DeleteFiles { paths: _ } => {}
+            NavigatorAction::DeleteFiles { paths } => {
+                self.dialogs.operation.batch_trash(paths);
+            }
             NavigatorAction::PasteFiles {
                 target_dir,
                 op,

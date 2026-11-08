@@ -34,11 +34,22 @@ pub(super) fn show(
             else {
                 continue;
             };
-            let selected = index == state.selected_index;
-            let response = crate::components::list_row(ui, row_height, selected, theme, |ui| {
+            let is_cursor = index == state.selected_index;
+            let is_in_selection = state.is_index_selected(index);
+            let is_marked = state.marked_indices.contains(&index);
+            let row_selected = is_cursor || is_in_selection;
+            let response = crate::components::list_row(ui, row_height, row_selected, theme, |ui| {
                 ui.spacing_mut().interact_size.y = row_height - theme.spacing_xs * 2.0;
                 ui.spacing_mut().item_spacing = egui::vec2(theme.spacing_sm, 0.0);
                 ui.horizontal(|ui| {
+                    if is_marked {
+                        ui.label(
+                            egui::RichText::new("[✓]")
+                                .monospace()
+                                .strong()
+                                .color(color(theme.accent_primary)),
+                        );
+                    }
                     if state.jump_labels_active {
                         const LABELS: &[char] = &[
                             'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'q', 'w', 'e', 'r', 't',
@@ -122,7 +133,7 @@ pub(super) fn show(
                             .size(theme.geometry.ui_font_size)
                             .color(color(theme.text_primary));
                         ui.add(
-                            egui::Label::new(if selected { title.strong() } else { title })
+                            egui::Label::new(if row_selected { title.strong() } else { title })
                                 .truncate(),
                         );
                         if state.mode == crate::navigator::NavigatorMode::Mixed {
@@ -155,6 +166,14 @@ pub(super) fn show(
                     }
                 });
             });
+            if is_cursor && state.has_multi_selection() {
+                ui.painter().rect_stroke(
+                    response.rect,
+                    theme.geometry.corner_radius,
+                    egui::Stroke::new(1.0, color(theme.accent_primary)),
+                    egui::StrokeKind::Inside,
+                );
+            }
             if response.clicked() {
                 state.selected_index = index;
             }

@@ -831,3 +831,42 @@ fn navigator_multi_select_and_paste_workflow() {
         other => panic!("expected PasteFiles, got {:?}", other),
     }
 }
+
+#[test]
+fn navigator_batch_trash_and_rename_actions_test() {
+    let ctx = egui::Context::default();
+    let application = Application::new();
+    let mut app = NativeApp::new(application, &ctx);
+    app.open_navigator(NavigatorMode::Files);
+    app.navigator.items = vec![
+        truff_ui::navigator::NavigatorItem::new_file(1, "doc1.md", "doc1.md".into(), false, 0),
+        truff_ui::navigator::NavigatorItem::new_file(2, "doc2.md", "doc2.md".into(), false, 0),
+    ];
+    app.navigator.recompute_filter();
+
+    // Select both with 'v' + 'j'
+    app.navigator.handle_key_event(NavKey::Char('v'), false);
+    app.navigator.handle_key_event(NavKey::Char('j'), false);
+
+    // Press 'd' -> produces DeleteFiles action and opens BatchTrash dialog
+    let action = app.navigator.handle_key_event(NavKey::Char('d'), false);
+    assert_eq!(
+        action,
+        NavigatorAction::DeleteFiles {
+            paths: vec!["doc1.md".into(), "doc2.md".into()]
+        }
+    );
+    app.handle_navigator_action(action);
+    assert!(app.dialogs.operation.is_open());
+
+    // Press 'r' -> produces BatchRenameFiles action and opens BatchRename dialog
+    let action = app.navigator.handle_key_event(NavKey::Char('r'), false);
+    assert_eq!(
+        action,
+        NavigatorAction::BatchRenameFiles {
+            paths: vec!["doc1.md".into(), "doc2.md".into()]
+        }
+    );
+    app.handle_navigator_action(action);
+    assert!(app.dialogs.operation.is_open());
+}

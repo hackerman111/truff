@@ -76,17 +76,31 @@ pub(super) fn header(
                 *action = NavigatorAction::Close;
             }
             let mode_badge = if state.search_mode || state.hub_tasks.editing.is_some() {
-                "Ввод"
+                "Ввод".to_string()
+            } else if state.in_visual_mode() {
+                format!("VISUAL ({})", state.selected_file_paths().len())
             } else if is_hub && state.hub_tasks.focus_tasks {
-                "Задачи"
+                "Задачи".to_string()
             } else {
-                "Normal"
+                "Normal".to_string()
             };
             ui.label(
                 egui::RichText::new(mode_badge)
                     .monospace()
                     .color(color(theme.accent_primary)),
             );
+            if let Some(clipboard) = &state.clipboard {
+                let op_text = match clipboard.op {
+                    crate::navigator::ClipboardOp::Copy => "Копия",
+                    crate::navigator::ClipboardOp::Move => "Перенос",
+                };
+                let count = clipboard.paths.len();
+                ui.label(
+                    egui::RichText::new(format!("[Буфер: {op_text} {count} · p: вставить]"))
+                        .size(theme.geometry.ui_font_size - 1.0)
+                        .color(color(theme.accent_primary)),
+                );
+            }
         });
     });
 }

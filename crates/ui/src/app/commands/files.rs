@@ -147,6 +147,19 @@ impl Application {
         self.enqueue_file_operations(jobs)
     }
 
+    pub(crate) fn batch_rename(&mut self, renames: Vec<(String, String)>) -> AppResult<()> {
+        let dirty = self.dirty_paths();
+        let jobs: Vec<_> = renames
+            .into_iter()
+            .map(|(from, to)| CatalogJob::Rename {
+                from,
+                to,
+                dirty: dirty.clone(),
+            })
+            .collect();
+        self.enqueue_file_operations(jobs)
+    }
+
     pub(crate) fn paste_files(
         &mut self,
         target_dir: &str,

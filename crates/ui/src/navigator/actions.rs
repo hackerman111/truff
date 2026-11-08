@@ -24,6 +24,11 @@ const fn spec(
 const FILES: &[QuickActionSpec] = &[
     spec("↵", "Открыть", "Открыть выбранную заметку"),
     spec("a", "Создать", "Создать новую заметку"),
+    spec("v", "Visual", "Режим выделения"),
+    spec("x", "Отметка", "Отметить файл"),
+    spec("y", "Копировать", "Скопировать в буфер"),
+    spec("m", "Перенести", "Вырезать для переноса"),
+    spec("p", "Вставить", "Вставить файлы из буфера"),
     spec("r", "Переименовать", "Переименовать заметку или папку"),
     spec("d", "Удалить", "Удалить в корзину"),
     spec("/", "Поиск", "Режим текстового поиска"),
@@ -271,7 +276,10 @@ mod tests {
     fn static_action_keys_keep_mode_order_and_file_actions_resolve_on_demand() {
         let mut state = NavigatorState::new();
         for (mode, keys) in [
-            (NavigatorMode::Files, &["↵", "a", "r", "d", "/", "?"][..]),
+            (
+                NavigatorMode::Files,
+                &["↵", "a", "v", "x", "y", "m", "p", "r", "d", "/", "?"][..],
+            ),
             (NavigatorMode::Sessions, &["↵", "p", "d", "/", "?"][..]),
             (NavigatorMode::Commands, &["↵", "/", "?"][..]),
             (NavigatorMode::Boards, &["↵", "/"][..]),
