@@ -69,13 +69,20 @@ fn test_navigator_keyboard_motions_and_clipboard() {
     state.handle_key_event(NavKey::Char('y'), false);
     assert!(!state.in_visual_mode());
     assert_eq!(state.clipboard.as_ref().unwrap().op, ClipboardOp::Copy);
-    assert_eq!(state.clipboard.as_ref().unwrap().paths, vec!["a.md", "b.md", "c.md"]);
+    assert_eq!(
+        state.clipboard.as_ref().unwrap().paths,
+        vec!["a.md", "b.md", "c.md"]
+    );
 
     // Move to folder (index 3) and press 'p' -> triggers paste into folder
     state.selected_index = 3;
     let action = state.handle_key_event(NavKey::Char('p'), false);
     match action {
-        NavigatorAction::PasteFiles { target_dir, op, paths } => {
+        NavigatorAction::PasteFiles {
+            target_dir,
+            op,
+            paths,
+        } => {
             assert_eq!(target_dir, "folder");
             assert_eq!(op, ClipboardOp::Copy);
             assert_eq!(paths, vec!["a.md", "b.md", "c.md"]);
@@ -98,4 +105,3 @@ fn test_navigator_keyboard_motions_and_clipboard() {
     let action = state.handle_key_event(NavKey::Escape, false);
     assert_eq!(action, NavigatorAction::Close);
 }
-

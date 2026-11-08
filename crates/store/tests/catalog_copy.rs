@@ -37,7 +37,10 @@ fn test_catalog_copy_file() {
         })
         .unwrap();
 
-    wait(&worker, |event| matches!(event, CatalogEvent::Copied { to, .. } if to == "subfolder/copied.md"));
+    wait(
+        &worker,
+        |event| matches!(event, CatalogEvent::Copied { to, .. } if to == "subfolder/copied.md"),
+    );
 
     assert!(vault.join("source.md").exists());
     assert!(vault.join("subfolder/copied.md").exists());

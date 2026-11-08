@@ -184,10 +184,10 @@ impl NavigatorState {
         if self.marked_indices.len() > 1 {
             return true;
         }
-        if let Some(anchor) = self.visual_anchor {
-            if anchor != self.selected_index {
-                return true;
-            }
+        if let Some(anchor) = self.visual_anchor
+            && anchor != self.selected_index
+        {
+            return true;
         }
         !self.marked_indices.is_empty() && self.visual_anchor.is_some()
     }
@@ -197,20 +197,18 @@ impl NavigatorState {
         let mut paths = Vec::new();
         let total = self.visible_count();
         for i in 0..total {
-            if self.is_index_selected(i) {
-                if let Some(item) = self.item_at(i) {
-                    if let NavigatorItemPayload::File { path, .. } = &item.payload {
-                        paths.push(path.clone());
-                    }
-                }
+            if self.is_index_selected(i)
+                && let Some(item) = self.item_at(i)
+                && let NavigatorItemPayload::File { path, .. } = &item.payload
+            {
+                paths.push(path.clone());
             }
         }
-        if paths.is_empty() {
-            if let Some(item) = self.selected_item() {
-                if let NavigatorItemPayload::File { path, .. } = &item.payload {
-                    paths.push(path.clone());
-                }
-            }
+        if paths.is_empty()
+            && let Some(item) = self.selected_item()
+            && let NavigatorItemPayload::File { path, .. } = &item.payload
+        {
+            paths.push(path.clone());
         }
         paths
     }

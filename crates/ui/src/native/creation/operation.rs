@@ -152,7 +152,11 @@ impl OperationDialog {
                         if self.focus {
                             ui.memory_mut(|memory| memory.request_focus(id));
                         }
-                        ui.add(egui::TextEdit::singleline(pattern).id(id).hint_text("текст"));
+                        ui.add(
+                            egui::TextEdit::singleline(pattern)
+                                .id(id)
+                                .hint_text("текст"),
+                        );
                     });
                     ui.horizontal(|ui| {
                         ui.label("Заменить:");

@@ -194,7 +194,7 @@ impl Application {
                 let mut counter = 1;
                 while vault_paths
                     .resolve_path(&dest_rel)
-                    .map_or(false, |p| p.exists())
+                    .is_ok_and(|p| p.exists())
                 {
                     let stem = src_path
                         .file_stem()

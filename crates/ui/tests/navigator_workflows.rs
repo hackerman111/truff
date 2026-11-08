@@ -807,7 +807,10 @@ fn navigator_multi_select_and_paste_workflow() {
     // Select with Visual mode 'v' + 'j'
     app.navigator.handle_key_event(NavKey::Char('v'), false);
     app.navigator.handle_key_event(NavKey::Char('j'), false);
-    assert_eq!(app.navigator.selected_file_paths(), vec!["doc1.md", "doc2.md"]);
+    assert_eq!(
+        app.navigator.selected_file_paths(),
+        vec!["doc1.md", "doc2.md"]
+    );
 
     // Yank files with 'y'
     let action = app.navigator.handle_key_event(NavKey::Char('y'), false);
@@ -823,7 +826,11 @@ fn navigator_multi_select_and_paste_workflow() {
     // Paste with 'p'
     let action = app.navigator.handle_key_event(NavKey::Char('p'), false);
     match action {
-        NavigatorAction::PasteFiles { target_dir, op, paths } => {
+        NavigatorAction::PasteFiles {
+            target_dir,
+            op,
+            paths,
+        } => {
             assert_eq!(target_dir, "archive");
             assert_eq!(op, truff_ui::navigator::ClipboardOp::Copy);
             assert_eq!(paths, vec!["doc1.md", "doc2.md"]);
