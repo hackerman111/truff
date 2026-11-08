@@ -118,7 +118,7 @@ pub fn color(value: Color) -> Color32 {
 }
 
 impl EditorWidget {
-    pub const TOP_MARGIN: f32 = 48.0;
+    pub const TOP_MARGIN: f32 = 84.0;
 
     /// Calculates the constrained readable column width and centered horizontal margin.
     pub fn calculate_column_metrics(available_width: f32) -> (f32, f32) {

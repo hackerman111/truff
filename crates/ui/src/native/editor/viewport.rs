@@ -393,33 +393,26 @@ impl EditorWidget {
         if typography.show_inline_title
             && let Some(title) = note_title
         {
-            let start0 = line_start(buffer, 0);
-            let end0 = line_start(buffer, 1).min(buffer.byte_len());
-            let first_line = buffer.slice(start0..end0);
-            let first_is_h1 = first_line
-                .chunks()
-                .any(|c| c.trim_start().starts_with("# "));
-            if !first_is_h1 {
-                let title_y = rect.top() + Self::TOP_MARGIN - 34.0 - self.scroll;
-                if title_y + 32.0 > rect.top() && title_y < rect.bottom() {
-                    let title_pos = egui::pos2(rect.left() + margin_x, title_y);
-                    let title_font = egui::FontId::new(
-                        (typography.base_font_size * 1.6).round().max(24.0),
-                        egui::FontFamily::Proportional,
-                    );
-                    let title_color = if theme.is_dark() {
-                        egui::Color32::from_rgb(235, 203, 139)
-                    } else {
-                        egui::Color32::from_rgb(180, 120, 20)
-                    };
-                    painter.text(
-                        title_pos,
-                        egui::Align2::LEFT_TOP,
-                        title,
-                        title_font,
-                        title_color,
-                    );
-                }
+            let title_size = (typography.base_font_size * 2.0).round().max(28.0);
+            let title_y = rect.top() + Self::TOP_MARGIN - title_size - 32.0 - self.scroll;
+            if title_y + title_size + 16.0 > rect.top() && title_y < rect.bottom() {
+                let title_pos = egui::pos2(rect.left() + margin_x, title_y);
+                let title_font = egui::FontId::new(
+                    title_size,
+                    egui::FontFamily::Proportional,
+                );
+                let title_color = if theme.is_dark() {
+                    egui::Color32::from_rgb(235, 203, 139)
+                } else {
+                    egui::Color32::from_rgb(180, 120, 20)
+                };
+                painter.text(
+                    title_pos,
+                    egui::Align2::LEFT_TOP,
+                    title,
+                    title_font,
+                    title_color,
+                );
             }
         }
 

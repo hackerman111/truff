@@ -304,7 +304,7 @@ fn test_editor_readable_column_and_margin() {
         truff_ui::native::EditorWidget::calculate_column_metrics(available_width);
     assert_eq!(content_width, 720.0);
     assert_eq!(margin_x, (1200.0 - 720.0) / 2.0);
-    assert_eq!(truff_ui::native::EditorWidget::TOP_MARGIN, 48.0);
+    assert_eq!(truff_ui::native::EditorWidget::TOP_MARGIN, 84.0);
 
     // Narrow window clamps to available_width - 48
     let narrow_width = 600.0;
