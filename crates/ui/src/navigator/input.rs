@@ -238,6 +238,95 @@ impl NavigatorState {
                 }
                 NavigatorAction::None
             }
+            NavKey::Char('v' | 'V')
+                if matches!(self.mode, NavigatorMode::Files | NavigatorMode::Folders) =>
+            {
+                if self.in_visual_mode() {
+                    self.visual_anchor = None;
+                } else {
+                    self.visual_anchor = Some(self.selected_index);
+                }
+                NavigatorAction::None
+            }
+            NavKey::Char('x')
+                if matches!(self.mode, NavigatorMode::Files | NavigatorMode::Folders) =>
+            {
+                if self.marked_indices.contains(&self.selected_index) {
+                    self.marked_indices.remove(&self.selected_index);
+                } else {
+                    self.marked_indices.insert(self.selected_index);
+                }
+                let count = self.visible_count();
+                if self.selected_index + 1 < count {
+                    self.selected_index += 1;
+                }
+                NavigatorAction::None
+            }
+            NavKey::Char('y')
+                if matches!(self.mode, NavigatorMode::Files | NavigatorMode::Folders) =>
+            {
+                let paths = self.selected_file_paths();
+                if !paths.is_empty() {
+                    self.clipboard = Some(FileClipboard {
+                        op: ClipboardOp::Copy,
+                        paths,
+                    });
+                    self.clear_selection();
+                }
+                NavigatorAction::None
+            }
+            NavKey::Char('m')
+                if matches!(self.mode, NavigatorMode::Files | NavigatorMode::Folders) =>
+            {
+                let paths = self.selected_file_paths();
+                if !paths.is_empty() {
+                    self.clipboard = Some(FileClipboard {
+                        op: ClipboardOp::Move,
+                        paths,
+                    });
+                    self.clear_selection();
+                }
+                NavigatorAction::None
+            }
+            NavKey::Char('p')
+                if matches!(self.mode, NavigatorMode::Files | NavigatorMode::Folders) =>
+            {
+                if let Some(clipboard) = &self.clipboard {
+                    let target_dir = self.current_parent_dir().unwrap_or_default();
+                    NavigatorAction::PasteFiles {
+                        target_dir,
+                        op: clipboard.op,
+                        paths: clipboard.paths.clone(),
+                    }
+                } else {
+                    self.preview_visible = !self.preview_visible;
+                    NavigatorAction::None
+                }
+            }
+            NavKey::Char('d')
+                if matches!(self.mode, NavigatorMode::Files | NavigatorMode::Folders) =>
+            {
+                let paths = self.selected_file_paths();
+                if paths.len() > 1 {
+                    NavigatorAction::DeleteFiles { paths }
+                } else if let Some(path) = paths.into_iter().next() {
+                    NavigatorAction::DeleteFile { path }
+                } else {
+                    NavigatorAction::None
+                }
+            }
+            NavKey::Char('r')
+                if matches!(self.mode, NavigatorMode::Files | NavigatorMode::Folders) =>
+            {
+                let paths = self.selected_file_paths();
+                if paths.len() > 1 {
+                    NavigatorAction::BatchRenameFiles { paths }
+                } else if let Some(path) = paths.into_iter().next() {
+                    NavigatorAction::RenameFile { path }
+                } else {
+                    NavigatorAction::None
+                }
+            }
             NavKey::Char('p') if self.mode != NavigatorMode::Sessions => {
                 self.preview_visible = !self.preview_visible;
                 NavigatorAction::None
@@ -292,8 +381,13 @@ impl NavigatorState {
                     .map_or(NavigatorAction::None, |action| action.action)
             }
             NavKey::Escape => {
-                self.close();
-                NavigatorAction::Close
+                if self.in_visual_mode() || !self.marked_indices.is_empty() {
+                    self.clear_selection();
+                    NavigatorAction::None
+                } else {
+                    self.close();
+                    NavigatorAction::Close
+                }
             }
             _ => NavigatorAction::None,
         }

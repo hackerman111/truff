@@ -159,8 +159,19 @@ pub enum NavigatorAction {
     RenameFile {
         path: String,
     },
+    BatchRenameFiles {
+        paths: Vec<String>,
+    },
     DeleteFile {
         path: String,
+    },
+    DeleteFiles {
+        paths: Vec<String>,
+    },
+    PasteFiles {
+        target_dir: String,
+        op: ClipboardOp,
+        paths: Vec<String>,
     },
     SwitchProvider {
         mode: NavigatorMode,

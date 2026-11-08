@@ -240,9 +240,16 @@ impl NativeApp {
             NavigatorAction::RenameFile { path } => {
                 self.dialogs.operation.rename(path);
             }
+            NavigatorAction::BatchRenameFiles { paths: _ } => {}
             NavigatorAction::DeleteFile { path } => {
                 self.dialogs.operation.trash(path);
             }
+            NavigatorAction::DeleteFiles { paths: _ } => {}
+            NavigatorAction::PasteFiles {
+                target_dir: _,
+                op: _,
+                paths: _,
+            } => {}
             NavigatorAction::SwitchBuffer { buffer_id } => {
                 self.navigator.close();
                 self.application.shell.pop_focus();
