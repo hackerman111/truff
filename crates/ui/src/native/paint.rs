@@ -23,7 +23,7 @@ pub fn resolve_font_and_line_height(source: &str, typography: &TypographyConfig)
         let size = (base * 1.15).round();
         (FontId::new(size, family), (size + 13.5 * scale).round())
     } else if source_trim.starts_with("#### ") {
-        let size = (base * 1.1).round();
+        let size = (base * 1.15).round();
         (FontId::new(size, family), (size + 10.0 * scale).round())
     } else if source_trim.starts_with("##### ") {
         let size = base;
