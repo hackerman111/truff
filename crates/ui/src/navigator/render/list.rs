@@ -44,7 +44,7 @@ pub(super) fn show(
                 ui.horizontal(|ui| {
                     if is_marked {
                         ui.label(
-                            egui::RichText::new("[✓]")
+                            egui::RichText::new("[x]")
                                 .monospace()
                                 .strong()
                                 .color(color(theme.accent_primary)),

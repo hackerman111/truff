@@ -1,4 +1,6 @@
-use super::picker::{FuzzyFilePicker, InlineFileAutocomplete, LinkJumpPicker};
+use super::picker::{
+    FuzzyFilePicker, InlineFileAutocomplete, LinkJumpPicker, PathAutocomplete, delete_word_backward,
+};
 use super::state::{KanbanBoardState, KanbanInputMode, KanbanIntent};
 use crate::native::editor::color;
 use crate::native::icons::{Icon, render_icon};
@@ -304,6 +306,7 @@ pub fn render_kanban_modal(
                         state.mode = KanbanInputMode::BoardPathInput {
                             buffer: "new_board.kanban.md".to_string(),
                             is_new: true,
+                            path_ac: Some(PathAutocomplete::new("", vault_files)),
                         };
                     }
                 });
@@ -332,6 +335,7 @@ pub fn render_kanban_modal(
                     state.mode = KanbanInputMode::BoardPathInput {
                         buffer: cur_path.to_string(),
                         is_new: false,
+                        path_ac: Some(PathAutocomplete::new(cur_path, vault_files)),
                     };
                 }
             });
@@ -340,7 +344,12 @@ pub fn render_kanban_modal(
             // Inline input for determining board location (new or relocated)
             let mut path_submit = None;
             let mut path_cancel = false;
-            if let KanbanInputMode::BoardPathInput { buffer, is_new } = &mut state.mode {
+            if let KanbanInputMode::BoardPathInput {
+                buffer,
+                is_new,
+                path_ac,
+            } = &mut state.mode
+            {
                 let is_new_board = *is_new;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
@@ -358,20 +367,195 @@ pub fn render_kanban_modal(
                         TextEdit::singleline(buffer)
                             .id(Id::new("kanban_board_path_input"))
                             .hint_text("folder/name.kanban.md")
-                            .desired_width(240.0),
+                            .desired_width(260.0),
                     );
                     edit_resp.request_focus();
-                    if ui.button(RichText::new("✓").strong()).clicked()
+
+                    if edit_resp.changed() {
+                        if let Some(ac) = path_ac.as_mut() {
+                            ac.query = buffer.clone();
+                            ac.refresh(vault_files);
+                        } else {
+                            *path_ac = Some(PathAutocomplete::new(buffer, vault_files));
+                        }
+                    }
+
+                    // Vim motions and hotkeys while editing
+                    if edit_resp.has_focus() {
+                        let is_down = ui.input(|i| {
+                            i.key_pressed(egui::Key::ArrowDown)
+                                || (i.modifiers.ctrl && i.key_pressed(egui::Key::J))
+                                || (i.modifiers.ctrl && i.key_pressed(egui::Key::N))
+                        });
+                        let is_up = ui.input(|i| {
+                            i.key_pressed(egui::Key::ArrowUp)
+                                || (i.modifiers.ctrl && i.key_pressed(egui::Key::K))
+                                || (i.modifiers.ctrl && i.key_pressed(egui::Key::P))
+                        });
+                        let is_tab = ui.input(|i| {
+                            i.key_pressed(egui::Key::Tab)
+                                || (i.modifiers.ctrl && i.key_pressed(egui::Key::Y))
+                        });
+                        let is_ctrl_w =
+                            ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::W));
+                        let is_ctrl_u =
+                            ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::U));
+
+                        if is_down {
+                            if let Some(ac) = path_ac.as_mut() {
+                                ac.next();
+                            }
+                        } else if is_up {
+                            if let Some(ac) = path_ac.as_mut() {
+                                ac.prev();
+                            }
+                        } else if is_tab {
+                            if let Some(ac) = path_ac.as_mut()
+                                && ac.apply_completion(buffer)
+                            {
+                                ac.query = buffer.clone();
+                                ac.refresh(vault_files);
+                            }
+                        } else if is_ctrl_w {
+                            delete_word_backward(buffer);
+                            if let Some(ac) = path_ac.as_mut() {
+                                ac.query = buffer.clone();
+                                ac.refresh(vault_files);
+                            }
+                        } else if is_ctrl_u {
+                            buffer.clear();
+                            if let Some(ac) = path_ac.as_mut() {
+                                ac.query.clear();
+                                ac.refresh(vault_files);
+                            }
+                        }
+                    }
+
+                    // Vector icons for apply and cancel:
+                    if compact_icon_button(ui, Icon::Check, "Применить (Enter)").clicked()
                         || (edit_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                     {
-                        path_submit = Some((buffer.trim().to_string(), is_new_board));
+                        if let Some(ac) = path_ac.as_mut()
+                            && let Some(cand) = ac.selected_candidate()
+                            && cand.is_dir
+                            && buffer != &cand.path
+                        {
+                            ac.apply_completion(buffer);
+                            ac.query = buffer.clone();
+                            ac.refresh(vault_files);
+                        } else {
+                            path_submit = Some((buffer.trim().to_string(), is_new_board));
+                        }
                     }
-                    if ui.button(RichText::new("✕")).clicked()
+                    if compact_icon_button(ui, Icon::Close, "Отмена (Esc)").clicked()
                         || (edit_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))
                     {
                         path_cancel = true;
                     }
                 });
+
+                // Dropdown list with autocomplete candidates
+                if let Some(ac) = path_ac
+                    && !ac.candidates.is_empty()
+                {
+                    ui.add_space(2.0);
+                    Frame::new()
+                        .fill(color(theme.bg_panel))
+                        .stroke(Stroke::new(1.0, color(theme.border_subtle)))
+                        .corner_radius(CornerRadius::same(6))
+                        .shadow(egui::Shadow {
+                            offset: [0, 4],
+                            blur: 12,
+                            spread: 0,
+                            color: Color32::from_black_alpha(80),
+                        })
+                        .inner_margin(Margin::symmetric(8, 6))
+                        .show(ui, |ui| {
+                            ui.set_max_width(340.0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("Автодополнение пути:")
+                                        .size(10.5)
+                                        .strong()
+                                        .color(color(theme.text_secondary)),
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    ui.label(
+                                        RichText::new(
+                                            "Tab/↵: применить • ^j/^k: выбор • Esc: закрыть",
+                                        )
+                                        .size(9.5)
+                                        .color(color(theme.text_muted)),
+                                    );
+                                });
+                            });
+                            ui.add_space(2.0);
+
+                            let mut candidate_clicked = None;
+                            for (idx, cand) in ac.candidates.iter().enumerate() {
+                                let is_active = idx == ac.selected;
+                                let row_frame = Frame::new()
+                                    .fill(if is_active {
+                                        color(theme.bg_selected)
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    })
+                                    .corner_radius(CornerRadius::same(3))
+                                    .inner_margin(Margin::symmetric(6, 3));
+
+                                let row_resp = row_frame.show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        let icon = if cand.is_dir {
+                                            Icon::Folder
+                                        } else if cand.path.ends_with(".kanban.md") {
+                                            Icon::Kanban
+                                        } else {
+                                            Icon::File
+                                        };
+                                        let (icon_r, _) = ui
+                                            .allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                                        render_icon(
+                                            ui.painter(),
+                                            icon,
+                                            icon_r,
+                                            if cand.is_dir {
+                                                color(theme.accent_primary)
+                                            } else {
+                                                color(theme.text_muted)
+                                            },
+                                            1.2,
+                                        );
+                                        let text_color = if is_active {
+                                            color(theme.accent_primary)
+                                        } else if cand.is_dir {
+                                            color(theme.text_primary)
+                                        } else {
+                                            color(theme.text_secondary)
+                                        };
+                                        ui.label(
+                                            RichText::new(&cand.path)
+                                                .monospace()
+                                                .size(11.0)
+                                                .color(text_color),
+                                        );
+                                    })
+                                });
+
+                                if row_resp.response.interact(Sense::click()).clicked() {
+                                    candidate_clicked = Some(idx);
+                                }
+                            }
+
+                            if let Some(clicked_idx) = candidate_clicked {
+                                ac.selected = clicked_idx;
+                                if ac.apply_completion(buffer) {
+                                    ac.query = buffer.clone();
+                                    ac.refresh(vault_files);
+                                }
+                            }
+                        });
+                }
                 ui.add_space(4.0);
             }
             if path_cancel {
@@ -873,12 +1057,12 @@ fn render_column_header(
                 );
                 edit_resp.request_focus();
 
-                if ui.button(RichText::new("✓").strong()).clicked()
+                if compact_icon_button(ui, Icon::Check, "Применить (Enter)").clicked()
                     || (edit_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                 {
                     commit = true;
                 }
-                if ui.button(RichText::new("✕")).clicked()
+                if compact_icon_button(ui, Icon::Close, "Отмена (Esc)").clicked()
                     || (edit_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))
                 {
                     cancel = true;

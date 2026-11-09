@@ -323,9 +323,206 @@ impl LinkJumpPicker {
     }
 }
 
+/// Deletes the last word or path segment backward in `buffer` (vim `<C-w>` behavior).
+pub fn delete_word_backward(buffer: &mut String) {
+    if buffer.is_empty() {
+        return;
+    }
+    if buffer.ends_with('/') || buffer.ends_with('\\') {
+        buffer.pop();
+    }
+    while let Some(c) = buffer.pop() {
+        if c == '/' || c == '\\' || c == ' ' {
+            buffer.push(c);
+            break;
+        }
+    }
+}
+
+/// A path autocomplete candidate representing a directory or file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathCandidate {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// Autocomplete state for board path inputs with vim motions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathAutocomplete {
+    pub query: String,
+    pub selected: usize,
+    pub candidates: Vec<PathCandidate>,
+}
+
+impl PathAutocomplete {
+    pub fn new(query: &str, vault_files: &[String]) -> Self {
+        let mut ac = Self {
+            query: query.to_string(),
+            selected: 0,
+            candidates: Vec::new(),
+        };
+        ac.refresh(vault_files);
+        ac
+    }
+
+    /// Recomputes autocomplete candidates based on `self.query` and `vault_files`.
+    pub fn refresh(&mut self, vault_files: &[String]) {
+        let mut all_candidates: Vec<PathCandidate> = Vec::new();
+        let mut dir_set = std::collections::BTreeSet::new();
+
+        for file in vault_files {
+            let normalized = file.replace('\\', "/");
+            let mut parts = normalized.split('/').collect::<Vec<_>>();
+            if parts.len() > 1 {
+                parts.pop();
+                let mut cur = String::new();
+                for part in parts {
+                    cur.push_str(part);
+                    cur.push('/');
+                    if dir_set.insert(cur.clone()) {
+                        all_candidates.push(PathCandidate {
+                            path: cur.clone(),
+                            is_dir: true,
+                        });
+                    }
+                }
+            }
+            all_candidates.push(PathCandidate {
+                path: normalized,
+                is_dir: false,
+            });
+        }
+
+        let q = self.query.trim();
+        if q.is_empty() {
+            let mut top = Vec::new();
+            for c in &all_candidates {
+                let slash_count = c.path.matches('/').count();
+                if (c.is_dir && slash_count == 1) || (!c.is_dir && slash_count == 0) {
+                    top.push(c.clone());
+                }
+            }
+            if top.is_empty() {
+                top = all_candidates.into_iter().take(10).collect();
+            } else {
+                top.truncate(10);
+            }
+            self.candidates = top;
+        } else {
+            let q_lower = q.to_lowercase();
+            let mut scored: Vec<(u8, usize, PathCandidate)> = Vec::new();
+            for c in all_candidates {
+                let path_lower = c.path.to_lowercase();
+                let score = if path_lower.starts_with(&q_lower) {
+                    let extra = path_lower.len() - q_lower.len();
+                    Some((0, extra))
+                } else if let Some((tier, len, _)) = rank_match(&q_lower, &c.path) {
+                    Some((tier + 1, len))
+                } else {
+                    None
+                };
+                if let Some((tier, metric)) = score {
+                    scored.push((tier, metric, c));
+                }
+            }
+            scored.sort_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.cmp(&b.1))
+                    .then_with(|| a.2.is_dir.cmp(&b.2.is_dir).reverse())
+                    .then_with(|| a.2.path.cmp(&b.2.path))
+            });
+            self.candidates = scored.into_iter().take(10).map(|(_, _, c)| c).collect();
+        }
+
+        if self.selected >= self.candidates.len() {
+            self.selected = 0;
+        }
+    }
+
+    pub fn next(&mut self) {
+        if !self.candidates.is_empty() {
+            self.selected = (self.selected + 1) % self.candidates.len();
+        }
+    }
+
+    pub fn prev(&mut self) {
+        if !self.candidates.is_empty() {
+            if self.selected == 0 {
+                self.selected = self.candidates.len() - 1;
+            } else {
+                self.selected -= 1;
+            }
+        }
+    }
+
+    pub fn selected_candidate(&self) -> Option<&PathCandidate> {
+        self.candidates.get(self.selected)
+    }
+
+    pub fn apply_completion(&self, buffer: &mut String) -> bool {
+        let Some(cand) = self.selected_candidate() else {
+            return false;
+        };
+        buffer.clear();
+        buffer.push_str(&cand.path);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_delete_word_backward() {
+        let mut path = "projects/backend/api.md".to_string();
+        delete_word_backward(&mut path);
+        assert_eq!(path, "projects/backend/");
+
+        delete_word_backward(&mut path);
+        assert_eq!(path, "projects/");
+
+        delete_word_backward(&mut path);
+        assert_eq!(path, "");
+    }
+
+    #[test]
+    fn test_path_autocomplete_and_vim_motions() {
+        let vault = vec![
+            "projects/backend/api.md".to_string(),
+            "projects/sprint.kanban.md".to_string(),
+            "notes/daily.md".to_string(),
+            "kanban.md".to_string(),
+        ];
+        let mut ac = PathAutocomplete::new("proj", &vault);
+        assert!(!ac.candidates.is_empty());
+        assert_eq!(ac.selected, 0);
+        let first = ac.selected_candidate().unwrap();
+        assert_eq!(first.path, "projects/");
+        assert!(first.is_dir);
+
+        // Next candidate
+        ac.next();
+        assert_eq!(ac.selected, 1);
+        let second = ac.selected_candidate().unwrap();
+        assert!(second.path.starts_with("projects/"));
+
+        // Prev candidate (vim motion k / Ctrl-k)
+        ac.prev();
+        assert_eq!(ac.selected, 0);
+
+        // Apply completion
+        let mut buffer = "proj".to_string();
+        assert!(ac.apply_completion(&mut buffer));
+        assert_eq!(buffer, "projects/");
+
+        // Refresh with completed buffer
+        ac.query = buffer.clone();
+        ac.refresh(&vault);
+        let paths: Vec<&str> = ac.candidates.iter().map(|c| c.path.as_str()).collect();
+        assert!(paths.contains(&"projects/backend/"));
+        assert!(paths.contains(&"projects/sprint.kanban.md"));
+    }
 
     #[test]
     fn test_fuzzy_file_picker_ranking() {

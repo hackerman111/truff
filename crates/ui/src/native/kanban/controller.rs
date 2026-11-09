@@ -192,7 +192,9 @@ impl KanbanController {
 
         let vault_files: Vec<String> = if matches!(
             self.overlay_state.mode,
-            KanbanInputMode::FilePicker(_) | KanbanInputMode::CardInput { .. }
+            KanbanInputMode::FilePicker(_)
+                | KanbanInputMode::CardInput { .. }
+                | KanbanInputMode::BoardPathInput { .. }
         ) {
             application
                 .shell
@@ -250,7 +252,9 @@ impl KanbanController {
 
         let vault_files: Vec<String> = if matches!(
             self.overlay_state.mode,
-            KanbanInputMode::FilePicker(_) | KanbanInputMode::CardInput { .. }
+            KanbanInputMode::FilePicker(_)
+                | KanbanInputMode::CardInput { .. }
+                | KanbanInputMode::BoardPathInput { .. }
         ) || key == Key::Char('f')
         {
             application
@@ -518,7 +522,9 @@ impl KanbanController {
         let state = self.central_states.entry(view_id).or_default();
         let vault_files: Vec<String> = if matches!(
             state.mode,
-            KanbanInputMode::FilePicker(_) | KanbanInputMode::CardInput { .. }
+            KanbanInputMode::FilePicker(_)
+                | KanbanInputMode::CardInput { .. }
+                | KanbanInputMode::BoardPathInput { .. }
         ) {
             application
                 .shell
@@ -581,7 +587,9 @@ impl KanbanController {
 
         let vault_files: Vec<String> = if matches!(
             state.mode,
-            KanbanInputMode::FilePicker(_) | KanbanInputMode::CardInput { .. }
+            KanbanInputMode::FilePicker(_)
+                | KanbanInputMode::CardInput { .. }
+                | KanbanInputMode::BoardPathInput { .. }
         ) || key == Key::Char('f')
         {
             application

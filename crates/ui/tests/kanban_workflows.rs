@@ -653,3 +653,113 @@ fn determine_board_location_in_kanban_panel() {
     assert!(sprint_content.contains("<!-- truff:kanban -->"));
     assert!(sprint_content.contains("## План"));
 }
+
+#[test]
+fn board_path_autocompletion_and_vim_motions_in_kanban_overlay() {
+    let vault = std::env::temp_dir().join(format!(
+        "kanban_path_ac_{}_{}",
+        std::process::id(),
+        BufferId::next()
+    ));
+    std::fs::create_dir_all(vault.join("projects")).unwrap();
+    std::fs::create_dir_all(vault.join("notes")).unwrap();
+    std::fs::write(
+        vault.join("projects").join("tasks.kanban.md"),
+        "<!-- truff:kanban -->\n# Tasks\n\n## План\n- [ ] Task 1\n",
+    )
+    .unwrap();
+    std::fs::write(vault.join("notes").join("memo.md"), "# Memo\n").unwrap();
+    std::fs::write(
+        vault.join("kanban.md"),
+        "<!-- truff:kanban -->\n# Main\n\n## План\n- [ ] Init\n",
+    )
+    .unwrap();
+
+    let mut application = Application::new();
+    application.open_vault(&vault).unwrap();
+    idle(&mut application);
+
+    let ctx = egui::Context::default();
+    let mut app = NativeApp::new(application, &ctx);
+    frame(&mut app, &ctx, vec![]);
+
+    // 1. Open Kanban modal overlay
+    app.kanban.open_overlay("kanban.md", &mut app.application);
+    frame(&mut app, &ctx, vec![]);
+    assert!(app.kanban.is_open());
+
+    // 2. Switch to BoardPathInput with empty query
+    let vault_files = vec![
+        "projects/tasks.kanban.md".to_string(),
+        "notes/memo.md".to_string(),
+        "kanban.md".to_string(),
+    ];
+    app.kanban.overlay_state.mode =
+        truff_ui::native::kanban::state::KanbanInputMode::BoardPathInput {
+            buffer: "proj".to_string(),
+            is_new: true,
+            path_ac: Some(truff_ui::native::kanban::picker::PathAutocomplete::new(
+                "proj",
+                &vault_files,
+            )),
+        };
+    frame(&mut app, &ctx, vec![]);
+
+    // Verify candidates are present and top candidate is projects/
+    if let truff_ui::native::kanban::state::KanbanInputMode::BoardPathInput { path_ac, .. } =
+        &app.kanban.overlay_state.mode
+    {
+        let ac = path_ac.as_ref().expect("path_ac must be active");
+        assert!(!ac.candidates.is_empty());
+        assert_eq!(ac.selected, 0);
+        assert_eq!(ac.selected_candidate().unwrap().path, "projects/");
+    } else {
+        panic!("expected BoardPathInput mode");
+    }
+
+    // 3. Vim motion: Ctrl+j moves to next candidate
+    app.key(Key::Ctrl('j'));
+    frame(&mut app, &ctx, vec![]);
+    if let truff_ui::native::kanban::state::KanbanInputMode::BoardPathInput { path_ac, .. } =
+        &app.kanban.overlay_state.mode
+    {
+        assert_eq!(path_ac.as_ref().unwrap().selected, 1);
+    }
+
+    // 4. Vim motion: Ctrl+k moves back to prev candidate
+    app.key(Key::Ctrl('k'));
+    frame(&mut app, &ctx, vec![]);
+    if let truff_ui::native::kanban::state::KanbanInputMode::BoardPathInput { path_ac, .. } =
+        &app.kanban.overlay_state.mode
+    {
+        assert_eq!(path_ac.as_ref().unwrap().selected, 0);
+    }
+
+    // 5. Tab: completes current selection ("projects/")
+    app.key(Key::Tab);
+    frame(&mut app, &ctx, vec![]);
+    if let truff_ui::native::kanban::state::KanbanInputMode::BoardPathInput { buffer, .. } =
+        &app.kanban.overlay_state.mode
+    {
+        assert_eq!(buffer, "projects/");
+    }
+
+    // 6. Ctrl+w: deletes backward segment -> empty
+    app.key(Key::Ctrl('w'));
+    frame(&mut app, &ctx, vec![]);
+    if let truff_ui::native::kanban::state::KanbanInputMode::BoardPathInput { buffer, .. } =
+        &app.kanban.overlay_state.mode
+    {
+        assert_eq!(buffer, "");
+    }
+
+    // 7. Esc cancels autocomplete, then second Esc closes overlay or cancels input
+    app.key(Key::Esc);
+    frame(&mut app, &ctx, vec![]);
+    app.key(Key::Esc);
+    frame(&mut app, &ctx, vec![]);
+    assert_eq!(
+        app.kanban.overlay_state.mode,
+        truff_ui::native::kanban::state::KanbanInputMode::Normal
+    );
+}

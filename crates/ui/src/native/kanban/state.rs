@@ -1,5 +1,6 @@
 use crate::native::kanban::picker::{
-    FuzzyFilePicker, InlineFileAutocomplete, LinkJumpAction, LinkJumpPicker,
+    FuzzyFilePicker, InlineFileAutocomplete, LinkJumpAction, LinkJumpPicker, PathAutocomplete,
+    delete_word_backward,
 };
 use truff_core::markdown::kanban::{
     CardInsertPos, KanbanBoard, plan_add_card, plan_add_column, plan_attach_file_link,
@@ -55,6 +56,7 @@ pub enum KanbanInputMode {
     BoardPathInput {
         buffer: String,
         is_new: bool,
+        path_ac: Option<PathAutocomplete>,
     },
 }
 
@@ -194,38 +196,118 @@ impl KanbanBoardState {
                 _ => KanbanIntent::None,
             },
 
-            KanbanInputMode::BoardPathInput { buffer, is_new } => match key {
-                Key::Esc => {
-                    self.mode = KanbanInputMode::Normal;
-                    KanbanIntent::None
-                }
-                Key::Backspace => {
-                    buffer.pop();
-                    KanbanIntent::None
-                }
-                Key::Char(c) => {
-                    buffer.push(c);
-                    KanbanIntent::None
-                }
-                Key::Enter => {
-                    let is_new = *is_new;
-                    let mut path = std::mem::take(buffer).trim().to_string();
-                    self.mode = KanbanInputMode::Normal;
-                    if !path.is_empty() {
-                        if !path.ends_with(".md") {
-                            path.push_str(".kanban.md");
+            KanbanInputMode::BoardPathInput {
+                buffer,
+                is_new,
+                path_ac,
+            } => {
+                if let Some(ac) = path_ac.as_mut() {
+                    match key {
+                        Key::Down | Key::Ctrl('j') | Key::Ctrl('n') => {
+                            ac.next();
+                            return KanbanIntent::None;
                         }
-                        KanbanIntent::SetBoardPath {
-                            old_path: None,
-                            new_path: path,
-                            is_new,
+                        Key::Up | Key::Ctrl('k') | Key::Ctrl('p') => {
+                            ac.prev();
+                            return KanbanIntent::None;
                         }
-                    } else {
-                        KanbanIntent::None
+                        Key::Tab | Key::Ctrl('y') => {
+                            if ac.apply_completion(buffer) {
+                                ac.query = buffer.clone();
+                                ac.refresh(vault_files);
+                            }
+                            return KanbanIntent::None;
+                        }
+                        Key::ShiftTab => {
+                            ac.prev();
+                            return KanbanIntent::None;
+                        }
+                        Key::Ctrl('e') => {
+                            *path_ac = None;
+                            return KanbanIntent::None;
+                        }
+                        _ => {}
                     }
                 }
-                _ => KanbanIntent::None,
-            },
+
+                match key {
+                    Key::Esc => {
+                        if path_ac.is_some() {
+                            *path_ac = None;
+                        } else {
+                            self.mode = KanbanInputMode::Normal;
+                        }
+                        KanbanIntent::None
+                    }
+                    Key::Ctrl('w') => {
+                        delete_word_backward(buffer);
+                        if let Some(ac) = path_ac.as_mut() {
+                            ac.query = buffer.clone();
+                            ac.refresh(vault_files);
+                        } else {
+                            *path_ac = Some(PathAutocomplete::new(buffer, vault_files));
+                        }
+                        KanbanIntent::None
+                    }
+                    Key::Ctrl('u') => {
+                        buffer.clear();
+                        if let Some(ac) = path_ac.as_mut() {
+                            ac.query.clear();
+                            ac.refresh(vault_files);
+                        }
+                        KanbanIntent::None
+                    }
+                    Key::Backspace => {
+                        buffer.pop();
+                        if let Some(ac) = path_ac.as_mut() {
+                            ac.query = buffer.clone();
+                            ac.refresh(vault_files);
+                        } else {
+                            *path_ac = Some(PathAutocomplete::new(buffer, vault_files));
+                        }
+                        KanbanIntent::None
+                    }
+                    Key::Char(c) => {
+                        buffer.push(c);
+                        if let Some(ac) = path_ac.as_mut() {
+                            ac.query = buffer.clone();
+                            ac.refresh(vault_files);
+                        } else {
+                            *path_ac = Some(PathAutocomplete::new(buffer, vault_files));
+                        }
+                        KanbanIntent::None
+                    }
+                    Key::Enter => {
+                        if let Some(ac) = path_ac.as_mut()
+                            && let Some(cand) = ac.selected_candidate()
+                            && cand.is_dir
+                            && buffer != &cand.path
+                        {
+                            ac.apply_completion(buffer);
+                            ac.query = buffer.clone();
+                            ac.refresh(vault_files);
+                            return KanbanIntent::None;
+                        }
+
+                        let is_new = *is_new;
+                        let mut path = std::mem::take(buffer).trim().to_string();
+                        self.mode = KanbanInputMode::Normal;
+                        if !path.is_empty() {
+                            if !path.ends_with(".md") {
+                                path.push_str(".kanban.md");
+                            }
+                            KanbanIntent::SetBoardPath {
+                                old_path: None,
+                                new_path: path,
+                                is_new,
+                            }
+                        } else {
+                            KanbanIntent::None
+                        }
+                    }
+                    _ => KanbanIntent::None,
+                }
+            }
 
             KanbanInputMode::CardInput {
                 col_idx,
@@ -1259,5 +1341,74 @@ mod tests {
         // q -> CloseOverlay
         let intent = state.feed_key(Key::Char('q'), SAMPLE_BOARD, &board, &files);
         assert_eq!(intent, KanbanIntent::CloseOverlay);
+    }
+
+    #[test]
+    fn test_board_path_input_with_autocomplete_and_vim_motions() {
+        let board = KanbanBoard::parse(SAMPLE_BOARD);
+        let mut state = KanbanBoardState::new();
+        let files = vec![
+            "projects/backend/api.md".to_string(),
+            "projects/sprint.kanban.md".to_string(),
+            "notes/daily.md".to_string(),
+        ];
+
+        state.mode = KanbanInputMode::BoardPathInput {
+            buffer: "proj".to_string(),
+            is_new: true,
+            path_ac: Some(PathAutocomplete::new("proj", &files)),
+        };
+
+        // Down / Ctrl-j -> next candidate
+        state.feed_key(Key::Ctrl('j'), SAMPLE_BOARD, &board, &files);
+        if let KanbanInputMode::BoardPathInput { path_ac, .. } = &state.mode {
+            assert_eq!(path_ac.as_ref().unwrap().selected, 1);
+        } else {
+            panic!("expected BoardPathInput");
+        }
+
+        // Up / Ctrl-k -> prev candidate
+        state.feed_key(Key::Ctrl('k'), SAMPLE_BOARD, &board, &files);
+        if let KanbanInputMode::BoardPathInput { path_ac, .. } = &state.mode {
+            assert_eq!(path_ac.as_ref().unwrap().selected, 0);
+        } else {
+            panic!("expected BoardPathInput");
+        }
+
+        // Tab -> complete candidate (projects/)
+        state.feed_key(Key::Tab, SAMPLE_BOARD, &board, &files);
+        if let KanbanInputMode::BoardPathInput { buffer, .. } = &state.mode {
+            assert_eq!(buffer, "projects/");
+        } else {
+            panic!("expected BoardPathInput");
+        }
+
+        // Ctrl-w -> delete word backward
+        state.feed_key(Key::Ctrl('w'), SAMPLE_BOARD, &board, &files);
+        if let KanbanInputMode::BoardPathInput { buffer, .. } = &state.mode {
+            assert_eq!(buffer, "");
+        } else {
+            panic!("expected BoardPathInput");
+        }
+
+        // Enter on empty -> None
+        let intent = state.feed_key(Key::Enter, SAMPLE_BOARD, &board, &files);
+        assert_eq!(intent, KanbanIntent::None);
+
+        // Type "custom" then Enter -> SetBoardPath
+        state.mode = KanbanInputMode::BoardPathInput {
+            buffer: "custom".to_string(),
+            is_new: false,
+            path_ac: None,
+        };
+        let intent = state.feed_key(Key::Enter, SAMPLE_BOARD, &board, &files);
+        assert!(matches!(
+            intent,
+            KanbanIntent::SetBoardPath {
+                new_path,
+                is_new: false,
+                ..
+            } if new_path == "custom.kanban.md"
+        ));
     }
 }
