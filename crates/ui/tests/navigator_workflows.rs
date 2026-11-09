@@ -877,3 +877,36 @@ fn navigator_batch_trash_and_rename_actions_test() {
     app.handle_navigator_action(action);
     assert!(app.dialogs.operation.is_open());
 }
+
+#[test]
+fn test_empty_trash_removes_trashed_items() {
+    let root = std::env::temp_dir().join(format!(
+        "truff_empty_trash_test_{}_{}",
+        std::process::id(),
+        truff_core::BufferId::next()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let trash_dir = root.join(".truff").join("trash");
+    std::fs::create_dir_all(&trash_dir).unwrap();
+    std::fs::write(trash_dir.join("discarded.md"), "trashed text").unwrap();
+    std::fs::create_dir_all(trash_dir.join("subfolder")).unwrap();
+    std::fs::write(trash_dir.join("subfolder").join("nested.md"), "nested").unwrap();
+
+    let mut app = Application::new();
+    app.open_vault(&root).unwrap();
+
+    assert!(trash_dir.join("discarded.md").exists());
+    let deleted = app.empty_trash().unwrap();
+    assert_eq!(deleted, 2);
+    assert!(!trash_dir.join("discarded.md").exists());
+    assert!(!trash_dir.join("subfolder").exists());
+    assert!(app.status.contains("Корзина очищена"));
+
+    // Emptying already empty trash returns 0
+    let deleted_again = app.empty_trash().unwrap();
+    assert_eq!(deleted_again, 0);
+
+    // Test execute_command with :empty_trash
+    assert!(app.execute_command("empty_trash").is_ok());
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -46,6 +46,11 @@ pub(super) fn show(
                         dialogs.vault.open = true;
                     }
                     if application.vault_path().is_some() {
+                        if widgets::icon_button(ui, icons::Icon::Trash, "Очистить корзину")
+                            .clicked()
+                        {
+                            dialogs.operation.empty_trash();
+                        }
                         if widgets::icon_button(ui, icons::Icon::Folder, "Создать новую папку")
                             .clicked()
                         {

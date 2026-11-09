@@ -256,27 +256,6 @@ pub fn render_kanban_modal(
 
     let width = (screen.width() * 0.86).clamp(680.0, 1400.0);
     let height = (screen.height() * 0.82).clamp(460.0, 880.0);
-    let window_rect = Rect::from_center_size(screen.center(), vec2(width, height));
-
-    // Soft scrim backdrop
-    let backdrop_layer = egui::LayerId::new(egui::Order::Middle, Id::new("kanban_modal_backdrop"));
-    ctx.layer_painter(backdrop_layer).rect_filled(
-        screen,
-        0.0,
-        if theme.is_dark() {
-            Color32::from_black_alpha(45)
-        } else {
-            Color32::from_black_alpha(20)
-        },
-    );
-
-    // Clicking outside the floating modal window dismisses it
-    if ctx.input(|i| i.pointer.primary_clicked())
-        && let Some(click_pos) = ctx.input(|i| i.pointer.interact_pos())
-        && !window_rect.contains(click_pos)
-    {
-        intent = KanbanIntent::CloseOverlay;
-    }
 
     let frame = Frame::new()
         .fill(color(theme.bg_panel))
@@ -290,14 +269,12 @@ pub fn render_kanban_modal(
         })
         .inner_margin(Margin::symmetric(18, 14));
 
-    egui::Window::new("kanban_modal_window")
-        .title_bar(false)
+    let modal_resp = egui::Modal::new(egui::Id::new("kanban_modal_window"))
         .frame(frame)
-        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0))
-        .fixed_size(vec2(width, height))
-        .resizable(false)
         .show(ctx, |ui| {
-            ui.set_min_size(vec2(width - 36.0, height - 28.0));
+            ui.set_width((width - 36.0).max(1.0));
+            ui.set_max_width((width - 36.0).max(1.0));
+            ui.set_height((height - 28.0).max(1.0));
 
             // Board switcher tabs if multiple boards exist
             if !available_boards.is_empty() {
@@ -324,10 +301,98 @@ pub fn render_kanban_modal(
                         }
                     }
                     if icon_button(ui, Icon::Plus, "Создать доску").clicked() {
-                        intent = KanbanIntent::CreateNewBoard;
+                        state.mode = KanbanInputMode::BoardPathInput {
+                            buffer: "new_board.kanban.md".to_string(),
+                            is_new: true,
+                        };
                     }
                 });
                 ui.add_space(4.0);
+            }
+
+            // Location bar: displays and allows determining/editing the board file location
+            let cur_path = current_board_name.unwrap_or("kanban.md");
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let (icon_rect, _) = ui.allocate_exact_size(vec2(12.0, 14.0), Sense::hover());
+                render_icon(
+                    ui.painter(),
+                    Icon::Folder,
+                    icon_rect,
+                    color(theme.text_muted),
+                    1.2,
+                );
+                ui.label(
+                    RichText::new(format!("Расположение: {cur_path}"))
+                        .size(11.0)
+                        .color(color(theme.text_secondary)),
+                );
+                if compact_icon_button(ui, Icon::Edit, "Изменить расположение файла").clicked()
+                {
+                    state.mode = KanbanInputMode::BoardPathInput {
+                        buffer: cur_path.to_string(),
+                        is_new: false,
+                    };
+                }
+            });
+            ui.add_space(4.0);
+
+            // Inline input for determining board location (new or relocated)
+            let mut path_submit = None;
+            let mut path_cancel = false;
+            if let KanbanInputMode::BoardPathInput { buffer, is_new } = &mut state.mode {
+                let is_new_board = *is_new;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(
+                        RichText::new(if is_new_board {
+                            "Путь к новой доске:"
+                        } else {
+                            "Новое расположение:"
+                        })
+                        .size(11.5)
+                        .strong()
+                        .color(color(theme.accent_primary)),
+                    );
+                    let edit_resp = ui.add(
+                        TextEdit::singleline(buffer)
+                            .id(Id::new("kanban_board_path_input"))
+                            .hint_text("folder/name.kanban.md")
+                            .desired_width(240.0),
+                    );
+                    edit_resp.request_focus();
+                    if ui.button(RichText::new("✓").strong()).clicked()
+                        || (edit_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                    {
+                        path_submit = Some((buffer.trim().to_string(), is_new_board));
+                    }
+                    if ui.button(RichText::new("✕")).clicked()
+                        || (edit_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))
+                    {
+                        path_cancel = true;
+                    }
+                });
+                ui.add_space(4.0);
+            }
+            if path_cancel {
+                state.mode = KanbanInputMode::Normal;
+            } else if let Some((clean, is_new_board)) = path_submit {
+                state.mode = KanbanInputMode::Normal;
+                if !clean.is_empty() {
+                    let mut path = clean;
+                    if !path.ends_with(".md") {
+                        path.push_str(".kanban.md");
+                    }
+                    intent = KanbanIntent::SetBoardPath {
+                        old_path: if is_new_board {
+                            None
+                        } else {
+                            current_board_name.map(str::to_string)
+                        },
+                        new_path: path,
+                        is_new: is_new_board,
+                    };
+                }
             }
 
             // Board Surface
@@ -342,6 +407,10 @@ pub fn render_kanban_modal(
             // Shortcut Hints Footer
             render_shortcut_footer(ui, theme);
         });
+
+    if modal_resp.should_close() {
+        intent = KanbanIntent::CloseOverlay;
+    }
 
     intent
 }
@@ -829,12 +898,32 @@ fn render_column_header(
                 state.mode = KanbanInputMode::Normal;
             }
         } else {
-            ui.label(
-                RichText::new(&col.title)
-                    .strong()
-                    .size(13.0)
-                    .color(color(theme.text_primary)),
+            let title_resp = ui.add(
+                egui::Label::new(
+                    RichText::new(&col.title)
+                        .strong()
+                        .size(13.0)
+                        .color(color(theme.text_primary)),
+                )
+                .sense(Sense::click()),
             );
+            if title_resp.clicked() || title_resp.double_clicked() {
+                state.selected_col = col_idx;
+                state.mode = KanbanInputMode::ColumnInput {
+                    rename_col_idx: Some(col_idx),
+                    buffer: col.title.clone(),
+                };
+            }
+            title_resp.context_menu(|ui| {
+                if ui.button("Переименовать колонку").clicked() {
+                    state.selected_col = col_idx;
+                    state.mode = KanbanInputMode::ColumnInput {
+                        rename_col_idx: Some(col_idx),
+                        buffer: col.title.clone(),
+                    };
+                    ui.close();
+                }
+            });
         }
 
         // Card count badge
@@ -851,7 +940,7 @@ fn render_column_header(
                 );
             });
 
-        // Action buttons: Delete column (Trash) and Add card (Plus)
+        // Action buttons: Delete column (Trash), Rename column (Edit), and Add card (Plus)
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
 
@@ -860,6 +949,15 @@ fn render_column_header(
             {
                 state.clamp_selection(board);
                 intent = KanbanIntent::ApplyTx(tx);
+            }
+
+            if compact_icon_button(ui, Icon::Edit, "Переименовать колонку (R)").clicked()
+            {
+                state.selected_col = col_idx;
+                state.mode = KanbanInputMode::ColumnInput {
+                    rename_col_idx: Some(col_idx),
+                    buffer: col.title.clone(),
+                };
             }
 
             if compact_icon_button(ui, Icon::Plus, "Добавить карточку (o)").clicked()
@@ -1687,7 +1785,7 @@ pub fn render_shortcut_footer(ui: &mut Ui, theme: &Theme) {
             ("h/l", "колонка"),
             ("j/k", "карточка"),
             ("o/O", "добавить"),
-            ("Space", "статус"),
+            ("x", "статус"),
             ("f", "ссылка"),
             ("Enter", "открыть"),
             ("gs", "исходник"),

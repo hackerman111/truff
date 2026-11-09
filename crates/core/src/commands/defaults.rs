@@ -572,6 +572,14 @@ impl CommandRegistry {
                 Some("d"),
                 vec![CommandContext::Rows, CommandContext::Navigator],
             ),
+            cmd(
+                "file.empty_trash",
+                "Очистить корзину",
+                "Безвозвратно удалить все файлы и папки из корзины хранилища",
+                "Файлы",
+                None,
+                vec![CommandContext::Global],
+            ),
             // Panes and Focus
             cmd(
                 "focus.left",

@@ -20,6 +20,7 @@ enum Operation {
         target: crate::app::SelectionTarget,
         note: String,
     },
+    EmptyTrash,
 }
 
 #[derive(Default)]
@@ -56,6 +57,11 @@ impl OperationDialog {
     }
     pub fn batch_trash(&mut self, paths: Vec<String>) {
         self.operation = Some(Operation::BatchTrash { paths });
+        self.error = None;
+        self.focus = true;
+    }
+    pub fn empty_trash(&mut self) {
+        self.operation = Some(Operation::EmptyTrash);
         self.error = None;
         self.focus = true;
     }
@@ -118,7 +124,13 @@ impl OperationDialog {
                 Operation::Trash { path } => {
                     ui.heading("Переместить в корзину?");
                     ui.label(path.as_str());
-                    ui.label("Заметка будет перемещена в корзину хранилища. Несохранённые изменения блокируют операцию.");
+                    ui.label("Заметка будет перемещена в корзину хранилища.");
+                }
+                Operation::EmptyTrash => {
+                    ui.heading("Очистить корзину?");
+                    ui.label(
+                        "Все файлы и папки в корзине (.truff/trash) будут удалены безвозвратно.",
+                    );
                 }
                 Operation::BatchTrash { paths } => {
                     ui.heading("Переместить файлы в корзину?");
@@ -199,6 +211,8 @@ impl OperationDialog {
                         Operation::Trash { .. } | Operation::BatchTrash { .. }
                     ) {
                         "В корзину"
+                    } else if matches!(operation, Operation::EmptyTrash) {
+                        "Очистить корзину"
                     } else if matches!(operation, Operation::Link { .. }) {
                         "Создать ссылку"
                     } else if matches!(operation, Operation::BatchRename { .. }) {
@@ -210,7 +224,9 @@ impl OperationDialog {
                 if self.focus
                     && matches!(
                         operation,
-                        Operation::Trash { .. } | Operation::BatchTrash { .. }
+                        Operation::Trash { .. }
+                            | Operation::BatchTrash { .. }
+                            | Operation::EmptyTrash
                     )
                 {
                     response.request_focus();
@@ -227,6 +243,7 @@ impl OperationDialog {
             let result = match operation {
                 Operation::Rename { from, to } => application.rename_path(from, to),
                 Operation::Trash { path } => application.trash(path),
+                Operation::EmptyTrash => application.empty_trash().map(|_| ()),
                 Operation::BatchTrash { paths } => application.trash_files(paths),
                 Operation::BatchRename {
                     paths,

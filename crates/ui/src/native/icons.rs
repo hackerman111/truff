@@ -26,6 +26,7 @@ pub enum Icon {
     Kanban,
     InProgress,
     Trash,
+    Edit,
 }
 
 /// Renders a crisp 5.5 px diameter dirty indicator circle without font dependencies.
@@ -464,6 +465,29 @@ pub fn render_icon(painter: &Painter, icon: Icon, rect: Rect, color: Color32, st
                 stroke,
             );
         }
+        Icon::Edit => {
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 3.5, center.y + 3.5),
+                    Pos2::new(center.x + 3.0, center.y - 3.0),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - 3.5, center.y + 3.5),
+                    Pos2::new(center.x - 4.5, center.y + 4.5),
+                ],
+                stroke,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + 2.0, center.y - 4.0),
+                    Pos2::new(center.x + 4.0, center.y - 2.0),
+                ],
+                stroke,
+            );
+        }
     }
 }
 
@@ -502,6 +526,7 @@ mod tests {
                     Icon::Kanban,
                     Icon::InProgress,
                     Icon::Trash,
+                    Icon::Edit,
                 ];
                 for icon in icons {
                     render_icon(ui.painter(), icon, rect, color, 1.4);

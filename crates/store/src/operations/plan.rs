@@ -150,9 +150,6 @@ impl FileOpPlan {
                 if !abs.exists() {
                     return Err(FileOpError::SourceNotFound(path.clone()));
                 }
-                if dirty_buffers.iter().any(|d| d == path) {
-                    return Err(FileOpError::DirtyBufferBlocked(path.clone()));
-                }
             }
             FileOpKind::Rename { from, to } | FileOpKind::Move { from, to } => {
                 let from_path = from.clone();

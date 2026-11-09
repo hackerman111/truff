@@ -61,6 +61,7 @@ impl Application {
                     "folder.create" => "mkdir",
                     "file.rename" | "file.move" => "rename",
                     "file.trash" => "trash",
+                    "file.empty_trash" | "trash.empty" => "empty_trash",
                     "style.text_color" => "color",
                     "style.highlight_color" => "highlight",
                     "style.wrap_callout" => "callout",

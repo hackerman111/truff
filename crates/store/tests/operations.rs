@@ -182,3 +182,40 @@ fn operation_recovery() {
     let trash_target = vault.trash_dir().join("doc.md");
     assert!(trash_target.exists() || file_path.exists());
 }
+
+#[test]
+fn trash_unsaved_dirty_file_is_allowed() {
+    let temp_path = temp_test_dir("trash_dirty_test");
+    let vault = VaultPaths::new(temp_path.clone());
+    let mut db = IndexDatabase::open_in_memory().unwrap();
+
+    let file_path = temp_path.join("unsaved.md");
+    fs::write(&file_path, "Unsaved changes in editor").unwrap();
+
+    let facts =
+        truff_core::markdown::facts::MarkdownFacts::extract("Unsaved changes in editor").unwrap();
+    db.index_file(
+        FileId(2),
+        "unsaved.md",
+        "Unsaved",
+        "fp2",
+        1,
+        &facts,
+        "Unsaved changes in editor",
+    )
+    .unwrap();
+
+    // The file is dirty in memory: dirty_buffers contains "unsaved.md"
+    let dirty_buffers = vec![PathBuf::from("unsaved.md")];
+    let mut plan = FileOpPlan::trash(&vault, "unsaved.md").unwrap();
+
+    // Validating trash operation must succeed and not return DirtyBufferBlocked
+    assert!(plan.validate(&vault, &dirty_buffers, &db).is_ok());
+
+    plan.stage(&vault, db.connection_mut()).unwrap();
+    plan.apply(&vault, db.connection_mut()).unwrap();
+
+    let trash_target = vault.trash_dir().join("unsaved.md");
+    assert!(trash_target.exists());
+    assert!(!file_path.exists());
+}

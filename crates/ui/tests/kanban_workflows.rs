@@ -114,7 +114,7 @@ fn space_b_opens_kanban_overlay_creates_tasks_links_file_and_jumps() {
             .contains("target")
     );
 
-    // 4. Press 'L' -> move to column 1 ("В работе"), press Space -> status cycles to InProgress
+    // 4. Press 'L' -> move to column 1 ("В работе"), press 't' -> status cycles to InProgress
     app.key(Key::Char('L'));
     frame(&mut app, &ctx, vec![]);
     let kanban_moved = std::fs::read_to_string(vault.join("kanban.md")).unwrap();
@@ -122,7 +122,7 @@ fn space_b_opens_kanban_overlay_creates_tasks_links_file_and_jumps() {
     assert_eq!(board_moved.columns[0].cards.len(), 0);
     assert_eq!(board_moved.columns[1].cards.len(), 1);
 
-    app.key(Key::Char(' '));
+    app.key(Key::Char('t'));
     frame(&mut app, &ctx, vec![]);
     let kanban_cycled = std::fs::read_to_string(vault.join("kanban.md")).unwrap();
     let board_cycled = KanbanBoard::parse(&kanban_cycled);
@@ -487,4 +487,169 @@ fn multi_link_jump_picker_workflow() {
         Some("docs/two.md"),
         "Should jump to docs/two.md after selecting in LinkJumpPicker"
     );
+}
+
+#[test]
+fn space_in_central_kanban_invokes_which_key_menu() {
+    let vault = std::env::temp_dir().join(format!(
+        "space_which_key_kanban_{}_{}",
+        std::process::id(),
+        BufferId::next()
+    ));
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(
+        vault.join("todo.kanban.md"),
+        "<!-- truff:kanban -->\n# Задачи\n\n## План\n- [ ] Задача 1\n",
+    )
+    .unwrap();
+
+    let mut application = Application::new();
+    application.open_vault(&vault).unwrap();
+    idle(&mut application);
+    application.open_note("todo.kanban.md").unwrap();
+
+    let ctx = egui::Context::default();
+    let mut app = NativeApp::new(application, &ctx);
+    frame(&mut app, &ctx, vec![]);
+
+    assert!(app.is_central_kanban_active());
+    assert!(app.application.shell.which_key().hints().is_empty());
+
+    // Press Space -> must NOT cycle card status, but invoke Which-Key menu!
+    app.key(Key::Char(' '));
+    frame(&mut app, &ctx, vec![]);
+
+    assert!(
+        !app.application.shell.which_key().hints().is_empty(),
+        "Space in Kanban must invoke Which-Key menu prefix"
+    );
+    assert_eq!(
+        app.application.shell.which_key().title(),
+        "<Space> Навигатор"
+    );
+
+    // Card status was untouched
+    let text = std::fs::read_to_string(vault.join("todo.kanban.md")).unwrap();
+    assert!(text.contains("- [ ] Задача 1"));
+}
+
+#[test]
+fn rename_standard_column_in_kanban() {
+    let vault = std::env::temp_dir().join(format!(
+        "rename_col_kanban_{}_{}",
+        std::process::id(),
+        BufferId::next()
+    ));
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(
+        vault.join("board.kanban.md"),
+        "<!-- truff:kanban -->\n# Доска\n\n## План\n- [ ] Задача 1\n\n## В работе\n\n## Готово\n",
+    )
+    .unwrap();
+
+    let mut application = Application::new();
+    application.open_vault(&vault).unwrap();
+    idle(&mut application);
+    application.open_note("board.kanban.md").unwrap();
+
+    let ctx = egui::Context::default();
+    let mut app = NativeApp::new(application, &ctx);
+    frame(&mut app, &ctx, vec![]);
+
+    assert!(app.is_central_kanban_active());
+
+    // Press 'R' to rename standard column 0 ("План")
+    app.key(Key::Char('R'));
+    frame(&mut app, &ctx, vec![]);
+
+    // Clear and type "Бэклог", then press Enter
+    for _ in 0..10 {
+        app.key(Key::Backspace);
+    }
+    for ch in "Бэклог".chars() {
+        app.key(Key::Char(ch));
+    }
+    app.key(Key::Enter);
+    frame(&mut app, &ctx, vec![]);
+
+    let text = std::fs::read_to_string(vault.join("board.kanban.md")).unwrap();
+    let parsed = KanbanBoard::parse(&text);
+    assert_eq!(parsed.columns[0].title, "Бэклог");
+    assert_eq!(parsed.columns[0].cards.len(), 1);
+    assert_eq!(parsed.columns[0].cards[0].clean_title, "Задача 1");
+    assert_eq!(parsed.columns[1].title, "В работе");
+    assert_eq!(parsed.columns[2].title, "Готово");
+}
+
+#[test]
+fn determine_board_location_in_kanban_panel() {
+    let vault = std::env::temp_dir().join(format!(
+        "custom_location_kanban_{}_{}",
+        std::process::id(),
+        BufferId::next()
+    ));
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(
+        vault.join("kanban.md"),
+        "<!-- truff:kanban -->\n# Главный Канбан\n\n## План\n- [ ] Первая\n",
+    )
+    .unwrap();
+
+    let mut application = Application::new();
+    application.open_vault(&vault).unwrap();
+    idle(&mut application);
+
+    let ctx = egui::Context::default();
+    let mut app = NativeApp::new(application, &ctx);
+    frame(&mut app, &ctx, vec![]);
+
+    // 1. Open Kanban modal overlay targeting root kanban.md
+    app.kanban.open_overlay("kanban.md", &mut app.application);
+    frame(&mut app, &ctx, vec![]);
+    assert!(app.kanban.is_open());
+    assert_eq!(app.kanban.active_board_path.as_deref(), Some("kanban.md"));
+
+    // 2. Relocate kanban.md to archive/old_kanban.kanban.md
+    let relocate_intent = truff_ui::native::kanban::state::KanbanIntent::SetBoardPath {
+        old_path: Some("kanban.md".to_string()),
+        new_path: "archive/old_kanban.kanban.md".to_string(),
+        is_new: false,
+    };
+    let buf_id = app
+        .kanban
+        .ensure_overlay_buffer("kanban.md", &mut app.application)
+        .unwrap();
+    app.kanban
+        .handle_overlay_intent(relocate_intent, buf_id, &mut app.application);
+    frame(&mut app, &ctx, vec![]);
+
+    assert_eq!(
+        app.kanban.active_board_path.as_deref(),
+        Some("archive/old_kanban.kanban.md")
+    );
+    assert!(vault.join("archive/old_kanban.kanban.md").exists());
+    assert!(!vault.join("kanban.md").exists());
+
+    // 3. Create a brand new board at specific location tasks/sprint.kanban.md
+    let create_intent = truff_ui::native::kanban::state::KanbanIntent::SetBoardPath {
+        old_path: None,
+        new_path: "tasks/sprint.kanban.md".to_string(),
+        is_new: true,
+    };
+    let buf_id = app
+        .kanban
+        .ensure_overlay_buffer("archive/old_kanban.kanban.md", &mut app.application)
+        .unwrap();
+    app.kanban
+        .handle_overlay_intent(create_intent, buf_id, &mut app.application);
+    frame(&mut app, &ctx, vec![]);
+
+    assert_eq!(
+        app.kanban.active_board_path.as_deref(),
+        Some("tasks/sprint.kanban.md")
+    );
+    assert!(vault.join("tasks/sprint.kanban.md").exists());
+    let sprint_content = std::fs::read_to_string(vault.join("tasks/sprint.kanban.md")).unwrap();
+    assert!(sprint_content.contains("<!-- truff:kanban -->"));
+    assert!(sprint_content.contains("## План"));
 }

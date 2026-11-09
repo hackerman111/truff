@@ -19,9 +19,16 @@ pub enum KanbanIntent {
     Undo,
     Redo,
     ToggleSourceView,
-    SwitchBoard { next: bool },
+    SwitchBoard {
+        next: bool,
+    },
     SelectBoard(String),
     CreateNewBoard,
+    SetBoardPath {
+        old_path: Option<String>,
+        new_path: String,
+        is_new: bool,
+    },
     CloseOverlay,
     Status(String),
 }
@@ -45,6 +52,10 @@ pub enum KanbanInputMode {
     FilePicker(FuzzyFilePicker),
     LinkJumpPicker(LinkJumpPicker),
     FilterSearch,
+    BoardPathInput {
+        buffer: String,
+        is_new: bool,
+    },
 }
 
 /// UI and interaction state machine for a Kanban board.
@@ -176,6 +187,39 @@ impl KanbanBoardState {
                         }
                     } else if let Some(tx) = plan_add_column(text, board, &title) {
                         KanbanIntent::ApplyTx(tx)
+                    } else {
+                        KanbanIntent::None
+                    }
+                }
+                _ => KanbanIntent::None,
+            },
+
+            KanbanInputMode::BoardPathInput { buffer, is_new } => match key {
+                Key::Esc => {
+                    self.mode = KanbanInputMode::Normal;
+                    KanbanIntent::None
+                }
+                Key::Backspace => {
+                    buffer.pop();
+                    KanbanIntent::None
+                }
+                Key::Char(c) => {
+                    buffer.push(c);
+                    KanbanIntent::None
+                }
+                Key::Enter => {
+                    let is_new = *is_new;
+                    let mut path = std::mem::take(buffer).trim().to_string();
+                    self.mode = KanbanInputMode::Normal;
+                    if !path.is_empty() {
+                        if !path.ends_with(".md") {
+                            path.push_str(".kanban.md");
+                        }
+                        KanbanIntent::SetBoardPath {
+                            old_path: None,
+                            new_path: path,
+                            is_new,
+                        }
                     } else {
                         KanbanIntent::None
                     }
@@ -496,17 +540,8 @@ impl KanbanBoardState {
                 }
             }
 
-            // Card status toggling
-            Key::Char(' ') => {
-                if let Some(tx) =
-                    plan_cycle_card_status(text, board, self.selected_col, self.selected_card)
-                {
-                    KanbanIntent::ApplyTx(tx)
-                } else {
-                    KanbanIntent::None
-                }
-            }
-            Key::Char('x') | Key::Char('X') => {
+            // Card status toggling and cycling
+            Key::Char('x') | Key::Char('ч') => {
                 if let Some(col) = board.columns.get(self.selected_col)
                     && let Some(card) = col.cards.get(self.selected_card)
                 {
@@ -522,6 +557,15 @@ impl KanbanBoardState {
                     }
                 }
                 KanbanIntent::None
+            }
+            Key::Char('t') | Key::Char('е') | Key::Char('X') | Key::Char('Ч') => {
+                if let Some(tx) =
+                    plan_cycle_card_status(text, board, self.selected_col, self.selected_card)
+                {
+                    KanbanIntent::ApplyTx(tx)
+                } else {
+                    KanbanIntent::None
+                }
             }
 
             // Card creation and editing
@@ -901,17 +945,21 @@ mod tests {
         let mut state = KanbanBoardState::new();
         let files: Vec<String> = vec![];
 
-        // Space -> cycles status
-        let intent = state.feed_key(Key::Char(' '), SAMPLE_BOARD, &board, &files);
-        assert!(matches!(intent, KanbanIntent::ApplyTx(_)));
-
-        // x -> cycles status
+        // x -> toggles done
         let intent = state.feed_key(Key::Char('x'), SAMPLE_BOARD, &board, &files);
         assert!(matches!(intent, KanbanIntent::ApplyTx(_)));
 
-        // X -> toggle done
+        // t -> cycles status
+        let intent = state.feed_key(Key::Char('t'), SAMPLE_BOARD, &board, &files);
+        assert!(matches!(intent, KanbanIntent::ApplyTx(_)));
+
+        // X -> cycles status
         let intent = state.feed_key(Key::Char('X'), SAMPLE_BOARD, &board, &files);
         assert!(matches!(intent, KanbanIntent::ApplyTx(_)));
+
+        // Space in normal mode is not intercepted by Kanban (reserved for global Which-Key menu)
+        let intent = state.feed_key(Key::Char(' '), SAMPLE_BOARD, &board, &files);
+        assert_eq!(intent, KanbanIntent::None);
     }
 
     #[test]

@@ -141,6 +141,9 @@ impl Application {
                 };
                 self.trash(&path)
             }
+            "empty-trash" | "empty_trash" | "clear-trash" | "clear_trash" => {
+                self.empty_trash().map(|_| ())
+            }
             "new" => self.create_note(argument),
             "mkdir" => self.create_folder(argument),
             "theme" => self.apply_theme_command(argument),

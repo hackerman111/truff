@@ -224,6 +224,11 @@ impl KanbanController {
             return false;
         }
 
+        if self.overlay_state.mode == KanbanInputMode::Normal && key == Key::Char(' ') {
+            self.overlay_open = false;
+            return false;
+        }
+
         let board_path = self
             .active_board_path
             .clone()
@@ -334,6 +339,46 @@ impl KanbanController {
             }
             KanbanIntent::CreateNewBoard => {
                 let new_path = "new_board.kanban.md".to_string();
+                self.active_board_path = Some(new_path.clone());
+                self.overlay_state = KanbanBoardState::new();
+                self.ensure_overlay_buffer(&new_path, application);
+            }
+            KanbanIntent::SetBoardPath {
+                old_path,
+                new_path,
+                is_new,
+            } => {
+                if is_new {
+                    if let Some(vault_root) = application.vault_path() {
+                        let abs = vault_root.join(&new_path);
+                        if let Some(parent) = abs.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        if !abs.exists() {
+                            let title = std::path::Path::new(&new_path)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .and_then(|s| s.strip_suffix(".kanban"))
+                                .unwrap_or("Канбан");
+                            let template =
+                                truff_core::markdown::kanban::default_kanban_template(title, "\n");
+                            let _ = std::fs::write(&abs, template);
+                        }
+                    }
+                } else {
+                    let old_str = old_path.or_else(|| self.active_board_path.clone());
+                    if let Some(old) = old_str
+                        && old != new_path
+                        && let Some(vault_root) = application.vault_path()
+                    {
+                        let old_abs = vault_root.join(&old);
+                        let new_abs = vault_root.join(&new_path);
+                        if let Some(parent) = new_abs.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = std::fs::rename(&old_abs, &new_abs);
+                    }
+                }
                 self.active_board_path = Some(new_path.clone());
                 self.overlay_state = KanbanBoardState::new();
                 self.ensure_overlay_buffer(&new_path, application);
@@ -526,7 +571,10 @@ impl KanbanController {
 
         let state = self.central_states.entry(view_id).or_default();
         if state.mode == KanbanInputMode::Normal
-            && matches!(key, Key::Char(':') | Key::Char('?') | Key::Ctrl('p'))
+            && matches!(
+                key,
+                Key::Char(':') | Key::Char('?') | Key::Ctrl('p') | Key::Char(' ')
+            )
         {
             return false;
         }

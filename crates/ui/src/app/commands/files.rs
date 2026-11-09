@@ -111,6 +111,32 @@ impl Application {
         })
     }
 
+    pub fn empty_trash(&mut self) -> AppResult<usize> {
+        let Some(paths) = &self.paths else {
+            return Err("Vault is not open".into());
+        };
+        let trash_dir = paths.trash_dir();
+        if !trash_dir.exists() {
+            self.status = "Корзина пуста".to_string();
+            return Ok(0);
+        }
+        let mut count = 0;
+        if let Ok(entries) = std::fs::read_dir(trash_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    if std::fs::remove_dir_all(&p).is_ok() {
+                        count += 1;
+                    }
+                } else if std::fs::remove_file(&p).is_ok() {
+                    count += 1;
+                }
+            }
+        }
+        self.status = format!("Корзина очищена (удалено объектов: {count})");
+        Ok(count)
+    }
+
     pub(crate) fn enqueue_file_operations(&mut self, mut jobs: Vec<CatalogJob>) -> AppResult<()> {
         if jobs.is_empty() {
             return Ok(());
